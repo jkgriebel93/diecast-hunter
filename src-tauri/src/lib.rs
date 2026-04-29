@@ -1,7 +1,9 @@
 mod commands;
 mod db;
+mod dcr;
 mod error;
 mod settings;
+mod sync;
 
 use tauri::Manager;
 
@@ -37,6 +39,9 @@ pub fn run() {
             commands::clear_diecastregistry_credentials,
             commands::get_setting,
             commands::set_setting,
+            commands::sync_dcr_collection,
+            commands::list_drivers_with_counts,
+            commands::list_collection_for_driver,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

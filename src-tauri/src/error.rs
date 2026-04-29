@@ -14,6 +14,18 @@ pub enum AppError {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("network error: {0}")]
+    Network(#[from] reqwest::Error),
+
+    #[error("login failed: {0}")]
+    LoginFailed(String),
+
+    #[error("parse error: {0}")]
+    Parse(String),
+
+    #[error("not configured: {0}")]
+    NotConfigured(String),
+
     #[error("config error: {0}")]
     Config(String),
 }

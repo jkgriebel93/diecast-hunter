@@ -1,5 +1,9 @@
 import { FormEvent, useEffect, useState } from "react";
-import { api, type CredentialState } from "@/lib/tauri";
+import {
+  api,
+  type CredentialState,
+  type SyncSummary,
+} from "@/lib/tauri";
 
 export function Settings() {
   const [creds, setCreds] = useState<CredentialState | null>(null);
@@ -9,11 +13,18 @@ export function Settings() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [lastSync, setLastSync] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncSummary, setSyncSummary] = useState<SyncSummary | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+
   async function refresh() {
     try {
       const c = await api.getCredentials();
       setCreds(c);
       setUsername(c.diecastregistry_username ?? "");
+      const ts = await api.getSetting("dcr.last_collection_sync");
+      setLastSync(ts);
     } catch (e) {
       setError(String(e));
     }
@@ -53,6 +64,21 @@ export function Settings() {
     }
   }
 
+  async function onSync() {
+    setSyncing(true);
+    setSyncError(null);
+    setSyncSummary(null);
+    try {
+      const summary = await api.syncDcrCollection();
+      setSyncSummary(summary);
+      await refresh();
+    } catch (e) {
+      setSyncError(String(e));
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   return (
     <div className="p-6 space-y-6 max-w-2xl">
       <header>
@@ -73,10 +99,10 @@ export function Settings() {
 
         <form onSubmit={onSave} className="space-y-3">
           <div>
-            <label className="label">Username or email</label>
+            <label className="label">Email</label>
             <input
               className="input"
-              type="text"
+              type="email"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               autoComplete="off"
@@ -121,6 +147,41 @@ export function Settings() {
             )}
           </div>
         </form>
+
+        <div className="border-t border-border pt-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium">Sync My Garage</div>
+              <div className="text-xs text-slate-500">
+                {lastSync
+                  ? `Last synced ${new Date(
+                      Number(lastSync) * 1000,
+                    ).toLocaleString()}`
+                  : "Never synced"}
+              </div>
+            </div>
+            <button
+              className="btn-primary"
+              type="button"
+              disabled={
+                syncing || !creds?.diecastregistry_has_password
+              }
+              onClick={onSync}
+            >
+              {syncing ? "Syncing…" : "Sync now"}
+            </button>
+          </div>
+          {syncSummary && (
+            <div className="text-xs text-emerald-400">
+              Pulled {syncSummary.items_seen} items across{" "}
+              {syncSummary.pages_fetched} page
+              {syncSummary.pages_fetched === 1 ? "" : "s"}.
+            </div>
+          )}
+          {syncError && (
+            <div className="text-xs text-red-400">{syncError}</div>
+          )}
+        </div>
       </section>
 
       <section className="card space-y-3">
