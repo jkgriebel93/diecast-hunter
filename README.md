@@ -15,16 +15,17 @@ prices against the registry's retail/wholesale values.
 ## Prerequisites (Windows 11)
 
 1. **Rust toolchain** — install via [rustup](https://rustup.rs/) (1.78+).
-2. **Node.js 20+** and **npm**.
-3. **Microsoft Edge WebView2 runtime** — preinstalled on Windows 11.
-4. **Visual Studio Build Tools 2022** with the *Desktop development with C++*
+2. **Node.js 20+**.
+3. **pnpm 10+** — `npm install -g pnpm` (or follow https://pnpm.io/installation).
+4. **Microsoft Edge WebView2 runtime** — preinstalled on Windows 11.
+5. **Visual Studio Build Tools 2022** with the *Desktop development with C++*
    workload (needed by the Rust linker).
 
 ## Getting started
 
 ```powershell
-npm install
-npm run tauri dev
+pnpm install
+pnpm tauri dev
 ```
 
 The first build is slow (Rust deps); subsequent builds are fast.
@@ -61,7 +62,7 @@ The SQLite database is created at:
 real source PNG (≥1024px square):
 
 ```powershell
-npm run tauri icon path\to\source.png
+pnpm tauri icon path\to\source.png
 ```
 
 ## Roadmap
