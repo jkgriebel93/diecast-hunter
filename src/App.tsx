@@ -1,0 +1,23 @@
+import { Navigate, Route, Routes } from "react-router-dom";
+import { Sidebar } from "@/components/Sidebar";
+import { Dashboard } from "@/pages/Dashboard";
+import { Collection } from "@/pages/Collection";
+import { Listings } from "@/pages/Listings";
+import { Settings } from "@/pages/Settings";
+
+export default function App() {
+  return (
+    <div className="flex h-full">
+      <Sidebar />
+      <main className="flex-1 overflow-auto">
+        <Routes>
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/collection" element={<Collection />} />
+          <Route path="/listings" element={<Listings />} />
+          <Route path="/settings" element={<Settings />} />
+        </Routes>
+      </main>
+    </div>
+  );
+}
