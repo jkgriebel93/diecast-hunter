@@ -14,8 +14,11 @@ pub enum AppError {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// Built from `reqwest::Error` via `From`, but flattens the source chain
+    /// at conversion time. reqwest's top-level message is generic ("error
+    /// sending request"); the actionable detail is in `.source()`.
     #[error("network error: {0}")]
-    Network(#[from] reqwest::Error),
+    Network(String),
 
     #[error("login failed: {0}")]
     LoginFailed(String),
@@ -28,6 +31,25 @@ pub enum AppError {
 
     #[error("config error: {0}")]
     Config(String),
+}
+
+impl From<reqwest::Error> for AppError {
+    fn from(e: reqwest::Error) -> Self {
+        AppError::Network(format_error_chain(&e))
+    }
+}
+
+fn format_error_chain(top: &(dyn std::error::Error + 'static)) -> String {
+    let mut parts = vec![top.to_string()];
+    let mut src = top.source();
+    while let Some(s) = src {
+        let msg = s.to_string();
+        if !parts.last().is_some_and(|prev| prev == &msg) {
+            parts.push(msg);
+        }
+        src = s.source();
+    }
+    parts.join(": ")
 }
 
 impl Serialize for AppError {
