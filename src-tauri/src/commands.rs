@@ -98,7 +98,15 @@ pub async fn set_setting(
 pub async fn sync_dcr_collection(
     state: State<'_, AppState>,
 ) -> AppResult<sync::SyncSummary> {
-    sync::sync_dcr_collection(&state.db.pool).await
+    sync::sync_dcr_collection_and_enrich(&state.db.pool).await
+}
+
+#[tauri::command]
+pub async fn refresh_registry_details(
+    state: State<'_, AppState>,
+    force: bool,
+) -> AppResult<sync::EnrichSummary> {
+    sync::enrich_only(&state.db.pool, force).await
 }
 
 #[derive(Serialize)]
@@ -117,16 +125,47 @@ pub struct CollectionRow {
     pub driver_id: Option<i64>,
     pub driver_name: Option<String>,
     pub year: Option<i32>,
+    pub year_raced: Option<i32>,
+    pub car_number: Option<String>,
+    pub diecast_type: Option<String>,
+    pub registration_number: Option<String>,
     pub oem: Option<String>,
     pub brand: Option<String>,
     pub scale: Option<String>,
     pub make: Option<String>,
+    pub finish: Option<String>,
+    pub production_qty: Option<i64>,
     pub scheme_text: Option<String>,
     pub image_url: Option<String>,
     pub detail_url: Option<String>,
     pub retail_value_cents: Option<i64>,
     pub wholesale_value_cents: Option<i64>,
     pub registry_int_id: Option<i64>,
+    pub enriched: bool,
+}
+
+#[derive(sqlx::FromRow)]
+struct CollectionRowRaw {
+    id: i64,
+    external_id: String,
+    driver_id: Option<i64>,
+    driver_name: Option<String>,
+    year: Option<i32>,
+    year_raced: Option<i32>,
+    car_number: Option<String>,
+    diecast_type: Option<String>,
+    registration_number: Option<String>,
+    registry_scheme_text: Option<String>,
+    oem: Option<String>,
+    brand: Option<String>,
+    scale: Option<String>,
+    make: Option<String>,
+    finish: Option<String>,
+    production_qty: Option<i64>,
+    retail_value_cents: Option<i64>,
+    wholesale_value_cents: Option<i64>,
+    details_fetched_at: Option<i64>,
+    raw_json: Option<String>,
 }
 
 #[tauri::command]
@@ -166,27 +205,26 @@ pub async fn list_collection_for_driver(
     driver_id: i64,
 ) -> AppResult<Vec<CollectionRow>> {
     let pool = &state.db.pool;
-    let rows: Vec<(
-        i64,
-        String,
-        Option<i64>,
-        Option<String>,
-        Option<i32>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-    )> = sqlx::query_as(
+    let rows: Vec<CollectionRowRaw> = sqlx::query_as(
         "SELECT c.id,
                 c.external_id,
                 d.id AS driver_id,
                 d.name AS driver_name,
                 re.year,
+                re.year_raced,
+                re.car_number,
+                re.diecast_type,
+                re.registration_number,
+                re.scheme_text AS registry_scheme_text,
                 re.oem,
                 re.brand,
                 re.scale,
                 re.make,
+                re.finish,
+                re.production_qty,
+                re.retail_value_cents,
+                re.wholesale_value_cents,
+                re.details_fetched_at,
                 c.raw_json
          FROM my_collection c
          JOIN registry_entries re ON re.id = c.registry_entry_id
@@ -199,48 +237,58 @@ pub async fn list_collection_for_driver(
     .await?;
 
     let mut out = Vec::with_capacity(rows.len());
-    for (id, asset_guid, driver_id, driver_name, year, oem, brand, scale, make, raw_json) in rows {
-        let json: serde_json::Value = raw_json
+    for r in rows {
+        // The collection's raw_json is the original list-page scrape; it
+        // carries the thumbnail image_url and detail_url (which the registry
+        // row doesn't, since enrichment overwrites raw_json with detail-page
+        // facts). Fall back to the registry's scheme_text first since
+        // detail-page text is authoritative; otherwise use the list-page
+        // text we captured originally.
+        let coll_json: serde_json::Value = r
+            .raw_json
             .as_deref()
             .and_then(|s| serde_json::from_str(s).ok())
             .unwrap_or(serde_json::Value::Null);
 
-        let retail_value_cents = json
-            .get("retail_value_cents")
-            .and_then(|v| v.as_i64());
-        let wholesale_value_cents = json
-            .get("wholesale_value_cents")
-            .and_then(|v| v.as_i64());
-        let scheme_text = json
-            .get("scheme_text")
-            .and_then(|v| v.as_str())
-            .map(str::to_owned);
-        let image_url = json
+        let scheme_text = r.registry_scheme_text.clone().or_else(|| {
+            coll_json
+                .get("scheme_text")
+                .and_then(|v| v.as_str())
+                .map(str::to_owned)
+        });
+        let image_url = coll_json
             .get("image_url")
             .and_then(|v| v.as_str())
             .map(str::to_owned);
-        let detail_url = json
+        let detail_url = coll_json
             .get("detail_url")
             .and_then(|v| v.as_str())
             .map(str::to_owned);
-        let registry_int_id = json.get("registry_int_id").and_then(|v| v.as_i64());
+        let registry_int_id = coll_json.get("registry_int_id").and_then(|v| v.as_i64());
 
         out.push(CollectionRow {
-            collection_id: id,
-            asset_guid,
-            driver_id,
-            driver_name,
-            year,
-            oem,
-            brand,
-            scale,
-            make,
+            collection_id: r.id,
+            asset_guid: r.external_id,
+            driver_id: r.driver_id,
+            driver_name: r.driver_name,
+            year: r.year,
+            year_raced: r.year_raced,
+            car_number: r.car_number,
+            diecast_type: r.diecast_type,
+            registration_number: r.registration_number,
+            oem: r.oem,
+            brand: r.brand,
+            scale: r.scale,
+            make: r.make,
+            finish: r.finish,
+            production_qty: r.production_qty,
             scheme_text,
             image_url,
             detail_url,
-            retail_value_cents,
-            wholesale_value_cents,
+            retail_value_cents: r.retail_value_cents,
+            wholesale_value_cents: r.wholesale_value_cents,
             registry_int_id,
+            enriched: r.details_fetched_at.is_some(),
         });
     }
 

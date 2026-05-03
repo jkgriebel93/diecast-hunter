@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import {
   api,
   type CredentialState,
+  type EnrichSummary,
   type SyncSummary,
 } from "@/lib/tauri";
 
@@ -17,6 +18,11 @@ export function Settings() {
   const [syncing, setSyncing] = useState(false);
   const [syncSummary, setSyncSummary] = useState<SyncSummary | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshSummary, setRefreshSummary] =
+    useState<EnrichSummary | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
 
   async function refresh() {
     try {
@@ -76,6 +82,20 @@ export function Settings() {
       setSyncError(String(e));
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function onRefresh(force: boolean) {
+    setRefreshing(true);
+    setRefreshError(null);
+    setRefreshSummary(null);
+    try {
+      const summary = await api.refreshRegistryDetails(force);
+      setRefreshSummary(summary);
+    } catch (e) {
+      setRefreshError(String(e));
+    } finally {
+      setRefreshing(false);
     }
   }
 
@@ -172,14 +192,69 @@ export function Settings() {
             </button>
           </div>
           {syncSummary && (
-            <div className="text-xs text-emerald-400">
-              Pulled {syncSummary.items_seen} items across{" "}
-              {syncSummary.pages_fetched} page
-              {syncSummary.pages_fetched === 1 ? "" : "s"}.
+            <div className="text-xs text-emerald-400 space-y-1">
+              <div>
+                Pulled {syncSummary.items_seen} items across{" "}
+                {syncSummary.pages_fetched} page
+                {syncSummary.pages_fetched === 1 ? "" : "s"}.
+              </div>
+              {syncSummary.enrichment && (
+                <div>
+                  Enriched {syncSummary.enrichment.enriched} of{" "}
+                  {syncSummary.enrichment.considered} registry entries (
+                  {syncSummary.enrichment.failed} failed,{" "}
+                  {syncSummary.enrichment.skipped} skipped).
+                </div>
+              )}
             </div>
           )}
           {syncError && (
             <div className="text-xs text-red-400">{syncError}</div>
+          )}
+        </div>
+
+        <div className="border-t border-border pt-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium">Registry details</div>
+              <div className="text-xs text-slate-500">
+                Re-fetch detail pages for cars in your collection. Stale
+                entries (older than 30 days) refresh automatically.
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                className="btn-secondary"
+                type="button"
+                disabled={
+                  refreshing || !creds?.diecastregistry_has_password
+                }
+                onClick={() => onRefresh(false)}
+              >
+                {refreshing ? "Refreshing…" : "Refresh stale"}
+              </button>
+              <button
+                className="btn-secondary"
+                type="button"
+                disabled={
+                  refreshing || !creds?.diecastregistry_has_password
+                }
+                onClick={() => onRefresh(true)}
+              >
+                Force refresh all
+              </button>
+            </div>
+          </div>
+          {refreshSummary && (
+            <div className="text-xs text-emerald-400">
+              Refreshed {refreshSummary.enriched} of{" "}
+              {refreshSummary.considered} (
+              {refreshSummary.failed} failed,{" "}
+              {refreshSummary.skipped} skipped).
+            </div>
+          )}
+          {refreshError && (
+            <div className="text-xs text-red-400">{refreshError}</div>
           )}
         </div>
       </section>

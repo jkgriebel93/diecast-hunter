@@ -152,16 +152,37 @@ function DriverCard({
                         .filter(Boolean)
                         .join(" · ")}
                     </div>
-                    {item.detail_url && (
-                      <a
-                        className="text-xs text-accent hover:underline mt-1 inline-block"
-                        href={DCR_BASE + item.detail_url}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        View on diecastregistry.com →
-                      </a>
+                    {item.enriched && (
+                      <div className="text-xs text-slate-500 mt-0.5">
+                        {[
+                          item.diecast_type,
+                          item.finish && `finish: ${item.finish}`,
+                          item.production_qty &&
+                            `qty: ${item.production_qty.toLocaleString()}`,
+                          item.registration_number &&
+                            `reg ${item.registration_number}`,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </div>
                     )}
+                    <div className="flex items-center gap-3 mt-1">
+                      {item.detail_url && (
+                        <a
+                          className="text-xs text-accent hover:underline"
+                          href={DCR_BASE + item.detail_url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          View on diecastregistry.com →
+                        </a>
+                      )}
+                      {!item.enriched && (
+                        <span className="text-xs text-amber-400/80">
+                          stub — needs registry sync
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="text-right text-xs tabular-nums shrink-0">
                     <div>

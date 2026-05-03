@@ -14,12 +14,20 @@ export interface CredentialState {
   ebay_connected: boolean;
 }
 
+export interface EnrichSummary {
+  considered: number;
+  enriched: number;
+  skipped: number;
+  failed: number;
+}
+
 export interface SyncSummary {
   items_seen: number;
   drivers_upserted: number;
   registry_entries_upserted: number;
   collection_rows_upserted: number;
   pages_fetched: number;
+  enrichment: EnrichSummary | null;
 }
 
 export interface DriverGroup {
@@ -36,16 +44,23 @@ export interface CollectionRow {
   driver_id: number | null;
   driver_name: string | null;
   year: number | null;
+  year_raced: number | null;
+  car_number: string | null;
+  diecast_type: string | null;
+  registration_number: string | null;
   oem: string | null;
   brand: string | null;
   scale: string | null;
   make: string | null;
+  finish: string | null;
+  production_qty: number | null;
   scheme_text: string | null;
   image_url: string | null;
   detail_url: string | null;
   retail_value_cents: number | null;
   wholesale_value_cents: number | null;
   registry_int_id: number | null;
+  enriched: boolean;
 }
 
 export const api = {
@@ -60,6 +75,8 @@ export const api = {
   setSetting: (key: string, value: string) =>
     invoke<void>("set_setting", { key, value }),
   syncDcrCollection: () => invoke<SyncSummary>("sync_dcr_collection"),
+  refreshRegistryDetails: (force: boolean) =>
+    invoke<EnrichSummary>("refresh_registry_details", { force }),
   listDriversWithCounts: () =>
     invoke<DriverGroup[]>("list_drivers_with_counts"),
   listCollectionForDriver: (driverId: number) =>

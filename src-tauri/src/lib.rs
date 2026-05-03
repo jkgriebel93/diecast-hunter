@@ -40,6 +40,7 @@ pub fn run() {
             commands::get_setting,
             commands::set_setting,
             commands::sync_dcr_collection,
+            commands::refresh_registry_details,
             commands::list_drivers_with_counts,
             commands::list_collection_for_driver,
         ])
