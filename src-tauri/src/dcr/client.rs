@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, ACCEPT_LANGUAGE};
 use reqwest::redirect::Policy;
 use reqwest::Client;
 use scraper::{Html, Selector};
@@ -7,8 +8,9 @@ use scraper::{Html, Selector};
 use crate::error::{AppError, AppResult};
 
 const BASE: &str = "https://www.diecastregistry.com";
-const USER_AGENT: &str =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) DiecastHunter/0.1 (+local)";
+/// Pose as a real Chrome on Windows. The site's WAF resets connections that
+/// don't look like a browser at the TLS or HTTP layer.
+const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 /// Cookie-aware HTTP client targeted at diecastregistry.com.
 ///
@@ -20,12 +22,25 @@ pub struct DcrClient {
 
 impl DcrClient {
     pub fn new() -> AppResult<Self> {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            ACCEPT,
+            HeaderValue::from_static(
+                "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            ),
+        );
+        headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_static("en-US,en;q=0.9"));
+
         let http = Client::builder()
             .user_agent(USER_AGENT)
+            .default_headers(headers)
             .cookie_store(true)
             .redirect(Policy::limited(10))
             .timeout(Duration::from_secs(30))
             .gzip(true)
+            // ASP.NET MVC + IIS: stick to HTTP/1.1. ALPN h2 has triggered
+            // mid-handshake resets against this host.
+            .http1_only()
             .build()?;
         Ok(Self { http })
     }
