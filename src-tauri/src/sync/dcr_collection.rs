@@ -117,7 +117,7 @@ async fn persist_item(
         "INSERT INTO my_collection
             (registry_entry_id, source, external_id, raw_json, imported_at)
          VALUES (?, 'diecastregistry', ?, ?, ?)
-         ON CONFLICT(external_id) DO UPDATE SET
+         ON CONFLICT(source, external_id) DO UPDATE SET
             registry_entry_id = excluded.registry_entry_id,
             raw_json = excluded.raw_json,
             imported_at = excluded.imported_at",
