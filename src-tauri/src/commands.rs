@@ -2,7 +2,7 @@ use serde::Serialize;
 use sqlx::SqlitePool;
 use tauri::State;
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::settings;
 use crate::sync;
 use crate::AppState;
@@ -177,6 +177,115 @@ pub async fn test_ebay_connection(
     let client = crate::ebay::EbayClient::from_settings(state.db.pool.clone()).await?;
     let _ = client.access_token().await?;
     Ok(format!("connected ({})", client.environment().as_str()))
+}
+
+// ----- eBay user OAuth -----
+
+#[tauri::command]
+pub async fn save_ebay_ru_name(
+    state: State<'_, AppState>,
+    ru_name: String,
+) -> AppResult<()> {
+    let env = settings::get(&state.db.pool, settings::KEY_EBAY_ENVIRONMENT)
+        .await?
+        .unwrap_or_else(|| "sandbox".to_string());
+    settings::set(
+        &state.db.pool,
+        &settings::ebay_ru_name_key(&env),
+        ru_name.trim(),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn get_ebay_ru_name(state: State<'_, AppState>) -> AppResult<Option<String>> {
+    let env = settings::get(&state.db.pool, settings::KEY_EBAY_ENVIRONMENT)
+        .await?
+        .unwrap_or_else(|| "sandbox".to_string());
+    settings::get(&state.db.pool, &settings::ebay_ru_name_key(&env)).await
+}
+
+#[tauri::command]
+pub async fn get_ebay_oauth_status(
+    state: State<'_, AppState>,
+) -> AppResult<crate::ebay::OauthStatus> {
+    let env_str = settings::get(&state.db.pool, settings::KEY_EBAY_ENVIRONMENT)
+        .await?
+        .unwrap_or_else(|| "sandbox".to_string());
+    let env = crate::ebay::EbayEnvironment::from_str(&env_str);
+    crate::ebay::status(&state.db.pool, env).await
+}
+
+#[tauri::command]
+pub async fn start_ebay_oauth(state: State<'_, AppState>) -> AppResult<String> {
+    let env_str = settings::get(&state.db.pool, settings::KEY_EBAY_ENVIRONMENT)
+        .await?
+        .unwrap_or_else(|| "sandbox".to_string());
+    let env = crate::ebay::EbayEnvironment::from_str(&env_str);
+    let app_id = settings::secret_get(settings::ENTRY_EBAY_APP_ID)?
+        .ok_or_else(|| AppError::NotConfigured("eBay App ID not set".into()))?;
+    let ru_name = settings::get(&state.db.pool, &settings::ebay_ru_name_key(env.as_str()))
+        .await?
+        .ok_or_else(|| {
+            AppError::NotConfigured(
+                "eBay RuName not set — configure it in Settings first".into(),
+            )
+        })?;
+
+    // 32 random hex chars for CSRF state. Persisted so we can validate on
+    // callback (M4c.2 will check this).
+    let state_value: String = (0..16)
+        .map(|_| format!("{:02x}", fastrand::u8(..)))
+        .collect();
+    settings::set(&state.db.pool, "ebay.oauth_pending_state", &state_value).await?;
+
+    crate::ebay::authorize_url(
+        env,
+        &app_id,
+        &ru_name,
+        crate::ebay::DEFAULT_SCOPES,
+        &state_value,
+    )
+}
+
+#[tauri::command]
+pub async fn complete_ebay_oauth(
+    state: State<'_, AppState>,
+    code: String,
+) -> AppResult<()> {
+    let env_str = settings::get(&state.db.pool, settings::KEY_EBAY_ENVIRONMENT)
+        .await?
+        .unwrap_or_else(|| "sandbox".to_string());
+    let env = crate::ebay::EbayEnvironment::from_str(&env_str);
+    let app_id = settings::secret_get(settings::ENTRY_EBAY_APP_ID)?
+        .ok_or_else(|| AppError::NotConfigured("eBay App ID not set".into()))?;
+    let cert_id = settings::secret_get(settings::ENTRY_EBAY_CERT_ID)?
+        .ok_or_else(|| AppError::NotConfigured("eBay Cert ID not set".into()))?;
+    let ru_name = settings::get(&state.db.pool, &settings::ebay_ru_name_key(env.as_str()))
+        .await?
+        .ok_or_else(|| AppError::NotConfigured("eBay RuName not set".into()))?;
+
+    crate::ebay::exchange_code(
+        &state.db.pool,
+        env,
+        &app_id,
+        &cert_id,
+        &ru_name,
+        code.trim(),
+    )
+    .await?;
+
+    let _ = settings::delete(&state.db.pool, "ebay.oauth_pending_state").await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn disconnect_ebay_oauth(state: State<'_, AppState>) -> AppResult<()> {
+    let env_str = settings::get(&state.db.pool, settings::KEY_EBAY_ENVIRONMENT)
+        .await?
+        .unwrap_or_else(|| "sandbox".to_string());
+    let env = crate::ebay::EbayEnvironment::from_str(&env_str);
+    crate::ebay::disconnect(&state.db.pool, env).await
 }
 
 #[tauri::command]

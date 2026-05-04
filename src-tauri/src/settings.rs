@@ -13,6 +13,28 @@ pub const ENTRY_EBAY_OAUTH: &str = "ebay.oauth_token";
 pub const ENTRY_EBAY_APP_ID: &str = "ebay.app_id";
 pub const ENTRY_EBAY_CERT_ID: &str = "ebay.cert_id";
 
+pub fn ebay_ru_name_key(env: &str) -> String {
+    format!("ebay.{env}.ru_name")
+}
+
+pub fn ebay_user_access_token_key(env: &str) -> String {
+    format!("ebay.{env}.user.access_token")
+}
+
+pub fn ebay_user_access_token_expires_key(env: &str) -> String {
+    format!("ebay.{env}.user.access_token_expires_at")
+}
+
+pub fn ebay_user_granted_scopes_key(env: &str) -> String {
+    format!("ebay.{env}.user.granted_scopes")
+}
+
+/// Refresh tokens are sensitive (longer-lived than access tokens) so they go
+/// in the OS keyring rather than the SQLite settings KV.
+pub fn ebay_user_refresh_token_entry(env: &str) -> String {
+    format!("ebay.{env}.user.refresh_token")
+}
+
 pub async fn get(pool: &SqlitePool, key: &str) -> AppResult<Option<String>> {
     let row: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key = ?")
         .bind(key)

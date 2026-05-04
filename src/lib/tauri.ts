@@ -95,6 +95,15 @@ export const api = {
     }),
   clearEbayCredentials: () => invoke<void>("clear_ebay_credentials"),
   testEbayConnection: () => invoke<string>("test_ebay_connection"),
+  getEbayRuName: () => invoke<string | null>("get_ebay_ru_name"),
+  saveEbayRuName: (ruName: string) =>
+    invoke<void>("save_ebay_ru_name", { ruName }),
+  getEbayOauthStatus: () =>
+    invoke<EbayOauthStatus>("get_ebay_oauth_status"),
+  startEbayOauth: () => invoke<string>("start_ebay_oauth"),
+  completeEbayOauth: (code: string) =>
+    invoke<void>("complete_ebay_oauth", { code }),
+  disconnectEbayOauth: () => invoke<void>("disconnect_ebay_oauth"),
   addEbayListing: (input: string) =>
     invoke<AddListingResult>("add_ebay_listing", { input }),
   refreshEbayListing: (listingId: number) =>
@@ -120,6 +129,14 @@ export interface RefreshSummary {
   considered: number;
   refreshed: number;
   failed: number;
+}
+
+export interface EbayOauthStatus {
+  connected: boolean;
+  environment: string;
+  has_ru_name: boolean;
+  granted_scopes: string[];
+  access_token_expires_at: number | null;
 }
 
 export interface ListingRow {

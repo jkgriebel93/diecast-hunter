@@ -12,6 +12,12 @@
     "core:resources:default",
     "core:menu:default",
     "core:tray:default",
-    "shell:allow-open"
+    {
+      "identifier": "shell:allow-open",
+      "allow": [
+        { "url": "https://**" },
+        { "url": "http://localhost/**" }
+      ]
+    }
   ]
 }
