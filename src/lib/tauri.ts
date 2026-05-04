@@ -81,7 +81,66 @@ export const api = {
     invoke<DriverGroup[]>("list_drivers_with_counts"),
   listCollectionForDriver: (driverId: number) =>
     invoke<CollectionRow[]>("list_collection_for_driver", { driverId }),
+  getEbayCredentials: () =>
+    invoke<EbayCredentialsState>("get_ebay_credentials"),
+  saveEbayCredentials: (
+    appId: string,
+    certId: string,
+    environment: string,
+  ) =>
+    invoke<void>("save_ebay_credentials", {
+      appId,
+      certId,
+      environment,
+    }),
+  clearEbayCredentials: () => invoke<void>("clear_ebay_credentials"),
+  testEbayConnection: () => invoke<string>("test_ebay_connection"),
+  addEbayListing: (input: string) =>
+    invoke<AddListingResult>("add_ebay_listing", { input }),
+  refreshEbayListing: (listingId: number) =>
+    invoke<void>("refresh_ebay_listing", { listingId }),
+  refreshAllEbayListings: () =>
+    invoke<RefreshSummary>("refresh_all_ebay_listings"),
+  listListings: () => invoke<ListingRow[]>("list_listings"),
 };
+
+export interface EbayCredentialsState {
+  environment: string;
+  has_app_id: boolean;
+  has_cert_id: boolean;
+}
+
+export interface AddListingResult {
+  listing_id: number;
+  created: boolean;
+  title: string;
+}
+
+export interface RefreshSummary {
+  considered: number;
+  refreshed: number;
+  failed: number;
+}
+
+export interface ListingRow {
+  listing_id: number;
+  seller_code: string;
+  external_id: string;
+  url: string;
+  title: string;
+  price_cents: number | null;
+  shipping_cents: number | null;
+  currency: string;
+  condition: string | null;
+  listing_type: string | null;
+  status: string;
+  end_time: number | null;
+  seller_username: string | null;
+  seller_rating: number | null;
+  image_url: string | null;
+  saved_at: number;
+  last_seen_at: number;
+}
 
 export function formatCents(cents: number | null): string {
   if (cents === null || cents === undefined) return "—";

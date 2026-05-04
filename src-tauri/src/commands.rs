@@ -109,6 +109,182 @@ pub async fn refresh_registry_details(
     sync::enrich_only(&state.db.pool, force).await
 }
 
+// ----- eBay -----
+
+#[derive(Serialize)]
+pub struct EbayCredentialsState {
+    pub environment: String,
+    pub has_app_id: bool,
+    pub has_cert_id: bool,
+}
+
+#[tauri::command]
+pub async fn get_ebay_credentials(
+    state: State<'_, AppState>,
+) -> AppResult<EbayCredentialsState> {
+    let environment = settings::get(&state.db.pool, settings::KEY_EBAY_ENVIRONMENT)
+        .await?
+        .unwrap_or_else(|| "sandbox".to_string());
+    let has_app_id = settings::secret_get(settings::ENTRY_EBAY_APP_ID)?.is_some();
+    let has_cert_id = settings::secret_get(settings::ENTRY_EBAY_CERT_ID)?.is_some();
+    Ok(EbayCredentialsState {
+        environment,
+        has_app_id,
+        has_cert_id,
+    })
+}
+
+#[tauri::command]
+pub async fn save_ebay_credentials(
+    state: State<'_, AppState>,
+    app_id: String,
+    cert_id: String,
+    environment: String,
+) -> AppResult<()> {
+    let env = match environment.as_str() {
+        "production" | "sandbox" => environment,
+        _ => "sandbox".to_string(),
+    };
+    settings::set(&state.db.pool, settings::KEY_EBAY_ENVIRONMENT, &env).await?;
+    settings::secret_set(settings::ENTRY_EBAY_APP_ID, &app_id)?;
+    settings::secret_set(settings::ENTRY_EBAY_CERT_ID, &cert_id)?;
+    // Invalidate cached tokens — they were issued against the previous keys.
+    let _ = settings::delete(&state.db.pool, "ebay.sandbox.access_token").await;
+    let _ = settings::delete(&state.db.pool, "ebay.sandbox.access_token_expires_at").await;
+    let _ = settings::delete(&state.db.pool, "ebay.production.access_token").await;
+    let _ = settings::delete(&state.db.pool, "ebay.production.access_token_expires_at").await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn clear_ebay_credentials(
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    settings::secret_delete(settings::ENTRY_EBAY_APP_ID)?;
+    settings::secret_delete(settings::ENTRY_EBAY_CERT_ID)?;
+    settings::delete(&state.db.pool, "ebay.sandbox.access_token").await?;
+    settings::delete(&state.db.pool, "ebay.sandbox.access_token_expires_at").await?;
+    settings::delete(&state.db.pool, "ebay.production.access_token").await?;
+    settings::delete(&state.db.pool, "ebay.production.access_token_expires_at").await?;
+    Ok(())
+}
+
+/// Ping the OAuth endpoint to confirm the saved credentials work.
+#[tauri::command]
+pub async fn test_ebay_connection(
+    state: State<'_, AppState>,
+) -> AppResult<String> {
+    let client = crate::ebay::EbayClient::from_settings(state.db.pool.clone()).await?;
+    let _ = client.access_token().await?;
+    Ok(format!("connected ({})", client.environment().as_str()))
+}
+
+#[tauri::command]
+pub async fn add_ebay_listing(
+    state: State<'_, AppState>,
+    input: String,
+) -> AppResult<sync::AddListingResult> {
+    sync::add_listing_from_input(&state.db.pool, &input).await
+}
+
+#[tauri::command]
+pub async fn refresh_ebay_listing(
+    state: State<'_, AppState>,
+    listing_id: i64,
+) -> AppResult<()> {
+    sync::refresh_listing(&state.db.pool, listing_id).await
+}
+
+#[tauri::command]
+pub async fn refresh_all_ebay_listings(
+    state: State<'_, AppState>,
+) -> AppResult<sync::RefreshSummary> {
+    sync::refresh_all_active(&state.db.pool).await
+}
+
+#[derive(Serialize)]
+pub struct ListingRow {
+    pub listing_id: i64,
+    pub seller_code: String,
+    pub external_id: String,
+    pub url: String,
+    pub title: String,
+    pub price_cents: Option<i64>,
+    pub shipping_cents: Option<i64>,
+    pub currency: String,
+    pub condition: Option<String>,
+    pub listing_type: Option<String>,
+    pub status: String,
+    pub end_time: Option<i64>,
+    pub seller_username: Option<String>,
+    pub seller_rating: Option<f64>,
+    pub image_url: Option<String>,
+    pub saved_at: i64,
+    pub last_seen_at: i64,
+}
+
+#[derive(sqlx::FromRow)]
+struct ListingRowRaw {
+    id: i64,
+    seller_code: String,
+    external_id: String,
+    url: String,
+    title: String,
+    price_cents: Option<i64>,
+    shipping_cents: Option<i64>,
+    currency: String,
+    condition: Option<String>,
+    listing_type: Option<String>,
+    status: String,
+    end_time: Option<i64>,
+    seller_username: Option<String>,
+    seller_rating: Option<f64>,
+    image_url: Option<String>,
+    saved_at: i64,
+    last_seen_at: i64,
+}
+
+#[tauri::command]
+pub async fn list_listings(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<ListingRow>> {
+    let rows: Vec<ListingRowRaw> = sqlx::query_as(
+        "SELECT l.id, s.code AS seller_code, l.external_id, l.url, l.title,
+                l.price_cents, l.shipping_cents, l.currency,
+                l.condition, l.listing_type, l.status, l.end_time,
+                l.seller_username, l.seller_rating, l.image_url,
+                l.saved_at, l.last_seen_at
+         FROM listings l
+         JOIN sellers s ON s.id = l.seller_id
+         ORDER BY l.status = 'active' DESC, l.last_seen_at DESC",
+    )
+    .fetch_all(&state.db.pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| ListingRow {
+            listing_id: r.id,
+            seller_code: r.seller_code,
+            external_id: r.external_id,
+            url: r.url,
+            title: r.title,
+            price_cents: r.price_cents,
+            shipping_cents: r.shipping_cents,
+            currency: r.currency,
+            condition: r.condition,
+            listing_type: r.listing_type,
+            status: r.status,
+            end_time: r.end_time,
+            seller_username: r.seller_username,
+            seller_rating: r.seller_rating,
+            image_url: r.image_url,
+            saved_at: r.saved_at,
+            last_seen_at: r.last_seen_at,
+        })
+        .collect())
+}
+
 #[derive(Serialize)]
 pub struct DriverGroup {
     pub driver_id: i64,

@@ -1,6 +1,7 @@
 mod commands;
 mod db;
 mod dcr;
+mod ebay;
 mod error;
 mod settings;
 mod sync;
@@ -43,6 +44,14 @@ pub fn run() {
             commands::refresh_registry_details,
             commands::list_drivers_with_counts,
             commands::list_collection_for_driver,
+            commands::get_ebay_credentials,
+            commands::save_ebay_credentials,
+            commands::clear_ebay_credentials,
+            commands::test_ebay_connection,
+            commands::add_ebay_listing,
+            commands::refresh_ebay_listing,
+            commands::refresh_all_ebay_listings,
+            commands::list_listings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

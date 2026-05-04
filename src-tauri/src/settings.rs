@@ -6,9 +6,12 @@ use crate::error::AppResult;
 const KEYRING_SERVICE: &str = "DiecastHunter";
 
 pub const KEY_DCR_USERNAME: &str = "diecastregistry.username";
+pub const KEY_EBAY_ENVIRONMENT: &str = "ebay.environment";
 
 pub const ENTRY_DCR_PASSWORD: &str = "diecastregistry.password";
 pub const ENTRY_EBAY_OAUTH: &str = "ebay.oauth_token";
+pub const ENTRY_EBAY_APP_ID: &str = "ebay.app_id";
+pub const ENTRY_EBAY_CERT_ID: &str = "ebay.cert_id";
 
 pub async fn get(pool: &SqlitePool, key: &str) -> AppResult<Option<String>> {
     let row: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key = ?")

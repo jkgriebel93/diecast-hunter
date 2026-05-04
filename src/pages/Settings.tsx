@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import {
   api,
   type CredentialState,
+  type EbayCredentialsState,
   type EnrichSummary,
   type SyncSummary,
 } from "@/lib/tauri";
@@ -24,6 +25,17 @@ export function Settings() {
     useState<EnrichSummary | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
 
+  const [ebayCreds, setEbayCreds] = useState<EbayCredentialsState | null>(
+    null,
+  );
+  const [ebayAppId, setEbayAppId] = useState("");
+  const [ebayCertId, setEbayCertId] = useState("");
+  const [ebayEnv, setEbayEnv] = useState<"sandbox" | "production">("sandbox");
+  const [ebaySaving, setEbaySaving] = useState(false);
+  const [ebayTesting, setEbayTesting] = useState(false);
+  const [ebayMessage, setEbayMessage] = useState<string | null>(null);
+  const [ebayError, setEbayError] = useState<string | null>(null);
+
   async function refresh() {
     try {
       const c = await api.getCredentials();
@@ -31,8 +43,57 @@ export function Settings() {
       setUsername(c.diecastregistry_username ?? "");
       const ts = await api.getSetting("dcr.last_collection_sync");
       setLastSync(ts);
+      const e = await api.getEbayCredentials();
+      setEbayCreds(e);
+      setEbayEnv(e.environment === "production" ? "production" : "sandbox");
     } catch (e) {
       setError(String(e));
+    }
+  }
+
+  async function onEbaySave(e: FormEvent) {
+    e.preventDefault();
+    setEbaySaving(true);
+    setEbayError(null);
+    setEbayMessage(null);
+    try {
+      await api.saveEbayCredentials(ebayAppId, ebayCertId, ebayEnv);
+      setEbayAppId("");
+      setEbayCertId("");
+      setEbayMessage("Saved.");
+      await refresh();
+    } catch (e) {
+      setEbayError(String(e));
+    } finally {
+      setEbaySaving(false);
+    }
+  }
+
+  async function onEbayClear() {
+    setEbayError(null);
+    setEbayMessage(null);
+    try {
+      await api.clearEbayCredentials();
+      setEbayAppId("");
+      setEbayCertId("");
+      setEbayMessage("Cleared.");
+      await refresh();
+    } catch (e) {
+      setEbayError(String(e));
+    }
+  }
+
+  async function onEbayTest() {
+    setEbayTesting(true);
+    setEbayError(null);
+    setEbayMessage(null);
+    try {
+      const result = await api.testEbayConnection();
+      setEbayMessage(result);
+    } catch (e) {
+      setEbayError(String(e));
+    } finally {
+      setEbayTesting(false);
     }
   }
 
@@ -259,16 +320,115 @@ export function Settings() {
         </div>
       </section>
 
-      <section className="card space-y-3">
+      <section className="card space-y-4">
         <div>
-          <h3 className="text-base font-medium">eBay</h3>
+          <h3 className="text-base font-medium">eBay Developers</h3>
           <p className="text-xs text-slate-500 mt-1">
-            Connect via OAuth to sync watched listings and refresh prices.
+            App ID and Cert ID from your eBay developer keyset. Used for
+            looking up item details via the Browse API. Stored in the Windows
+            Credential Manager. User OAuth (for watchlist sync) comes later.
           </p>
         </div>
-        <button className="btn-secondary" type="button" disabled>
-          Connect eBay account (coming soon)
-        </button>
+
+        <form onSubmit={onEbaySave} className="space-y-3">
+          <div>
+            <label className="label">Environment</label>
+            <div className="flex gap-4 text-sm">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="ebay-env"
+                  value="sandbox"
+                  checked={ebayEnv === "sandbox"}
+                  onChange={() => setEbayEnv("sandbox")}
+                />
+                Sandbox
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="ebay-env"
+                  value="production"
+                  checked={ebayEnv === "production"}
+                  onChange={() => setEbayEnv("production")}
+                />
+                Production
+              </label>
+            </div>
+          </div>
+          <div>
+            <label className="label">
+              App ID (Client ID){" "}
+              {ebayCreds?.has_app_id && (
+                <span className="text-slate-500 normal-case">
+                  (saved — leave blank to keep)
+                </span>
+              )}
+            </label>
+            <input
+              className="input"
+              type="text"
+              value={ebayAppId}
+              onChange={(e) => setEbayAppId(e.target.value)}
+              autoComplete="off"
+              placeholder={ebayCreds?.has_app_id ? "••••••••" : ""}
+            />
+          </div>
+          <div>
+            <label className="label">
+              Cert ID (Client Secret){" "}
+              {ebayCreds?.has_cert_id && (
+                <span className="text-slate-500 normal-case">
+                  (saved — leave blank to keep)
+                </span>
+              )}
+            </label>
+            <input
+              className="input"
+              type="password"
+              value={ebayCertId}
+              onChange={(e) => setEbayCertId(e.target.value)}
+              autoComplete="new-password"
+              placeholder={ebayCreds?.has_cert_id ? "••••••••" : ""}
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              className="btn-primary"
+              type="submit"
+              disabled={ebaySaving || !ebayAppId || !ebayCertId}
+            >
+              {ebaySaving ? "Saving…" : "Save"}
+            </button>
+            <button
+              className="btn-secondary"
+              type="button"
+              disabled={
+                ebayTesting ||
+                !ebayCreds?.has_app_id ||
+                !ebayCreds?.has_cert_id
+              }
+              onClick={onEbayTest}
+            >
+              {ebayTesting ? "Testing…" : "Test connection"}
+            </button>
+            {(ebayCreds?.has_app_id || ebayCreds?.has_cert_id) && (
+              <button
+                className="btn-secondary"
+                type="button"
+                onClick={onEbayClear}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </form>
+        {ebayMessage && (
+          <div className="text-xs text-emerald-400">{ebayMessage}</div>
+        )}
+        {ebayError && (
+          <div className="text-xs text-red-400">{ebayError}</div>
+        )}
       </section>
 
       {message && (
