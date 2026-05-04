@@ -3,6 +3,7 @@ import {
   api,
   formatCents,
   type ListingRow,
+  type MatchSummary,
   type RefreshSummary,
   type WatchlistSyncSummary,
 } from "@/lib/tauri";
@@ -24,6 +25,9 @@ export function Listings() {
   const [syncingWatchlist, setSyncingWatchlist] = useState(false);
   const [watchlistSummary, setWatchlistSummary] =
     useState<WatchlistSyncSummary | null>(null);
+
+  const [rematching, setRematching] = useState(false);
+  const [matchSummary, setMatchSummary] = useState<MatchSummary | null>(null);
 
   async function load() {
     setError(null);
@@ -99,6 +103,21 @@ export function Listings() {
     }
   }
 
+  async function onRematchAll() {
+    setRematching(true);
+    setMatchSummary(null);
+    setError(null);
+    try {
+      const summary = await api.rematchAllListings();
+      setMatchSummary(summary);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setRematching(false);
+    }
+  }
+
   return (
     <div className="p-6 space-y-4">
       <header className="flex items-end justify-between">
@@ -121,14 +140,25 @@ export function Listings() {
             {syncingWatchlist ? "Syncing…" : "Sync watchlist"}
           </button>
           {rows && rows.length > 0 && (
-            <button
-              className="btn-secondary"
-              type="button"
-              onClick={onRefreshAll}
-              disabled={bulkRefreshing}
-            >
-              {bulkRefreshing ? "Refreshing…" : "Refresh all"}
-            </button>
+            <>
+              <button
+                className="btn-secondary"
+                type="button"
+                onClick={onRematchAll}
+                disabled={rematching}
+                title="Re-run the title→registry matcher against every listing"
+              >
+                {rematching ? "Matching…" : "Re-match all"}
+              </button>
+              <button
+                className="btn-secondary"
+                type="button"
+                onClick={onRefreshAll}
+                disabled={bulkRefreshing}
+              >
+                {bulkRefreshing ? "Refreshing…" : "Refresh all"}
+              </button>
+            </>
           )}
         </div>
       </header>
@@ -174,6 +204,13 @@ export function Listings() {
           {watchlistSummary.items_seen} items total).
         </div>
       )}
+      {matchSummary && (
+        <div className="text-xs text-emerald-400">
+          Matched: {matchSummary.auto_matched} auto-matched,{" "}
+          {matchSummary.needs_review} need review,{" "}
+          {matchSummary.unmatched} unmatched (of {matchSummary.considered}).
+        </div>
+      )}
       {error && (
         <div className="card border-red-500/40 text-red-300 text-sm">
           {error}
@@ -216,10 +253,9 @@ function ListingCard({
       ? row.price_cents + (row.shipping_cents ?? 0)
       : null;
   const ended = row.status === "ended";
+  const matched = row.registry_entry_id !== null;
   return (
-    <li
-      className={`card flex gap-4 ${ended ? "opacity-60" : ""}`}
-    >
+    <li className={`card flex gap-4 ${ended ? "opacity-60" : ""}`}>
       {row.image_url && (
         <img
           src={row.image_url}
@@ -242,7 +278,41 @@ function ListingCard({
             .filter(Boolean)
             .join(" · ")}
         </div>
-        <div className="text-xs text-slate-500 mt-0.5">
+
+        {matched ? (
+          <div className="mt-2 rounded-md border border-border bg-bg-elevated px-2 py-1.5 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="text-emerald-400">✓ matched</span>
+              <span className="text-slate-300 truncate">
+                {row.matched_driver_name}
+                {row.matched_scheme_text
+                  ? ` — ${row.matched_scheme_text}`
+                  : ""}
+              </span>
+            </div>
+            <div className="text-slate-500 mt-0.5">
+              {[
+                row.matched_year,
+                row.matched_oem,
+                row.matched_brand,
+                row.matched_scale,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+              {row.match_confidence !== null && (
+                <span className="ml-2 text-slate-600">
+                  ({row.match_confidence.toFixed(0)}% confidence)
+                </span>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="mt-2 text-xs text-amber-400/80">
+            Unmatched — no registry entry found for this listing.
+          </div>
+        )}
+
+        <div className="text-xs text-slate-500 mt-1">
           {ended
             ? "ended"
             : row.end_time
@@ -268,7 +338,7 @@ function ListingCard({
           </button>
         </div>
       </div>
-      <div className="text-right text-xs tabular-nums shrink-0">
+      <div className="text-right text-xs tabular-nums shrink-0 space-y-0.5">
         <div className="text-base text-slate-100">
           {formatCents(row.price_cents)}
         </div>
@@ -278,11 +348,48 @@ function ListingCard({
           </div>
         )}
         {total !== null && row.shipping_cents !== null && row.shipping_cents > 0 && (
-          <div className="text-slate-400 mt-1">
-            total {formatCents(total)}
+          <div className="text-slate-400">total {formatCents(total)}</div>
+        )}
+        {matched && (
+          <div className="text-slate-500 mt-1">
+            retail {formatCents(row.matched_retail_cents)}
           </div>
+        )}
+        {row.deal_score !== null && (
+          <DealBadge score={row.deal_score} />
         )}
       </div>
     </li>
+  );
+}
+
+function DealBadge({ score }: { score: number }) {
+  // score = (price+shipping) / retail * 100
+  // < 70%  → great deal (green)
+  // 70-90% → fair (yellow)
+  // 90-110% → at retail (slate)
+  // > 110% → over retail (red)
+  let cls = "text-slate-400 border-border";
+  let label = "at retail";
+  if (score < 70) {
+    cls = "text-emerald-400 border-emerald-500/30 bg-emerald-500/10";
+    label = "great deal";
+  } else if (score < 90) {
+    cls = "text-yellow-400 border-yellow-500/30 bg-yellow-500/10";
+    label = "fair";
+  } else if (score > 110) {
+    cls = "text-red-400 border-red-500/30 bg-red-500/10";
+    label = "over retail";
+  }
+  return (
+    <div
+      className={`inline-flex flex-col items-end mt-1 px-1.5 py-0.5 rounded border ${cls}`}
+      title={`${score.toFixed(0)}% of registry retail (${label})`}
+    >
+      <span className="font-medium">{score.toFixed(0)}% of retail</span>
+      <span className="text-[10px] uppercase tracking-wide opacity-80">
+        {label}
+      </span>
+    </div>
   );
 }

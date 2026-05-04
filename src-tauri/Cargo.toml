@@ -38,6 +38,7 @@ url = "2"
 once_cell = "1"
 base64 = "0.22"
 fastrand = "2"
+phf = { version = "0.11", features = ["macros"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }

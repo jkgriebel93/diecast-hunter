@@ -337,6 +337,20 @@ pub struct ListingRow {
     pub image_url: Option<String>,
     pub saved_at: i64,
     pub last_seen_at: i64,
+    pub registry_entry_id: Option<i64>,
+    pub match_confidence: Option<f64>,
+    pub match_user_confirmed: bool,
+    pub matched_driver_name: Option<String>,
+    pub matched_scheme_text: Option<String>,
+    pub matched_year: Option<i32>,
+    pub matched_oem: Option<String>,
+    pub matched_brand: Option<String>,
+    pub matched_scale: Option<String>,
+    pub matched_retail_cents: Option<i64>,
+    pub matched_wholesale_cents: Option<i64>,
+    /// Total cost (price + shipping) as a percentage of registry retail. None
+    /// if either side is missing. Lower = better deal.
+    pub deal_score: Option<f64>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -358,6 +372,17 @@ struct ListingRowRaw {
     image_url: Option<String>,
     saved_at: i64,
     last_seen_at: i64,
+    registry_entry_id: Option<i64>,
+    match_confidence: Option<f64>,
+    match_user_confirmed: Option<i64>,
+    matched_driver_name: Option<String>,
+    matched_scheme_text: Option<String>,
+    matched_year: Option<i32>,
+    matched_oem: Option<String>,
+    matched_brand: Option<String>,
+    matched_scale: Option<String>,
+    matched_retail_cents: Option<i64>,
+    matched_wholesale_cents: Option<i64>,
 }
 
 #[tauri::command]
@@ -369,9 +394,23 @@ pub async fn list_listings(
                 l.price_cents, l.shipping_cents, l.currency,
                 l.condition, l.listing_type, l.status, l.end_time,
                 l.seller_username, l.seller_rating, l.image_url,
-                l.saved_at, l.last_seen_at
+                l.saved_at, l.last_seen_at,
+                lm.registry_entry_id,
+                lm.confidence AS match_confidence,
+                lm.user_confirmed AS match_user_confirmed,
+                d.name AS matched_driver_name,
+                re.scheme_text AS matched_scheme_text,
+                re.year AS matched_year,
+                re.oem AS matched_oem,
+                re.brand AS matched_brand,
+                re.scale AS matched_scale,
+                re.retail_value_cents AS matched_retail_cents,
+                re.wholesale_value_cents AS matched_wholesale_cents
          FROM listings l
          JOIN sellers s ON s.id = l.seller_id
+         LEFT JOIN listing_matches lm ON lm.listing_id = l.id
+         LEFT JOIN registry_entries re ON re.id = lm.registry_entry_id
+         LEFT JOIN drivers d ON d.id = re.driver_id
          ORDER BY l.status = 'active' DESC, l.last_seen_at DESC",
     )
     .fetch_all(&state.db.pool)
@@ -379,26 +418,56 @@ pub async fn list_listings(
 
     Ok(rows
         .into_iter()
-        .map(|r| ListingRow {
-            listing_id: r.id,
-            seller_code: r.seller_code,
-            external_id: r.external_id,
-            url: r.url,
-            title: r.title,
-            price_cents: r.price_cents,
-            shipping_cents: r.shipping_cents,
-            currency: r.currency,
-            condition: r.condition,
-            listing_type: r.listing_type,
-            status: r.status,
-            end_time: r.end_time,
-            seller_username: r.seller_username,
-            seller_rating: r.seller_rating,
-            image_url: r.image_url,
-            saved_at: r.saved_at,
-            last_seen_at: r.last_seen_at,
+        .map(|r| {
+            let total_cents = r
+                .price_cents
+                .map(|p| p + r.shipping_cents.unwrap_or(0));
+            let deal_score = match (total_cents, r.matched_retail_cents) {
+                (Some(t), Some(retail)) if retail > 0 => {
+                    Some((t as f64) / (retail as f64) * 100.0)
+                }
+                _ => None,
+            };
+            ListingRow {
+                listing_id: r.id,
+                seller_code: r.seller_code,
+                external_id: r.external_id,
+                url: r.url,
+                title: r.title,
+                price_cents: r.price_cents,
+                shipping_cents: r.shipping_cents,
+                currency: r.currency,
+                condition: r.condition,
+                listing_type: r.listing_type,
+                status: r.status,
+                end_time: r.end_time,
+                seller_username: r.seller_username,
+                seller_rating: r.seller_rating,
+                image_url: r.image_url,
+                saved_at: r.saved_at,
+                last_seen_at: r.last_seen_at,
+                registry_entry_id: r.registry_entry_id,
+                match_confidence: r.match_confidence,
+                match_user_confirmed: r.match_user_confirmed.unwrap_or(0) != 0,
+                matched_driver_name: r.matched_driver_name,
+                matched_scheme_text: r.matched_scheme_text,
+                matched_year: r.matched_year,
+                matched_oem: r.matched_oem,
+                matched_brand: r.matched_brand,
+                matched_scale: r.matched_scale,
+                matched_retail_cents: r.matched_retail_cents,
+                matched_wholesale_cents: r.matched_wholesale_cents,
+                deal_score,
+            }
         })
         .collect())
+}
+
+#[tauri::command]
+pub async fn rematch_all_listings(
+    state: State<'_, AppState>,
+) -> AppResult<sync::MatchSummary> {
+    sync::match_all(&state.db.pool).await
 }
 
 #[derive(Serialize)]

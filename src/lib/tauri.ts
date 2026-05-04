@@ -113,6 +113,7 @@ export const api = {
   syncEbayWatchlist: () =>
     invoke<WatchlistSyncSummary>("sync_ebay_watchlist"),
   listListings: () => invoke<ListingRow[]>("list_listings"),
+  rematchAllListings: () => invoke<MatchSummary>("rematch_all_listings"),
 };
 
 export interface WatchlistSyncSummary {
@@ -167,6 +168,26 @@ export interface ListingRow {
   image_url: string | null;
   saved_at: number;
   last_seen_at: number;
+  registry_entry_id: number | null;
+  match_confidence: number | null;
+  match_user_confirmed: boolean;
+  matched_driver_name: string | null;
+  matched_scheme_text: string | null;
+  matched_year: number | null;
+  matched_oem: string | null;
+  matched_brand: string | null;
+  matched_scale: string | null;
+  matched_retail_cents: number | null;
+  matched_wholesale_cents: number | null;
+  /** Total (price + shipping) as percentage of registry retail. Lower = better deal. */
+  deal_score: number | null;
+}
+
+export interface MatchSummary {
+  considered: number;
+  auto_matched: number;
+  needs_review: number;
+  unmatched: number;
 }
 
 export function formatCents(cents: number | null): string {

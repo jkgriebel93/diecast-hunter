@@ -3,6 +3,7 @@ mod db;
 mod dcr;
 mod ebay;
 mod error;
+mod matcher;
 mod settings;
 mod sync;
 
@@ -59,6 +60,7 @@ pub fn run() {
             commands::refresh_all_ebay_listings,
             commands::sync_ebay_watchlist,
             commands::list_listings,
+            commands::rematch_all_listings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
