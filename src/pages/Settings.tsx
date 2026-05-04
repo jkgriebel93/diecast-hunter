@@ -27,6 +27,10 @@ export function Settings() {
     useState<EnrichSummary | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
 
+  const [optionsRefreshing, setOptionsRefreshing] = useState(false);
+  const [optionsMessage, setOptionsMessage] = useState<string | null>(null);
+  const [optionsError, setOptionsError] = useState<string | null>(null);
+
   const [ebayCreds, setEbayCreds] = useState<EbayCredentialsState | null>(
     null,
   );
@@ -243,6 +247,22 @@ export function Settings() {
     }
   }
 
+  async function onRefreshFormOptions() {
+    setOptionsRefreshing(true);
+    setOptionsMessage(null);
+    setOptionsError(null);
+    try {
+      const summary = await api.refreshRegistryFormOptions();
+      setOptionsMessage(
+        `Cached ${summary.options_upserted} dropdown options across ${summary.fields_seen} fields.`,
+      );
+    } catch (e) {
+      setOptionsError(String(e));
+    } finally {
+      setOptionsRefreshing(false);
+    }
+  }
+
   return (
     <div className="p-6 space-y-6 max-w-2xl">
       <header>
@@ -399,6 +419,36 @@ export function Settings() {
           )}
           {refreshError && (
             <div className="text-xs text-red-400">{refreshError}</div>
+          )}
+        </div>
+
+        <div className="border-t border-border pt-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium">Registry search options</div>
+              <div className="text-xs text-slate-500">
+                Cache driver / OEM / brand / scale / finish dropdown choices
+                from diecastregistry.com. Used by the "Search registry…" dialog
+                on saved listings. Refresh occasionally to pick up new
+                drivers / brands.
+              </div>
+            </div>
+            <button
+              className="btn-secondary"
+              type="button"
+              disabled={
+                optionsRefreshing || !creds?.diecastregistry_has_password
+              }
+              onClick={onRefreshFormOptions}
+            >
+              {optionsRefreshing ? "Fetching…" : "Refresh options"}
+            </button>
+          </div>
+          {optionsMessage && (
+            <div className="text-xs text-emerald-400">{optionsMessage}</div>
+          )}
+          {optionsError && (
+            <div className="text-xs text-red-400">{optionsError}</div>
           )}
         </div>
       </section>

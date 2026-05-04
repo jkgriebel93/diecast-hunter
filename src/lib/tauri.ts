@@ -127,7 +127,70 @@ export const api = {
       query,
       limit,
     }),
+  refreshRegistryFormOptions: () =>
+    invoke<RefreshOptionsSummary>("refresh_registry_form_options"),
+  listRegistryFormOptions: (field: string) =>
+    invoke<FormOptionRow[]>("list_registry_form_options", { field }),
+  searchDcrProduction: (filter: ProductionSearchFilter) =>
+    invoke<ProductionSearchResult[]>("search_dcr_production", { filter }),
+  linkListingToRegistry: (
+    listingId: number,
+    registryGuid: string,
+    detailUrl: string | null,
+  ) =>
+    invoke<LinkResult>("link_listing_to_registry", {
+      listingId,
+      registryGuid,
+      detailUrl,
+    }),
 };
+
+export interface RefreshOptionsSummary {
+  fields_seen: number;
+  options_upserted: number;
+}
+
+export interface FormOptionRow {
+  value: string;
+  display: string;
+  normalized: string;
+}
+
+export interface ProductionSearchFilter {
+  diecast_type?: string;
+  driver_guids?: string[];
+  year_opt?: string;
+  years?: string[];
+  oem_guids?: string[];
+  brand_guids?: string[];
+  make_guids?: string[];
+  scale_guids?: string[];
+  finish_guids?: string[];
+  autographed?: boolean;
+  raced?: boolean;
+}
+
+export interface ProductionSearchResult {
+  registry_guid: string;
+  detail_url: string | null;
+  image_url: string | null;
+  driver_name: string;
+  driver_normalized: string;
+  year: number | null;
+  oem: string | null;
+  brand: string | null;
+  scale: string | null;
+  make: string | null;
+  scheme_text: string | null;
+  seq_produced_total: number | null;
+  retail_value_cents: number | null;
+  wholesale_value_cents: number | null;
+}
+
+export interface LinkResult {
+  registry_entry_id: number;
+  enriched: boolean;
+}
 
 export interface RegistryPickerRow {
   id: number;
