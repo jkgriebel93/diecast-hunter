@@ -1,0 +1,19 @@
+name = "diecast-hunter-ebay"
+main = "src/index.ts"
+compatibility_date = "2024-11-12"
+
+# After deploying once, paste the Worker's public URL here so the verification
+# challenge hash matches what eBay expects. Path must match the route the eBay
+# config points at — keep it as /marketplace-deletion.
+[vars]
+ENDPOINT_URL = "https://CHANGE-ME.workers.dev/marketplace-deletion"
+
+# Set the KV namespace id after running:
+#   wrangler kv namespace create DELETIONS
+[[kv_namespaces]]
+binding = "DELETIONS"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# Secrets are NOT defined here. Set them with:
+#   wrangler secret put EBAY_VERIFICATION_TOKEN
+#   wrangler secret put APP_SHARED_SECRET

@@ -44,11 +44,15 @@ The first build is slow (Rust deps); subsequent builds are fast.
 │   │   ├── commands.rs   # #[tauri::command] handlers exposed to JS
 │   │   ├── db.rs         # sqlx pool + migration runner
 │   │   ├── settings.rs   # KV settings (DB) + secrets (keyring)
-│   │   └── error.rs      # AppError, serializable to the frontend
+│   │   ├── error.rs      # AppError, serializable to the frontend
+│   │   ├── dcr/          # diecastregistry.com client + parsers
+│   │   └── sync/         # Sync orchestration (collection, registry enrich)
 │   ├── migrations/       # SQL migrations applied at startup
+│   ├── fixtures/         # Test fixtures for HTML parsers
 │   ├── icons/            # App icons (placeholder; replace before release)
 │   ├── capabilities/     # Tauri capability/permission config
 │   └── tauri.conf.json
+├── worker/               # Cloudflare Worker — eBay deletion-notification compliance
 └── package.json
 ```
 
@@ -69,9 +73,10 @@ pnpm tauri icon path\to\source.png
 
 This is milestone 1 of 6. See conversation history for the full plan.
 
-- [x] **M1**: Scaffold (this commit) — Tauri shell, SQLite, settings screen.
-- [ ] **M2**: diecastregistry.com sync (login + master registry + collection).
-- [ ] **M3**: Browser extension companion for capturing eBay/FB listings.
-- [ ] **M4**: Listing → registry matcher and grouped browse UI.
-- [ ] **M5**: eBay API integration (read-only, then write/buy/bid).
-- [ ] **M6**: Value comparison view.
+- [x] **M1**: Scaffold — Tauri shell, SQLite, settings screen.
+- [x] **M2**: diecastregistry.com collection sync.
+- [x] **M3**: Lazy-enrich registry entries from detail pages.
+- [ ] **M4**: eBay direct integration (Browse API, watchlist sync via OAuth).
+  See [`worker/`](./worker) for the eBay deletion-compliance endpoint.
+- [ ] **M5**: Facebook Marketplace browser extension (Firefox + Chrome).
+- [ ] **M6**: Value comparison view + bid/buy actions.
