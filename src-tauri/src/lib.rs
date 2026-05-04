@@ -57,6 +57,7 @@ pub fn run() {
             commands::add_ebay_listing,
             commands::refresh_ebay_listing,
             commands::refresh_all_ebay_listings,
+            commands::sync_ebay_watchlist,
             commands::list_listings,
         ])
         .run(tauri::generate_context!())

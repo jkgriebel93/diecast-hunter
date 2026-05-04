@@ -4,6 +4,7 @@ import {
   formatCents,
   type ListingRow,
   type RefreshSummary,
+  type WatchlistSyncSummary,
 } from "@/lib/tauri";
 
 export function Listings() {
@@ -19,6 +20,10 @@ export function Listings() {
   const [bulkRefreshing, setBulkRefreshing] = useState(false);
   const [bulkSummary, setBulkSummary] =
     useState<RefreshSummary | null>(null);
+
+  const [syncingWatchlist, setSyncingWatchlist] = useState(false);
+  const [watchlistSummary, setWatchlistSummary] =
+    useState<WatchlistSyncSummary | null>(null);
 
   async function load() {
     setError(null);
@@ -79,27 +84,53 @@ export function Listings() {
     }
   }
 
+  async function onSyncWatchlist() {
+    setSyncingWatchlist(true);
+    setWatchlistSummary(null);
+    setError(null);
+    try {
+      const summary = await api.syncEbayWatchlist();
+      setWatchlistSummary(summary);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSyncingWatchlist(false);
+    }
+  }
+
   return (
     <div className="p-6 space-y-4">
       <header className="flex items-end justify-between">
         <div>
           <h2 className="text-2xl font-semibold">Saved Listings</h2>
           <p className="text-sm text-slate-500">
-            Track eBay listings you're watching. Paste an item URL or id to
-            add. Facebook Marketplace integration ships later via a browser
-            extension.
+            Track eBay listings you're watching. Paste a URL or pull your eBay
+            watchlist directly. Facebook Marketplace integration ships later
+            via a browser extension.
           </p>
         </div>
-        {rows && rows.length > 0 && (
+        <div className="flex gap-2">
           <button
-            className="btn-secondary"
+            className="btn-primary"
             type="button"
-            onClick={onRefreshAll}
-            disabled={bulkRefreshing}
+            onClick={onSyncWatchlist}
+            disabled={syncingWatchlist}
+            title="Pull watchlist from your connected eBay account"
           >
-            {bulkRefreshing ? "Refreshing…" : "Refresh all"}
+            {syncingWatchlist ? "Syncing…" : "Sync watchlist"}
           </button>
-        )}
+          {rows && rows.length > 0 && (
+            <button
+              className="btn-secondary"
+              type="button"
+              onClick={onRefreshAll}
+              disabled={bulkRefreshing}
+            >
+              {bulkRefreshing ? "Refreshing…" : "Refresh all"}
+            </button>
+          )}
+        </div>
       </header>
 
       <section className="card space-y-3">
@@ -131,6 +162,16 @@ export function Listings() {
         <div className="text-xs text-emerald-400">
           Refreshed {bulkSummary.refreshed} of {bulkSummary.considered} (
           {bulkSummary.failed} failed).
+        </div>
+      )}
+      {watchlistSummary && (
+        <div className="text-xs text-emerald-400">
+          Watchlist: {watchlistSummary.created} new,{" "}
+          {watchlistSummary.updated} updated,{" "}
+          {watchlistSummary.failed} failed across{" "}
+          {watchlistSummary.pages_fetched} page
+          {watchlistSummary.pages_fetched === 1 ? "" : "s"} (
+          {watchlistSummary.items_seen} items total).
         </div>
       )}
       {error && (

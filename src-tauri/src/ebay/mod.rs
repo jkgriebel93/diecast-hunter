@@ -6,6 +6,7 @@ pub mod browse;
 pub mod client;
 pub mod oauth;
 pub mod parse;
+pub mod trading;
 
 pub use browse::{fetch_item_by_legacy_id, EbayItem};
 pub use client::{EbayClient, EbayEnvironment};
@@ -14,3 +15,4 @@ pub use oauth::{
     OauthStatus, DEFAULT_SCOPES,
 };
 pub use parse::extract_legacy_item_id;
+pub use trading::{fetch_watchlist_page, WatchlistPage};

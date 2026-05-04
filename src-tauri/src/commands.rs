@@ -311,6 +311,13 @@ pub async fn refresh_all_ebay_listings(
     sync::refresh_all_active(&state.db.pool).await
 }
 
+#[tauri::command]
+pub async fn sync_ebay_watchlist(
+    state: State<'_, AppState>,
+) -> AppResult<sync::WatchlistSyncSummary> {
+    sync::sync_watchlist(&state.db.pool).await
+}
+
 #[derive(Serialize)]
 pub struct ListingRow {
     pub listing_id: i64,

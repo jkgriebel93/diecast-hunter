@@ -110,8 +110,18 @@ export const api = {
     invoke<void>("refresh_ebay_listing", { listingId }),
   refreshAllEbayListings: () =>
     invoke<RefreshSummary>("refresh_all_ebay_listings"),
+  syncEbayWatchlist: () =>
+    invoke<WatchlistSyncSummary>("sync_ebay_watchlist"),
   listListings: () => invoke<ListingRow[]>("list_listings"),
 };
+
+export interface WatchlistSyncSummary {
+  items_seen: number;
+  created: number;
+  updated: number;
+  failed: number;
+  pages_fetched: number;
+}
 
 export interface EbayCredentialsState {
   environment: string;

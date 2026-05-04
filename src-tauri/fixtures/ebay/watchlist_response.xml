@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<GetMyeBayBuyingResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Timestamp>2026-05-04T15:30:00.000Z</Timestamp>
+  <Ack>Success</Ack>
+  <Version>1193</Version>
+  <Build>E1193_CORE_APIXO_1234567_R1</Build>
+  <WatchList>
+    <ItemArray>
+      <Item>
+        <ItemID>123456789012</ItemID>
+        <Title>2002 Jeff Gordon #24 Pepsi Daytona 1:24 Action ARC</Title>
+        <ListingType>FixedPriceItem</ListingType>
+        <SellingStatus>
+          <CurrentPrice currencyID="USD">49.95</CurrentPrice>
+        </SellingStatus>
+      </Item>
+      <Item>
+        <ItemID>234567890123</ItemID>
+        <Title>1995 Jeff Gordon DuPont Signature Series 1:24</Title>
+        <ListingType>Chinese</ListingType>
+        <SellingStatus>
+          <CurrentPrice currencyID="USD">35.00</CurrentPrice>
+        </SellingStatus>
+      </Item>
+      <Item>
+        <ItemID>345678901234</ItemID>
+        <Title>2013 Jeff Gordon Drive to End Hunger 1:24 Lionel</Title>
+        <ListingType>FixedPriceItem</ListingType>
+        <SellingStatus>
+          <CurrentPrice currencyID="USD">62.50</CurrentPrice>
+        </SellingStatus>
+      </Item>
+    </ItemArray>
+    <PaginationResult>
+      <TotalNumberOfPages>2</TotalNumberOfPages>
+      <TotalNumberOfEntries>250</TotalNumberOfEntries>
+    </PaginationResult>
+    <PageNumber>1</PageNumber>
+  </WatchList>
+</GetMyeBayBuyingResponse>
