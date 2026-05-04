@@ -16,12 +16,12 @@ use crate::settings;
 
 const TOKEN_REFRESH_BUFFER: i64 = 60;
 
-/// Default scope set we request. The basic api_scope is enough for Trading
-/// API IAF token usage; we add buy.item.feed for the newer REST endpoints
-/// that may eventually replace Trading.
+/// Default scope set we request. The basic api_scope is enough for IAF token
+/// use with the Trading API (GetMyeBayBuying for watchlist sync). Other
+/// scopes (buy.item.feed, buy.order.readonly, etc.) require separate eBay
+/// approvals and are added on demand if/when we use them.
 pub const DEFAULT_SCOPES: &[&str] = &[
     "https://api.ebay.com/oauth/api_scope",
-    "https://api.ebay.com/oauth/api_scope/buy.item.feed",
 ];
 
 #[derive(Debug, Serialize, Clone)]
