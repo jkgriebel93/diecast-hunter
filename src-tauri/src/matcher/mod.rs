@@ -220,14 +220,15 @@ fn normalize_scale(s: &str) -> String {
 
 /// Words too generic to count as evidence of a registry-entry match. Mostly
 /// vehicle bodies (every Chevy diecast says "chevy" / "monte" / "carlo") and
-/// catalog filler.
-static STOPWORDS: phf::Set<&'static str> = phf::phf_set! {
+/// catalog filler. Linear scan over ~40 strings is negligible at the rate
+/// the matcher runs — no need for a hashed set.
+const STOPWORDS: &[&str] = &[
     "nascar", "diecast", "stock", "car", "truck", "racing", "race", "the",
     "and", "with", "edition", "series", "new", "rare", "ltd", "limited",
     "chevy", "ford", "toyota", "dodge", "chevrolet", "monte", "carlo",
     "fusion", "camry", "ss", "thunderbird", "intrepid", "taurus", "impala",
     "lumina", "grand", "prix", "1of", "from", "for",
-};
+];
 
 #[cfg(test)]
 mod tests {

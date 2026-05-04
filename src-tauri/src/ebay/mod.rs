@@ -15,4 +15,4 @@ pub use oauth::{
     OauthStatus, DEFAULT_SCOPES,
 };
 pub use parse::extract_legacy_item_id;
-pub use trading::{fetch_watchlist_page, WatchlistPage};
+pub use trading::fetch_watchlist_page;

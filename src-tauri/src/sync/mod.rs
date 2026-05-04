@@ -13,4 +13,4 @@ pub use ebay_listing::{
     RefreshSummary,
 };
 pub use ebay_watchlist::{sync_watchlist, WatchlistSyncSummary};
-pub use listing_match::{match_all, match_listing, MatchSummary};
+pub use listing_match::{match_all, MatchSummary};
