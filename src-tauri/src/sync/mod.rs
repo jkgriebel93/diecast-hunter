@@ -5,6 +5,7 @@ pub mod dcr_registry;
 pub mod ebay_listing;
 pub mod ebay_watchlist;
 pub mod listing_match;
+pub mod registry_link;
 
 pub use dcr_collection::{enrich_only, sync_dcr_collection_and_enrich, SyncSummary};
 pub use dcr_registry::EnrichSummary;
@@ -14,3 +15,4 @@ pub use ebay_listing::{
 };
 pub use ebay_watchlist::{sync_watchlist, WatchlistSyncSummary};
 pub use listing_match::{match_all, MatchSummary};
+pub use registry_link::{link_listing_to_registry, LinkResult};

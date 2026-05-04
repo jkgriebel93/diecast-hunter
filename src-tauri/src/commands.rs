@@ -580,6 +580,107 @@ struct RegistryPickerRowRaw {
     wholesale_value_cents: Option<i64>,
 }
 
+// ----- Registry-search dialog (Option C: live search of diecastregistry.com) -----
+
+#[tauri::command]
+pub async fn refresh_registry_form_options(
+    state: State<'_, AppState>,
+) -> AppResult<crate::dcr::RefreshOptionsSummary> {
+    let username = settings::get(&state.db.pool, settings::KEY_DCR_USERNAME)
+        .await?
+        .ok_or_else(|| {
+            AppError::NotConfigured(
+                "diecastregistry.com username not set in Settings".into(),
+            )
+        })?;
+    let password = settings::secret_get(settings::ENTRY_DCR_PASSWORD)?
+        .ok_or_else(|| {
+            AppError::NotConfigured(
+                "diecastregistry.com password not set in Settings".into(),
+            )
+        })?;
+    let client = crate::dcr::DcrClient::new()?;
+    client.login(&username, &password).await?;
+    crate::dcr::refresh_form_options(&state.db.pool, &client).await
+}
+
+#[derive(Serialize)]
+pub struct FormOptionRow {
+    pub value: String,
+    pub display: String,
+    pub normalized: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct FormOptionRowRaw {
+    value: String,
+    display: String,
+    normalized: String,
+}
+
+#[tauri::command]
+pub async fn list_registry_form_options(
+    state: State<'_, AppState>,
+    field: String,
+) -> AppResult<Vec<FormOptionRow>> {
+    let rows: Vec<FormOptionRowRaw> = sqlx::query_as(
+        "SELECT value, display, normalized
+         FROM registry_form_options
+         WHERE field = ?
+         ORDER BY display COLLATE NOCASE",
+    )
+    .bind(&field)
+    .fetch_all(&state.db.pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| FormOptionRow {
+            value: r.value,
+            display: r.display,
+            normalized: r.normalized,
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub async fn search_dcr_production(
+    state: State<'_, AppState>,
+    filter: crate::dcr::ProductionSearchFilter,
+) -> AppResult<Vec<crate::dcr::ProductionSearchResult>> {
+    let username = settings::get(&state.db.pool, settings::KEY_DCR_USERNAME)
+        .await?
+        .ok_or_else(|| {
+            AppError::NotConfigured(
+                "diecastregistry.com username not set in Settings".into(),
+            )
+        })?;
+    let password = settings::secret_get(settings::ENTRY_DCR_PASSWORD)?
+        .ok_or_else(|| {
+            AppError::NotConfigured(
+                "diecastregistry.com password not set in Settings".into(),
+            )
+        })?;
+    let client = crate::dcr::DcrClient::new()?;
+    client.login(&username, &password).await?;
+    crate::dcr::search(&client, &filter).await
+}
+
+#[tauri::command]
+pub async fn link_listing_to_registry(
+    state: State<'_, AppState>,
+    listing_id: i64,
+    registry_guid: String,
+    detail_url: Option<String>,
+) -> AppResult<sync::LinkResult> {
+    sync::link_listing_to_registry(
+        &state.db.pool,
+        listing_id,
+        &registry_guid,
+        detail_url.as_deref(),
+    )
+    .await
+}
+
 /// Search registry entries for the manual-match picker. Empty `query` returns
 /// the most recently fetched entries; otherwise filters by case-insensitive
 /// substring match across driver / scheme / year / OEM / brand / scale.

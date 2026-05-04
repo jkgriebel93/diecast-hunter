@@ -66,6 +66,10 @@ pub fn run() {
             commands::clear_listing_match,
             commands::reject_listing_match,
             commands::search_registry_for_match,
+            commands::refresh_registry_form_options,
+            commands::list_registry_form_options,
+            commands::search_dcr_production,
+            commands::link_listing_to_registry,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

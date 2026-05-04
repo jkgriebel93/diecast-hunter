@@ -159,6 +159,58 @@ impl DcrClient {
         Err(last_err.unwrap_or_else(|| AppError::Network("retries exhausted".into())))
     }
 
+    /// POST a path with a form-encoded body. Same rate limiter and retry
+    /// behavior as get_html.
+    pub async fn post_form(
+        &self,
+        path: &str,
+        form: &[(String, String)],
+    ) -> AppResult<String> {
+        let url = if path.starts_with("http") {
+            path.to_string()
+        } else {
+            format!("{BASE}{path}")
+        };
+
+        let mut backoff = Duration::from_millis(500);
+        let mut last_err: Option<AppError> = None;
+        for attempt in 0..=MAX_RETRIES {
+            self.wait_for_slot().await;
+            let resp = self
+                .http
+                .post(&url)
+                .header(reqwest::header::REFERER, BASE)
+                .form(form)
+                .send()
+                .await;
+            match resp {
+                Ok(resp) => match resp.error_for_status() {
+                    Ok(ok) => return Ok(ok.text().await?),
+                    Err(e) => {
+                        let status = e.status();
+                        if attempt < MAX_RETRIES && is_retryable_status(status) {
+                            tokio::time::sleep(backoff).await;
+                            backoff *= 2;
+                            last_err = Some(e.into());
+                            continue;
+                        }
+                        return Err(e.into());
+                    }
+                },
+                Err(e) => {
+                    if attempt < MAX_RETRIES && is_retryable_network_err(&e) {
+                        tokio::time::sleep(backoff).await;
+                        backoff *= 2;
+                        last_err = Some(e.into());
+                        continue;
+                    }
+                    return Err(e.into());
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| AppError::Network("retries exhausted".into())))
+    }
+
     /// Block until enough time has passed since the last request, then mark
     /// the next earliest send time.
     async fn wait_for_slot(&self) {
