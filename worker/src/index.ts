@@ -41,7 +41,10 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     const path = url.pathname;
-    const method = req.method;
+    // Treat HEAD identically to GET. eBay's URL validator (and many other
+    // crawlers/probers) use HEAD to confirm a URL is live; without this they
+    // see 404 and the developer-portal form silently refuses to save.
+    const method = req.method === "HEAD" ? "GET" : req.method;
 
     if (path === "/marketplace-deletion" && method === "GET") {
       return handleVerification(url, env);
