@@ -61,6 +61,11 @@ pub fn run() {
             commands::sync_ebay_watchlist,
             commands::list_listings,
             commands::rematch_all_listings,
+            commands::confirm_listing_match,
+            commands::set_listing_match,
+            commands::clear_listing_match,
+            commands::reject_listing_match,
+            commands::search_registry_for_match,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

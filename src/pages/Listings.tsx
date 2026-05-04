@@ -1,16 +1,22 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   api,
   formatCents,
   type ListingRow,
   type MatchSummary,
   type RefreshSummary,
+  type RegistryPickerRow,
   type WatchlistSyncSummary,
 } from "@/lib/tauri";
+
+type ViewMode = "flat" | "byDriver";
 
 export function Listings() {
   const [rows, setRows] = useState<ListingRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [viewMode, setViewMode] = useState<ViewMode>("flat");
+  const [pickerListing, setPickerListing] = useState<ListingRow | null>(null);
 
   const [input, setInput] = useState("");
   const [adding, setAdding] = useState(false);
@@ -118,6 +124,50 @@ export function Listings() {
     }
   }
 
+  async function onConfirmMatch(listingId: number) {
+    setError(null);
+    try {
+      await api.confirmListingMatch(listingId);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function onClearMatch(listingId: number) {
+    setError(null);
+    try {
+      await api.clearListingMatch(listingId);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function onRejectMatch(listingId: number) {
+    setError(null);
+    try {
+      await api.rejectListingMatch(listingId);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function onPickRegistryEntry(
+    listingId: number,
+    registryEntryId: number,
+  ) {
+    setError(null);
+    try {
+      await api.setListingMatch(listingId, registryEntryId);
+      setPickerListing(null);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   return (
     <div className="p-6 space-y-4">
       <header className="flex items-end justify-between">
@@ -217,13 +267,41 @@ export function Listings() {
         </div>
       )}
 
+      {rows && rows.length > 0 && (
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-slate-500">View:</span>
+          <button
+            type="button"
+            className={`px-2 py-1 rounded border ${
+              viewMode === "flat"
+                ? "border-accent text-accent bg-accent/10"
+                : "border-border text-slate-400 hover:text-slate-100"
+            }`}
+            onClick={() => setViewMode("flat")}
+          >
+            Flat
+          </button>
+          <button
+            type="button"
+            className={`px-2 py-1 rounded border ${
+              viewMode === "byDriver"
+                ? "border-accent text-accent bg-accent/10"
+                : "border-border text-slate-400 hover:text-slate-100"
+            }`}
+            onClick={() => setViewMode("byDriver")}
+          >
+            By driver
+          </button>
+        </div>
+      )}
+
       {rows === null ? (
         <div className="card text-sm text-slate-400">Loading…</div>
       ) : rows.length === 0 ? (
         <div className="card text-sm text-slate-400">
           No listings tracked yet. Add an eBay URL above.
         </div>
-      ) : (
+      ) : viewMode === "flat" ? (
         <ul className="space-y-2">
           {rows.map((r) => (
             <ListingCard
@@ -231,9 +309,33 @@ export function Listings() {
               row={r}
               refreshing={refreshingId === r.listing_id}
               onRefresh={() => onRefreshOne(r.listing_id)}
+              onConfirmMatch={() => onConfirmMatch(r.listing_id)}
+              onClearMatch={() => onClearMatch(r.listing_id)}
+              onRejectMatch={() => onRejectMatch(r.listing_id)}
+              onChangeMatch={() => setPickerListing(r)}
             />
           ))}
         </ul>
+      ) : (
+        <GroupedByDriver
+          rows={rows}
+          refreshingId={refreshingId}
+          onRefresh={onRefreshOne}
+          onConfirmMatch={onConfirmMatch}
+          onClearMatch={onClearMatch}
+          onRejectMatch={onRejectMatch}
+          onChangeMatch={setPickerListing}
+        />
+      )}
+
+      {pickerListing && (
+        <MatchPicker
+          listing={pickerListing}
+          onClose={() => setPickerListing(null)}
+          onPick={(entryId) =>
+            onPickRegistryEntry(pickerListing.listing_id, entryId)
+          }
+        />
       )}
     </div>
   );
@@ -243,10 +345,18 @@ function ListingCard({
   row,
   refreshing,
   onRefresh,
+  onConfirmMatch,
+  onClearMatch,
+  onRejectMatch,
+  onChangeMatch,
 }: {
   row: ListingRow;
   refreshing: boolean;
   onRefresh: () => void;
+  onConfirmMatch: () => void;
+  onClearMatch: () => void;
+  onRejectMatch: () => void;
+  onChangeMatch: () => void;
 }) {
   const total =
     row.price_cents !== null
@@ -282,7 +392,9 @@ function ListingCard({
         {matched ? (
           <div className="mt-2 rounded-md border border-border bg-bg-elevated px-2 py-1.5 text-xs">
             <div className="flex items-center gap-2">
-              <span className="text-emerald-400">✓ matched</span>
+              <span className="text-emerald-400">
+                {row.match_user_confirmed ? "✓ confirmed" : "✓ matched"}
+              </span>
               <span className="text-slate-300 truncate">
                 {row.matched_driver_name}
                 {row.matched_scheme_text
@@ -299,12 +411,17 @@ function ListingCard({
               ]
                 .filter(Boolean)
                 .join(" · ")}
-              {row.match_confidence !== null && (
-                <span className="ml-2 text-slate-600">
-                  ({row.match_confidence.toFixed(0)}% confidence)
-                </span>
-              )}
+              {row.match_confidence !== null &&
+                !row.match_user_confirmed && (
+                  <span className="ml-2 text-slate-600">
+                    ({row.match_confidence.toFixed(0)}% confidence)
+                  </span>
+                )}
             </div>
+          </div>
+        ) : row.match_user_confirmed ? (
+          <div className="mt-2 text-xs text-slate-500">
+            Marked as no-match.
           </div>
         ) : (
           <div className="mt-2 text-xs text-amber-400/80">
@@ -319,7 +436,7 @@ function ListingCard({
               ? `ends ${new Date(row.end_time * 1000).toLocaleString()}`
               : ""}
         </div>
-        <div className="flex items-center gap-3 mt-1">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
           <a
             className="text-xs text-accent hover:underline"
             href={row.url}
@@ -336,6 +453,52 @@ function ListingCard({
           >
             {refreshing ? "Refreshing…" : "Refresh"}
           </button>
+          {matched && !row.match_user_confirmed && (
+            <button
+              className="text-xs text-emerald-400 hover:text-emerald-300"
+              type="button"
+              onClick={onConfirmMatch}
+              title="Lock this match so re-match-all leaves it alone"
+            >
+              Confirm
+            </button>
+          )}
+          <button
+            className="text-xs text-slate-400 hover:text-slate-100"
+            type="button"
+            onClick={onChangeMatch}
+          >
+            {matched ? "Change match…" : "Match…"}
+          </button>
+          {matched && (
+            <button
+              className="text-xs text-slate-500 hover:text-slate-300"
+              type="button"
+              onClick={onClearMatch}
+              title="Remove the match and let auto-match try again"
+            >
+              Clear
+            </button>
+          )}
+          {!matched && !row.match_user_confirmed && (
+            <button
+              className="text-xs text-slate-500 hover:text-slate-300"
+              type="button"
+              onClick={onRejectMatch}
+              title="Mark as having no match in your registry"
+            >
+              Mark no-match
+            </button>
+          )}
+          {row.match_user_confirmed && !matched && (
+            <button
+              className="text-xs text-slate-500 hover:text-slate-300"
+              type="button"
+              onClick={onClearMatch}
+            >
+              Allow auto-match
+            </button>
+          )}
         </div>
       </div>
       <div className="text-right text-xs tabular-nums shrink-0 space-y-0.5">
@@ -390,6 +553,204 @@ function DealBadge({ score }: { score: number }) {
       <span className="text-[10px] uppercase tracking-wide opacity-80">
         {label}
       </span>
+    </div>
+  );
+}
+
+function GroupedByDriver({
+  rows,
+  refreshingId,
+  onRefresh,
+  onConfirmMatch,
+  onClearMatch,
+  onRejectMatch,
+  onChangeMatch,
+}: {
+  rows: ListingRow[];
+  refreshingId: number | null;
+  onRefresh: (id: number) => void;
+  onConfirmMatch: (id: number) => void;
+  onClearMatch: (id: number) => void;
+  onRejectMatch: (id: number) => void;
+  onChangeMatch: (row: ListingRow) => void;
+}) {
+  // Bucket by driver name; matched first, then "Unmatched" / "No-match" at
+  // the bottom.
+  const groups = useMemo(() => {
+    const map = new Map<string, ListingRow[]>();
+    for (const r of rows) {
+      const key = r.matched_driver_name ?? "Unmatched";
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(r);
+    }
+    const entries = Array.from(map.entries()).sort(([a], [b]) => {
+      if (a === "Unmatched") return 1;
+      if (b === "Unmatched") return -1;
+      return a.localeCompare(b);
+    });
+    return entries;
+  }, [rows]);
+
+  return (
+    <div className="space-y-3">
+      {groups.map(([driver, items]) => {
+        const totalCents = items.reduce(
+          (s, r) => s + (r.price_cents ?? 0) + (r.shipping_cents ?? 0),
+          0,
+        );
+        return (
+          <details key={driver} className="card !p-0 overflow-hidden" open>
+            <summary className="cursor-pointer list-none px-4 py-3 flex items-center justify-between hover:bg-bg-elevated">
+              <div className="flex items-center gap-3">
+                <span className="font-medium">{driver}</span>
+                <span className="text-xs text-slate-500">
+                  {items.length} listing{items.length === 1 ? "" : "s"}
+                </span>
+              </div>
+              <div className="text-xs text-slate-500 tabular-nums">
+                total {formatCents(totalCents)}
+              </div>
+            </summary>
+            <ul className="divide-y divide-border">
+              {items.map((r) => (
+                <li key={r.listing_id} className="px-4 py-2">
+                  <ListingCard
+                    row={r}
+                    refreshing={refreshingId === r.listing_id}
+                    onRefresh={() => onRefresh(r.listing_id)}
+                    onConfirmMatch={() => onConfirmMatch(r.listing_id)}
+                    onClearMatch={() => onClearMatch(r.listing_id)}
+                    onRejectMatch={() => onRejectMatch(r.listing_id)}
+                    onChangeMatch={() => onChangeMatch(r)}
+                  />
+                </li>
+              ))}
+            </ul>
+          </details>
+        );
+      })}
+    </div>
+  );
+}
+
+function MatchPicker({
+  listing,
+  onClose,
+  onPick,
+}: {
+  listing: ListingRow;
+  onClose: () => void;
+  onPick: (registryEntryId: number) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<RegistryPickerRow[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [pickerError, setPickerError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    const handle = setTimeout(async () => {
+      try {
+        const r = await api.searchRegistryForMatch(query, 100);
+        if (!cancelled) setResults(r);
+      } catch (e) {
+        if (!cancelled) setPickerError(String(e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }, 150);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [query]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center pt-16 px-4 bg-black/60"
+      onClick={onClose}
+    >
+      <div
+        className="card w-full max-w-2xl max-h-[80vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between mb-3">
+          <div className="min-w-0">
+            <h3 className="text-base font-medium">Match listing</h3>
+            <p
+              className="text-xs text-slate-500 mt-0.5 truncate"
+              title={listing.title}
+            >
+              {listing.title}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="text-slate-400 hover:text-slate-100 text-xl leading-none px-2"
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </div>
+
+        <input
+          autoFocus
+          type="text"
+          className="input mb-3"
+          placeholder="Search by driver, year, scheme, OEM, brand…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+
+        <div className="flex-1 overflow-y-auto -mx-1 px-1 space-y-1 min-h-[10rem]">
+          {pickerError && (
+            <div className="text-xs text-red-400">{pickerError}</div>
+          )}
+          {loading && results === null ? (
+            <div className="text-sm text-slate-500">Loading…</div>
+          ) : results && results.length === 0 ? (
+            <div className="text-sm text-slate-500">No matches.</div>
+          ) : (
+            results?.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                className="w-full text-left rounded-md border border-border bg-bg-elevated hover:border-accent hover:bg-accent/5 px-3 py-2"
+                onClick={() => onPick(r.id)}
+              >
+                <div className="text-sm font-medium">
+                  {r.driver_name ?? "(no driver)"}
+                  {r.year && (
+                    <span className="text-slate-500 ml-2">{r.year}</span>
+                  )}
+                </div>
+                <div className="text-xs text-slate-500 truncate">
+                  {r.scheme_text ?? "(no scheme)"}
+                </div>
+                <div className="text-xs text-slate-600">
+                  {[r.oem, r.brand, r.scale].filter(Boolean).join(" · ")}
+                  {r.retail_value_cents !== null && (
+                    <span className="ml-2">
+                      retail {formatCents(r.retail_value_cents)}
+                    </span>
+                  )}
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-2 mt-3 pt-3 border-t border-border">
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={onClose}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

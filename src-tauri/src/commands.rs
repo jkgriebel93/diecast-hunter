@@ -470,6 +470,197 @@ pub async fn rematch_all_listings(
     sync::match_all(&state.db.pool).await
 }
 
+/// Lock the current auto-match as user-confirmed so re-match-all won't
+/// overwrite it. No-op if there's no current match row.
+#[tauri::command]
+pub async fn confirm_listing_match(
+    state: State<'_, AppState>,
+    listing_id: i64,
+) -> AppResult<()> {
+    sqlx::query(
+        "UPDATE listing_matches SET user_confirmed = 1, matched_at = ?
+         WHERE listing_id = ?",
+    )
+    .bind(chrono::Utc::now().timestamp())
+    .bind(listing_id)
+    .execute(&state.db.pool)
+    .await?;
+    Ok(())
+}
+
+/// Set a manual match. user_confirmed=1 protects it from auto-rematch.
+#[tauri::command]
+pub async fn set_listing_match(
+    state: State<'_, AppState>,
+    listing_id: i64,
+    registry_entry_id: i64,
+) -> AppResult<()> {
+    let now = chrono::Utc::now().timestamp();
+    sqlx::query(
+        "INSERT INTO listing_matches
+            (listing_id, registry_entry_id, confidence, user_confirmed, matched_at)
+         VALUES (?, ?, 100.0, 1, ?)
+         ON CONFLICT(listing_id) DO UPDATE SET
+            registry_entry_id = excluded.registry_entry_id,
+            confidence = excluded.confidence,
+            user_confirmed = 1,
+            matched_at = excluded.matched_at",
+    )
+    .bind(listing_id)
+    .bind(registry_entry_id)
+    .bind(now)
+    .execute(&state.db.pool)
+    .await?;
+    Ok(())
+}
+
+/// Clear a match and allow auto-rematch to consider it again next time.
+#[tauri::command]
+pub async fn clear_listing_match(
+    state: State<'_, AppState>,
+    listing_id: i64,
+) -> AppResult<()> {
+    sqlx::query("DELETE FROM listing_matches WHERE listing_id = ?")
+        .bind(listing_id)
+        .execute(&state.db.pool)
+        .await?;
+    Ok(())
+}
+
+/// Lock the listing as explicitly unmatched. Auto-rematch won't touch it
+/// until the user clears or sets a match.
+#[tauri::command]
+pub async fn reject_listing_match(
+    state: State<'_, AppState>,
+    listing_id: i64,
+) -> AppResult<()> {
+    let now = chrono::Utc::now().timestamp();
+    sqlx::query(
+        "INSERT INTO listing_matches
+            (listing_id, registry_entry_id, confidence, user_confirmed, matched_at)
+         VALUES (?, NULL, 0.0, 1, ?)
+         ON CONFLICT(listing_id) DO UPDATE SET
+            registry_entry_id = NULL,
+            confidence = 0.0,
+            user_confirmed = 1,
+            matched_at = excluded.matched_at",
+    )
+    .bind(listing_id)
+    .bind(now)
+    .execute(&state.db.pool)
+    .await?;
+    Ok(())
+}
+
+#[derive(Serialize)]
+pub struct RegistryPickerRow {
+    pub id: i64,
+    pub driver_name: Option<String>,
+    pub year: Option<i32>,
+    pub year_raced: Option<i32>,
+    pub scheme_text: Option<String>,
+    pub oem: Option<String>,
+    pub brand: Option<String>,
+    pub scale: Option<String>,
+    pub retail_value_cents: Option<i64>,
+    pub wholesale_value_cents: Option<i64>,
+}
+
+#[derive(sqlx::FromRow)]
+struct RegistryPickerRowRaw {
+    id: i64,
+    driver_name: Option<String>,
+    year: Option<i32>,
+    year_raced: Option<i32>,
+    scheme_text: Option<String>,
+    oem: Option<String>,
+    brand: Option<String>,
+    scale: Option<String>,
+    retail_value_cents: Option<i64>,
+    wholesale_value_cents: Option<i64>,
+}
+
+/// Search registry entries for the manual-match picker. Empty `query` returns
+/// the most recently fetched entries; otherwise filters by case-insensitive
+/// substring match across driver / scheme / year / OEM / brand / scale.
+#[tauri::command]
+pub async fn search_registry_for_match(
+    state: State<'_, AppState>,
+    query: String,
+    limit: i64,
+) -> AppResult<Vec<RegistryPickerRow>> {
+    let limit = limit.clamp(1, 500);
+    let trimmed = query.trim();
+    let rows: Vec<RegistryPickerRowRaw> = if trimmed.is_empty() {
+        sqlx::query_as(
+            "SELECT re.id,
+                    d.name AS driver_name,
+                    re.year,
+                    re.year_raced,
+                    re.scheme_text,
+                    re.oem,
+                    re.brand,
+                    re.scale,
+                    re.retail_value_cents,
+                    re.wholesale_value_cents
+             FROM registry_entries re
+             LEFT JOIN drivers d ON d.id = re.driver_id
+             ORDER BY d.name, re.year DESC, re.id
+             LIMIT ?",
+        )
+        .bind(limit)
+        .fetch_all(&state.db.pool)
+        .await?
+    } else {
+        let needle = format!("%{}%", trimmed.to_lowercase());
+        sqlx::query_as(
+            "SELECT re.id,
+                    d.name AS driver_name,
+                    re.year,
+                    re.year_raced,
+                    re.scheme_text,
+                    re.oem,
+                    re.brand,
+                    re.scale,
+                    re.retail_value_cents,
+                    re.wholesale_value_cents
+             FROM registry_entries re
+             LEFT JOIN drivers d ON d.id = re.driver_id
+             WHERE LOWER(
+                COALESCE(d.name, '') || ' ' ||
+                COALESCE(re.scheme_text, '') || ' ' ||
+                COALESCE(CAST(re.year AS TEXT), '') || ' ' ||
+                COALESCE(re.oem, '') || ' ' ||
+                COALESCE(re.brand, '') || ' ' ||
+                COALESCE(re.scale, '') || ' ' ||
+                COALESCE(re.car_number, '')
+             ) LIKE ?
+             ORDER BY d.name, re.year DESC, re.id
+             LIMIT ?",
+        )
+        .bind(needle)
+        .bind(limit)
+        .fetch_all(&state.db.pool)
+        .await?
+    };
+
+    Ok(rows
+        .into_iter()
+        .map(|r| RegistryPickerRow {
+            id: r.id,
+            driver_name: r.driver_name,
+            year: r.year,
+            year_raced: r.year_raced,
+            scheme_text: r.scheme_text,
+            oem: r.oem,
+            brand: r.brand,
+            scale: r.scale,
+            retail_value_cents: r.retail_value_cents,
+            wholesale_value_cents: r.wholesale_value_cents,
+        })
+        .collect())
+}
+
 #[derive(Serialize)]
 pub struct DriverGroup {
     pub driver_id: i64,
