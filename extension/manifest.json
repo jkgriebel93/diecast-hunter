@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Diecast Hunter — Facebook Marketplace",
+  "version": "0.1.0",
+  "description": "Save Facebook Marketplace listings to your Diecast Hunter desktop app.",
+  "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": [
+    "https://www.facebook.com/marketplace/*",
+    "https://m.facebook.com/marketplace/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Save to Diecast Hunter",
+    "default_icon": {
+      "16": "icons/16.png",
+      "48": "icons/48.png",
+      "128": "icons/128.png"
+    }
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "icons": {
+    "16": "icons/16.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "diecast-hunter@thistlegrow.com",
+      "strict_min_version": "121.0"
+    }
+  }
+}

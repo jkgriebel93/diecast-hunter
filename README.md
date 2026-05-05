@@ -76,7 +76,7 @@ This is milestone 1 of 6. See conversation history for the full plan.
 - [x] **M1**: Scaffold — Tauri shell, SQLite, settings screen.
 - [x] **M2**: diecastregistry.com collection sync.
 - [x] **M3**: Lazy-enrich registry entries from detail pages.
-- [ ] **M4**: eBay direct integration (Browse API, watchlist sync via OAuth).
-  See [`worker/`](./worker) for the eBay deletion-compliance endpoint.
-- [ ] **M5**: Facebook Marketplace browser extension (Firefox + Chrome).
-- [ ] **M6**: Value comparison view + bid/buy actions.
+- [x] **M4**: eBay direct integration (Browse API, watchlist sync, matcher, deal score, manual override, registry search).
+- [x] **M5**: Facebook Marketplace browser extension (Firefox + Chrome).
+  See [`extension/`](./extension).
+- [ ] **M6**: Bid / Buy It Now actions (gated; requires eBay Buy API approval).
