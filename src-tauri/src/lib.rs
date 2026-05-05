@@ -82,6 +82,7 @@ pub fn run() {
             commands::list_registry_form_options,
             commands::search_dcr_production,
             commands::link_listing_to_registry,
+            commands::prewarm_registry_by_driver,
             commands::get_listing_receiver_status,
             commands::get_listing_receiver_secret,
             commands::regenerate_listing_receiver_secret,

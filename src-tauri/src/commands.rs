@@ -718,6 +718,14 @@ pub async fn link_listing_to_registry(
     .await
 }
 
+#[tauri::command]
+pub async fn prewarm_registry_by_driver(
+    state: State<'_, AppState>,
+    driver_guid: String,
+) -> AppResult<sync::PrewarmSummary> {
+    sync::prewarm_by_driver(&state.db.pool, &driver_guid).await
+}
+
 /// Search registry entries for the manual-match picker. Empty `query` returns
 /// the most recently fetched entries; otherwise filters by case-insensitive
 /// substring match across driver / scheme / year / OEM / brand / scale.

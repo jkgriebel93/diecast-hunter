@@ -149,7 +149,16 @@ export const api = {
     invoke<string>("get_listing_receiver_secret"),
   regenerateListingReceiverSecret: () =>
     invoke<string>("regenerate_listing_receiver_secret"),
+  prewarmRegistryByDriver: (driverGuid: string) =>
+    invoke<PrewarmSummary>("prewarm_registry_by_driver", { driverGuid }),
 };
+
+export interface PrewarmSummary {
+  driver_name: string;
+  results_seen: number;
+  registry_entries_upserted: number;
+  pages_fetched: number;
+}
 
 export interface ListingReceiverStatus {
   url: string;

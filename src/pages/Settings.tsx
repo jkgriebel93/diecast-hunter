@@ -6,7 +6,9 @@ import {
   type EbayCredentialsState,
   type EbayOauthStatus,
   type EnrichSummary,
+  type FormOptionRow,
   type ListingReceiverStatus,
+  type PrewarmSummary,
   type SyncSummary,
 } from "@/lib/tauri";
 
@@ -31,6 +33,14 @@ export function Settings() {
   const [optionsRefreshing, setOptionsRefreshing] = useState(false);
   const [optionsMessage, setOptionsMessage] = useState<string | null>(null);
   const [optionsError, setOptionsError] = useState<string | null>(null);
+
+  const [drivers, setDrivers] = useState<FormOptionRow[]>([]);
+  const [prewarmInput, setPrewarmInput] = useState("");
+  const [prewarmDriverGuid, setPrewarmDriverGuid] = useState("");
+  const [prewarming, setPrewarming] = useState(false);
+  const [prewarmSummary, setPrewarmSummary] =
+    useState<PrewarmSummary | null>(null);
+  const [prewarmError, setPrewarmError] = useState<string | null>(null);
 
   const [receiverStatus, setReceiverStatus] =
     useState<ListingReceiverStatus | null>(null);
@@ -78,8 +88,31 @@ export function Settings() {
       setOauthStatus(status);
       const rs = await api.getListingReceiverStatus();
       setReceiverStatus(rs);
+      // Drivers list is for the pre-warm picker; harmless if empty (the
+      // form-options cache hasn't been populated yet).
+      try {
+        const ds = await api.listRegistryFormOptions("driver");
+        setDrivers(ds);
+      } catch {
+        // not fatal — picker shows empty
+      }
     } catch (e) {
       setError(String(e));
+    }
+  }
+
+  async function onPrewarm() {
+    if (!prewarmDriverGuid) return;
+    setPrewarming(true);
+    setPrewarmError(null);
+    setPrewarmSummary(null);
+    try {
+      const s = await api.prewarmRegistryByDriver(prewarmDriverGuid);
+      setPrewarmSummary(s);
+    } catch (e) {
+      setPrewarmError(String(e));
+    } finally {
+      setPrewarming(false);
     }
   }
 
@@ -505,6 +538,65 @@ export function Settings() {
           )}
           {optionsError && (
             <div className="text-xs text-red-400">{optionsError}</div>
+          )}
+        </div>
+
+        <div className="border-t border-border pt-4 space-y-3">
+          <div>
+            <div className="text-sm font-medium">Pre-warm registry by driver</div>
+            <div className="text-xs text-slate-500 mt-1">
+              Pull every registry entry for one driver and store them locally
+              so the listing matcher has candidates to score against. Takes a
+              minute or two for a prolific driver — pages are paced to be
+              polite. Repeat for every driver you watch.
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              list="prewarm-drivers-list"
+              type="text"
+              className="input flex-1"
+              value={prewarmInput}
+              onChange={(e) => {
+                setPrewarmInput(e.target.value);
+                const m = drivers.find((d) => d.display === e.target.value);
+                setPrewarmDriverGuid(m?.value ?? "");
+              }}
+              placeholder={
+                drivers.length === 0
+                  ? "Refresh registry options first…"
+                  : "Type a driver name…"
+              }
+              autoComplete="off"
+              disabled={drivers.length === 0}
+            />
+            <datalist id="prewarm-drivers-list">
+              {drivers.map((d) => (
+                <option key={d.value} value={d.display} />
+              ))}
+            </datalist>
+            <button
+              className="btn-primary shrink-0"
+              type="button"
+              onClick={onPrewarm}
+              disabled={prewarming || !prewarmDriverGuid}
+            >
+              {prewarming ? "Fetching…" : "Pre-warm"}
+            </button>
+          </div>
+
+          {prewarmSummary && (
+            <div className="text-xs text-emerald-400">
+              {prewarmSummary.driver_name}: pulled{" "}
+              {prewarmSummary.results_seen} entries across{" "}
+              {prewarmSummary.pages_fetched} page
+              {prewarmSummary.pages_fetched === 1 ? "" : "s"} (
+              {prewarmSummary.registry_entries_upserted} upserted).
+            </div>
+          )}
+          {prewarmError && (
+            <div className="text-xs text-red-400">{prewarmError}</div>
           )}
         </div>
       </section>

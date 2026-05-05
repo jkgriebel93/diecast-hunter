@@ -83,34 +83,65 @@ pub async fn search(
     client: &DcrClient,
     filter: &ProductionSearchFilter,
 ) -> AppResult<Vec<ProductionSearchResult>> {
+    let (results, _pages) = search_all_pages_capped(client, filter, 1).await?;
+    Ok(results)
+}
+
+/// Walk every page of results for the given filter (capped at 200 pages
+/// for safety). Returns (results, pages_fetched).
+pub async fn search_all_pages(
+    client: &DcrClient,
+    filter: &ProductionSearchFilter,
+) -> AppResult<(Vec<ProductionSearchResult>, u32)> {
+    search_all_pages_capped(client, filter, 200).await
+}
+
+async fn search_all_pages_capped(
+    client: &DcrClient,
+    filter: &ProductionSearchFilter,
+    max_pages: u32,
+) -> AppResult<(Vec<ProductionSearchResult>, u32)> {
     // 1. GET /Production for the form anti-forgery token.
     let initial = client.get_html("/Production").await?;
     let token = extract_form_token(&initial).ok_or_else(|| {
         AppError::Parse("could not find anti-forgery token on /Production".into())
     })?;
 
-    // 2. POST /Production/UpdateFilter with the form-encoded filter.
+    // 2. POST /Production/UpdateFilter — sets server-side filter state.
     let form = build_form(&token, filter);
     let body = client
         .post_form("/Production/UpdateFilter", &form)
         .await?;
 
-    // The server replies with a small JSON redirect envelope. Tolerate it
-    // either being JSON or HTML (older flow): if it parses as JSON with
-    // redirect=true, we follow; otherwise we assume the response itself is
-    // already the rendered results page.
-    let results_html = match serde_json::from_str::<UpdateFilterResponse>(&body) {
+    // 3. Follow the JSON redirect envelope, or refetch /Production directly.
+    let first_page_html = match serde_json::from_str::<UpdateFilterResponse>(&body) {
         Ok(envelope) if envelope.redirect && !envelope.url.is_empty() => {
             client.get_html(&envelope.url).await?
         }
-        _ => {
-            // Fallback: refetch /Production. Filter state lives in the session
-            // cookie that the POST set, so this returns filtered results.
-            client.get_html("/Production").await?
-        }
+        _ => client.get_html("/Production").await?,
     };
 
-    Ok(parse_results(&results_html))
+    // scraper::Html isn't Send; scope the doc to a block so it drops before
+    // the .await calls below.
+    let (current, total) = {
+        let first_doc = scraper::Html::parse_document(&first_page_html);
+        crate::dcr::parse::parse_pagination(&first_doc)
+    };
+
+    let mut all_results = parse_results(&first_page_html);
+    let mut pages_fetched = 1u32;
+
+    let stop_at = total.min(max_pages.max(1));
+    for page in (current + 1)..=stop_at {
+        let html = client
+            .get_html(&format!("/Production/{page}"))
+            .await?;
+        let mut more = parse_results(&html);
+        all_results.append(&mut more);
+        pages_fetched += 1;
+    }
+
+    Ok((all_results, pages_fetched))
 }
 
 fn build_form(token: &str, f: &ProductionSearchFilter) -> Vec<(String, String)> {

@@ -11,4 +11,6 @@ pub use client::DcrClient;
 pub use collection::{CollectionItem, CollectionPage};
 pub use detail::{parse_detail_page, RegistryDetail};
 pub use form_options::{refresh_form_options, RefreshOptionsSummary};
-pub use production_search::{search, ProductionSearchFilter, ProductionSearchResult};
+pub use production_search::{
+    search, search_all_pages, ProductionSearchFilter, ProductionSearchResult,
+};

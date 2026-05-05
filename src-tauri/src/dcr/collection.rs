@@ -47,7 +47,7 @@ pub fn parse_collection_page(html: &str) -> AppResult<CollectionPage> {
         }
     }
 
-    let (current_page, total_pages) = parse_pagination(&doc);
+    let (current_page, total_pages) = crate::dcr::parse::parse_pagination(&doc);
 
     Ok(CollectionPage {
         items,
@@ -200,35 +200,6 @@ fn text(el: ElementRef) -> String {
 /// year/OEM/brand/scale line where a double space marks an empty brand).
 fn raw_text(el: ElementRef) -> String {
     el.text().collect::<String>().trim().to_string()
-}
-
-fn parse_pagination(doc: &Html) -> (u32, u32) {
-    // Pagination: <ul class="pagination"><li class="active"><a>1</a></li> ... </ul>
-    // The largest numeric link tells us the total page count.
-    let pagination_sel = Selector::parse("ul.pagination").unwrap();
-    let li_sel = Selector::parse("li").unwrap();
-    let a_sel = Selector::parse("a").unwrap();
-
-    let mut current = 1u32;
-    let mut max = 1u32;
-
-    if let Some(ul) = doc.select(&pagination_sel).next() {
-        for li in ul.select(&li_sel) {
-            let is_active = li.value().classes().any(|c| c == "active");
-            if let Some(a) = li.select(&a_sel).next() {
-                if let Ok(n) = text(a).parse::<u32>() {
-                    if is_active {
-                        current = n;
-                    }
-                    if n > max {
-                        max = n;
-                    }
-                }
-            }
-        }
-    }
-
-    (current, max.max(current))
 }
 
 #[cfg(test)]
