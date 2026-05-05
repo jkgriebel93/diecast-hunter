@@ -1087,7 +1087,21 @@ function RegistrySearchDialog({
                 onClick={() => onLink(r)}
                 disabled={linkingGuid !== null}
               >
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  {r.image_url ? (
+                    <img
+                      src={
+                        r.image_url.startsWith("http")
+                          ? r.image_url
+                          : "https://www.diecastregistry.com" + r.image_url
+                      }
+                      alt=""
+                      loading="lazy"
+                      className="w-16 h-16 object-cover rounded border border-border shrink-0"
+                    />
+                  ) : (
+                    <div className="w-16 h-16 rounded border border-border bg-bg shrink-0" />
+                  )}
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium truncate">
                       {r.driver_name}
