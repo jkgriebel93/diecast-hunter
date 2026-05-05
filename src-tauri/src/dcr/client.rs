@@ -160,7 +160,11 @@ impl DcrClient {
     }
 
     /// POST a path with a form-encoded body. Same rate limiter and retry
-    /// behavior as get_html.
+    /// behavior as get_html. Adds XHR-style headers (X-Requested-With +
+    /// Accept: application/json) — diecastregistry.com's MVC controllers
+    /// switch between rendering full pages vs returning JSON envelopes
+    /// based on these headers, and the filter-update endpoints we use 404
+    /// without them.
     pub async fn post_form(
         &self,
         path: &str,
@@ -172,6 +176,15 @@ impl DcrClient {
             format!("{BASE}{path}")
         };
 
+        // Match the Referer the page submitting the form would have set.
+        // For our two callers (login and production-search) this is the
+        // same-host page they came from; falling back to BASE is harmless.
+        let referer = if path.starts_with('/') {
+            format!("{BASE}{}", path.trim_end_matches("/UpdateFilter"))
+        } else {
+            BASE.to_string()
+        };
+
         let mut backoff = Duration::from_millis(500);
         let mut last_err: Option<AppError> = None;
         for attempt in 0..=MAX_RETRIES {
@@ -179,7 +192,12 @@ impl DcrClient {
             let resp = self
                 .http
                 .post(&url)
-                .header(reqwest::header::REFERER, BASE)
+                .header(reqwest::header::REFERER, &referer)
+                .header("X-Requested-With", "XMLHttpRequest")
+                .header(
+                    reqwest::header::ACCEPT,
+                    "application/json, text/javascript, */*; q=0.01",
+                )
                 .form(form)
                 .send()
                 .await;
