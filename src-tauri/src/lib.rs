@@ -3,6 +3,7 @@ mod db;
 mod dcr;
 mod ebay;
 mod error;
+mod listing_receiver;
 mod matcher;
 mod settings;
 mod sync;
@@ -26,12 +27,23 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             let handle = app.handle().clone();
-            tauri::async_runtime::block_on(async move {
+            let pool = tauri::async_runtime::block_on(async move {
                 let data_dir = db::default_data_dir()?;
                 let database = db::Db::open(&data_dir).await?;
+                let pool = database.pool.clone();
                 handle.manage(AppState { db: database });
-                Ok::<_, error::AppError>(())
+                Ok::<_, error::AppError>(pool)
             })?;
+
+            // Spawn the embedded listing receiver. Failures here are
+            // non-fatal — the rest of the app still works without the
+            // browser-extension entry point.
+            let receiver_pool = pool.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = listing_receiver::run(receiver_pool).await {
+                    tracing::error!("listing receiver: {e}");
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -70,6 +82,9 @@ pub fn run() {
             commands::list_registry_form_options,
             commands::search_dcr_production,
             commands::link_listing_to_registry,
+            commands::get_listing_receiver_status,
+            commands::get_listing_receiver_secret,
+            commands::regenerate_listing_receiver_secret,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

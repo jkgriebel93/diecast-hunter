@@ -143,7 +143,19 @@ export const api = {
       registryGuid,
       detailUrl,
     }),
+  getListingReceiverStatus: () =>
+    invoke<ListingReceiverStatus>("get_listing_receiver_status"),
+  getListingReceiverSecret: () =>
+    invoke<string>("get_listing_receiver_secret"),
+  regenerateListingReceiverSecret: () =>
+    invoke<string>("regenerate_listing_receiver_secret"),
 };
+
+export interface ListingReceiverStatus {
+  url: string;
+  port: number;
+  has_secret: boolean;
+}
 
 export interface RefreshOptionsSummary {
   fields_seen: number;

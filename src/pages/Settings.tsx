@@ -6,6 +6,7 @@ import {
   type EbayCredentialsState,
   type EbayOauthStatus,
   type EnrichSummary,
+  type ListingReceiverStatus,
   type SyncSummary,
 } from "@/lib/tauri";
 
@@ -30,6 +31,14 @@ export function Settings() {
   const [optionsRefreshing, setOptionsRefreshing] = useState(false);
   const [optionsMessage, setOptionsMessage] = useState<string | null>(null);
   const [optionsError, setOptionsError] = useState<string | null>(null);
+
+  const [receiverStatus, setReceiverStatus] =
+    useState<ListingReceiverStatus | null>(null);
+  const [receiverSecret, setReceiverSecret] = useState<string | null>(null);
+  const [receiverSecretShown, setReceiverSecretShown] = useState(false);
+  const [receiverError, setReceiverError] = useState<string | null>(null);
+  const [receiverMessage, setReceiverMessage] = useState<string | null>(null);
+  const [regenerating, setRegenerating] = useState(false);
 
   const [ebayCreds, setEbayCreds] = useState<EbayCredentialsState | null>(
     null,
@@ -67,8 +76,55 @@ export function Settings() {
       setEbayRuName(ru ?? "");
       const status = await api.getEbayOauthStatus();
       setOauthStatus(status);
+      const rs = await api.getListingReceiverStatus();
+      setReceiverStatus(rs);
     } catch (e) {
       setError(String(e));
+    }
+  }
+
+  async function onRevealReceiverSecret() {
+    setReceiverError(null);
+    setReceiverMessage(null);
+    try {
+      const s = await api.getListingReceiverSecret();
+      setReceiverSecret(s);
+      setReceiverSecretShown(true);
+      const rs = await api.getListingReceiverStatus();
+      setReceiverStatus(rs);
+    } catch (e) {
+      setReceiverError(String(e));
+    }
+  }
+
+  async function onCopyReceiverSecret() {
+    setReceiverError(null);
+    setReceiverMessage(null);
+    try {
+      const s = receiverSecret ?? (await api.getListingReceiverSecret());
+      setReceiverSecret(s);
+      await navigator.clipboard.writeText(s);
+      setReceiverMessage("Secret copied to clipboard.");
+    } catch (e) {
+      setReceiverError(String(e));
+    }
+  }
+
+  async function onRegenerateReceiverSecret() {
+    setRegenerating(true);
+    setReceiverError(null);
+    setReceiverMessage(null);
+    try {
+      const s = await api.regenerateListingReceiverSecret();
+      setReceiverSecret(s);
+      setReceiverSecretShown(true);
+      setReceiverMessage(
+        "New secret generated. Update it in your browser extension.",
+      );
+    } catch (e) {
+      setReceiverError(String(e));
+    } finally {
+      setRegenerating(false);
     }
   }
 
@@ -675,6 +731,100 @@ export function Settings() {
           )}
           {oauthError && (
             <div className="text-xs text-red-400">{oauthError}</div>
+          )}
+        </div>
+      </section>
+
+      <section className="card space-y-4">
+        <div>
+          <h3 className="text-base font-medium">
+            Browser-extension receiver
+          </h3>
+          <p className="text-xs text-slate-500 mt-1">
+            Local HTTP server (running on {receiverStatus?.url ?? "…"}) that
+            the Diecast Hunter browser extension POSTs Facebook Marketplace
+            listings to. Paste the URL and shared secret into the extension's
+            options page.
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="label">Endpoint URL</label>
+            <div className="flex gap-2">
+              <input
+                className="input flex-1 font-mono text-xs"
+                type="text"
+                value={
+                  receiverStatus
+                    ? `${receiverStatus.url}/listings/save`
+                    : ""
+                }
+                readOnly
+              />
+              <button
+                type="button"
+                className="btn-secondary shrink-0"
+                onClick={async () => {
+                  if (receiverStatus) {
+                    await navigator.clipboard.writeText(
+                      `${receiverStatus.url}/listings/save`,
+                    );
+                    setReceiverMessage("URL copied.");
+                  }
+                }}
+              >
+                Copy
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="label">Shared secret</label>
+            <div className="flex gap-2">
+              <input
+                className="input flex-1 font-mono text-xs"
+                type={receiverSecretShown ? "text" : "password"}
+                value={receiverSecret ?? "•".repeat(32)}
+                readOnly
+                onFocus={(e) => e.currentTarget.select()}
+              />
+              <button
+                type="button"
+                className="btn-secondary shrink-0"
+                onClick={
+                  receiverSecretShown
+                    ? () => setReceiverSecretShown(false)
+                    : onRevealReceiverSecret
+                }
+                title={receiverSecretShown ? "Hide" : "Reveal"}
+              >
+                {receiverSecretShown ? "Hide" : "Show"}
+              </button>
+              <button
+                type="button"
+                className="btn-secondary shrink-0"
+                onClick={onCopyReceiverSecret}
+              >
+                Copy
+              </button>
+              <button
+                type="button"
+                className="btn-secondary shrink-0"
+                onClick={onRegenerateReceiverSecret}
+                disabled={regenerating}
+                title="Generate a new secret. You'll need to update the extension."
+              >
+                {regenerating ? "…" : "Regenerate"}
+              </button>
+            </div>
+          </div>
+
+          {receiverMessage && (
+            <div className="text-xs text-emerald-400">{receiverMessage}</div>
+          )}
+          {receiverError && (
+            <div className="text-xs text-red-400">{receiverError}</div>
           )}
         </div>
       </section>

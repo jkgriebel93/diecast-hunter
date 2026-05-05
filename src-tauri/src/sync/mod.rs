@@ -4,6 +4,7 @@ pub mod dcr_collection;
 pub mod dcr_registry;
 pub mod ebay_listing;
 pub mod ebay_watchlist;
+pub mod fb_listing;
 pub mod listing_match;
 pub mod registry_link;
 
@@ -14,5 +15,6 @@ pub use ebay_listing::{
     RefreshSummary,
 };
 pub use ebay_watchlist::{sync_watchlist, WatchlistSyncSummary};
+pub use fb_listing::{upsert_from_payload, FbListingPayload, FbSaveResult};
 pub use listing_match::{match_all, MatchSummary};
 pub use registry_link::{link_listing_to_registry, LinkResult};
