@@ -161,6 +161,12 @@ pub fn normalize_driver_name(name: &str) -> String {
 /// markup that's used on /MyGarage, /Production, and the registry views.
 /// Returns (current_page, total_pages); both default to 1 when no pager
 /// is rendered (e.g. single-page result).
+///
+/// The pager only renders a window of page-number links (typically 7), so
+/// the visible numbers cap at <= current+window. To find the *true* last
+/// page we also inspect every link's href: the "last page" (»») arrow's
+/// href points at the real last page even when its numeric label isn't
+/// rendered.
 pub fn parse_pagination(doc: &scraper::Html) -> (u32, u32) {
     use scraper::Selector;
     let pagination_sel = Selector::parse("ul.pagination").unwrap();
@@ -183,11 +189,24 @@ pub fn parse_pagination(doc: &scraper::Html) -> (u32, u32) {
                         max = n;
                     }
                 }
+                if let Some(href) = a.value().attr("href") {
+                    if let Some(n) = trailing_page_number(href) {
+                        if n > max {
+                            max = n;
+                        }
+                    }
+                }
             }
         }
     }
 
     (current, max.max(current))
+}
+
+fn trailing_page_number(href: &str) -> Option<u32> {
+    let last_segment = href.rsplit('/').next()?;
+    let no_query = last_segment.split('?').next()?;
+    no_query.parse().ok()
 }
 
 #[cfg(test)]
