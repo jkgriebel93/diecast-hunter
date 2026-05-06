@@ -3,10 +3,13 @@
 //! Watchlist sync (which needs user OAuth) is a later milestone.
 
 pub mod browse;
+pub mod category;
 pub mod client;
 pub mod oauth;
 pub mod parse;
 pub mod trading;
+
+pub use category::is_diecast;
 
 pub use browse::{fetch_item_by_legacy_id, EbayItem};
 pub use client::{EbayClient, EbayEnvironment};

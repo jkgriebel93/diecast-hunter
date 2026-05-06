@@ -34,6 +34,12 @@ export function Settings() {
   const [optionsMessage, setOptionsMessage] = useState<string | null>(null);
   const [optionsError, setOptionsError] = useState<string | null>(null);
 
+  const [filterDiecasts, setFilterDiecasts] = useState(true);
+  const [filterSaving, setFilterSaving] = useState(false);
+  const [filterMessage, setFilterMessage] = useState<string | null>(null);
+  const [filterError, setFilterError] = useState<string | null>(null);
+  const [cleanupRunning, setCleanupRunning] = useState(false);
+
   const [drivers, setDrivers] = useState<FormOptionRow[]>([]);
   const [prewarmInput, setPrewarmInput] = useState("");
   const [prewarmDriverGuid, setPrewarmDriverGuid] = useState("");
@@ -88,6 +94,11 @@ export function Settings() {
       setOauthStatus(status);
       const rs = await api.getListingReceiverStatus();
       setReceiverStatus(rs);
+      try {
+        setFilterDiecasts(await api.getEbayFilterNonDiecasts());
+      } catch {
+        // not fatal — leave default
+      }
       // Drivers list is for the pre-warm picker; harmless if empty (the
       // form-options cache hasn't been populated yet).
       try {
@@ -98,6 +109,41 @@ export function Settings() {
       }
     } catch (e) {
       setError(String(e));
+    }
+  }
+
+  async function onToggleFilter(enabled: boolean) {
+    setFilterSaving(true);
+    setFilterMessage(null);
+    setFilterError(null);
+    try {
+      await api.setEbayFilterNonDiecasts(enabled);
+      setFilterDiecasts(enabled);
+      setFilterMessage(
+        enabled
+          ? "Non-diecast eBay listings will be skipped on save."
+          : "All eBay listings will be saved regardless of category.",
+      );
+    } catch (e) {
+      setFilterError(String(e));
+    } finally {
+      setFilterSaving(false);
+    }
+  }
+
+  async function onCleanupNonDiecasts() {
+    setCleanupRunning(true);
+    setFilterMessage(null);
+    setFilterError(null);
+    try {
+      const summary = await api.removeNonDiecastListings();
+      setFilterMessage(
+        `Removed ${summary.removed} non-diecast listing${summary.removed === 1 ? "" : "s"} of ${summary.examined} examined.`,
+      );
+    } catch (e) {
+      setFilterError(String(e));
+    } finally {
+      setCleanupRunning(false);
     }
   }
 
@@ -823,6 +869,50 @@ export function Settings() {
           )}
           {oauthError && (
             <div className="text-xs text-red-400">{oauthError}</div>
+          )}
+        </div>
+
+        <div className="border-t border-border pt-4 space-y-3">
+          <div>
+            <h4 className="text-sm font-medium">Diecast filter</h4>
+            <p className="text-xs text-slate-500 mt-1">
+              Reject non-diecast eBay listings on save. Watchlist sync still
+              sees them but doesn't store them; manual URL adds error out
+              with a helpful message. Heuristic is a substring check on
+              eBay's category path — turn it off if you want to track an
+              accessory or transporter that lives in a different category.
+            </p>
+          </div>
+
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={filterDiecasts}
+              disabled={filterSaving}
+              onChange={(e) => onToggleFilter(e.target.checked)}
+            />
+            <span>Filter non-diecast eBay listings</span>
+          </label>
+
+          <div>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={onCleanupNonDiecasts}
+              disabled={cleanupRunning}
+              title="Walk every saved eBay listing and delete any whose category isn't a diecast. Listings without category data (saved before this feature) are skipped — refresh those first."
+            >
+              {cleanupRunning
+                ? "Cleaning…"
+                : "Remove existing non-diecast listings"}
+            </button>
+          </div>
+
+          {filterMessage && (
+            <div className="text-xs text-emerald-400">{filterMessage}</div>
+          )}
+          {filterError && (
+            <div className="text-xs text-red-400">{filterError}</div>
           )}
         </div>
       </section>

@@ -152,7 +152,18 @@ export const api = {
   prewarmRegistryByDriver: (driverGuid: string) =>
     invoke<PrewarmSummary>("prewarm_registry_by_driver", { driverGuid }),
   cancelActiveOperation: () => invoke<boolean>("cancel_active_operation"),
+  getEbayFilterNonDiecasts: () =>
+    invoke<boolean>("get_ebay_filter_non_diecasts"),
+  setEbayFilterNonDiecasts: (enabled: boolean) =>
+    invoke<void>("set_ebay_filter_non_diecasts", { enabled }),
+  removeNonDiecastListings: () =>
+    invoke<CleanupSummary>("remove_non_diecast_listings"),
 };
+
+export interface CleanupSummary {
+  examined: number;
+  removed: number;
+}
 
 export interface PrewarmSummary {
   driver_name: string;
@@ -232,6 +243,7 @@ export interface WatchlistSyncSummary {
   created: number;
   updated: number;
   failed: number;
+  filtered: number;
   pages_fetched: number;
 }
 
@@ -242,9 +254,11 @@ export interface EbayCredentialsState {
 }
 
 export interface AddListingResult {
-  listing_id: number;
+  /** null when the listing was filtered out (see filtered_reason). */
+  listing_id: number | null;
   created: boolean;
   title: string;
+  filtered_reason: string | null;
 }
 
 export interface RefreshSummary {

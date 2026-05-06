@@ -2,14 +2,22 @@ use chrono::Utc;
 use serde::Serialize;
 use sqlx::SqlitePool;
 
-use crate::ebay::{extract_legacy_item_id, fetch_item_by_legacy_id, EbayClient, EbayItem};
+use crate::ebay::{
+    extract_legacy_item_id, fetch_item_by_legacy_id, is_diecast, EbayClient, EbayItem,
+};
 use crate::error::{AppError, AppResult};
+use crate::settings;
 
 #[derive(Debug, Serialize, Clone)]
 pub struct AddListingResult {
-    pub listing_id: i64,
+    /// None when the listing was filtered out (see filtered_reason).
+    pub listing_id: Option<i64>,
     pub created: bool,
     pub title: String,
+    /// When set, the listing was rejected (typically as not-a-diecast) and
+    /// nothing was inserted. The caller can decide whether to show this to
+    /// the user (manual add) or quietly count it (watchlist sync).
+    pub filtered_reason: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Clone)]
@@ -35,6 +43,28 @@ pub async fn add_listing_from_input(
 
     let client = EbayClient::from_settings(pool.clone()).await?;
     let item = fetch_item_by_legacy_id(&client, &legacy_id).await?;
+
+    // Filter out non-diecast listings unless the user opted out. The check
+    // runs against the eBay categoryPath we just fetched; without category
+    // data is_diecast() returns false (conservative).
+    if filter_non_diecasts_enabled(pool).await? && !is_diecast(item.category_path.as_deref()) {
+        let reason = format!(
+            "Not a diecast (category: {})",
+            item.category_path.as_deref().unwrap_or("unknown")
+        );
+        tracing::info!(
+            "ebay add: filtered item {} as non-diecast (path: {:?})",
+            legacy_id,
+            item.category_path
+        );
+        return Ok(AddListingResult {
+            listing_id: None,
+            created: false,
+            title: item.title,
+            filtered_reason: Some(reason),
+        });
+    }
+
     let (listing_id, created) = upsert_listing(pool, &item).await?;
     insert_history(pool, listing_id, &item).await?;
     if let Err(e) = crate::sync::listing_match::match_listing(pool, listing_id).await {
@@ -43,10 +73,18 @@ pub async fn add_listing_from_input(
     }
 
     Ok(AddListingResult {
-        listing_id,
+        listing_id: Some(listing_id),
         created,
         title: item.title,
+        filtered_reason: None,
     })
+}
+
+async fn filter_non_diecasts_enabled(pool: &SqlitePool) -> AppResult<bool> {
+    match settings::get(pool, settings::KEY_EBAY_FILTER_NON_DIECASTS).await? {
+        Some(s) => Ok(s != "false"),
+        None => Ok(true),
+    }
 }
 
 /// Re-fetch a single tracked listing's current state.
@@ -141,8 +179,9 @@ async fn upsert_listing(pool: &SqlitePool, item: &EbayItem) -> AppResult<(i64, b
             price_cents, shipping_cents, currency,
             condition, listing_type, status, end_time,
             seller_username, seller_rating, image_url,
+            category_id, category_path,
             saved_at, last_seen_at, raw_json
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(seller_id, external_id) DO UPDATE SET
             url = excluded.url,
             title = excluded.title,
@@ -156,6 +195,8 @@ async fn upsert_listing(pool: &SqlitePool, item: &EbayItem) -> AppResult<(i64, b
             seller_username = excluded.seller_username,
             seller_rating = excluded.seller_rating,
             image_url = excluded.image_url,
+            category_id = excluded.category_id,
+            category_path = excluded.category_path,
             last_seen_at = excluded.last_seen_at,
             raw_json = excluded.raw_json",
     )
@@ -173,6 +214,8 @@ async fn upsert_listing(pool: &SqlitePool, item: &EbayItem) -> AppResult<(i64, b
     .bind(&item.seller_username)
     .bind(item.seller_rating)
     .bind(&item.image_url)
+    .bind(&item.category_id)
+    .bind(&item.category_path)
     .bind(now)
     .bind(now)
     .bind(&item.raw_json)

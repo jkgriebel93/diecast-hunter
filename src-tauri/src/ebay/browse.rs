@@ -85,6 +85,8 @@ pub struct EbayItem {
     pub seller_username: Option<String>,
     pub seller_rating: Option<f64>,
     pub image_url: Option<String>,
+    pub category_id: Option<String>,
+    pub category_path: Option<String>,
     pub raw_json: String,
 }
 
@@ -156,6 +158,8 @@ impl EbayItem {
             seller_username: r.seller.as_ref().map(|s| s.username.clone()),
             seller_rating,
             image_url,
+            category_id: r.category_id.clone(),
+            category_path: r.category_path.clone(),
             raw_json,
         }
     }
@@ -180,6 +184,10 @@ struct BrowseItemRaw {
     item_end_date: Option<String>,
     seller: Option<BrowseSeller>,
     image: Option<BrowseImage>,
+    #[serde(rename = "categoryId")]
+    category_id: Option<String>,
+    #[serde(rename = "categoryPath")]
+    category_path: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -233,5 +241,9 @@ mod tests {
         assert_eq!(item.seller_username.as_deref(), Some("diecast_seller_42"));
         assert_eq!(item.seller_rating, Some(99.8));
         assert!(item.image_url.is_some());
+        assert!(item
+            .category_path
+            .as_deref()
+            .is_some_and(|p| p.contains("Diecast")));
     }
 }

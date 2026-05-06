@@ -7,6 +7,9 @@ const KEYRING_SERVICE: &str = "DiecastHunter";
 
 pub const KEY_DCR_USERNAME: &str = "diecastregistry.username";
 pub const KEY_EBAY_ENVIRONMENT: &str = "ebay.environment";
+/// "true" / "false". When unset or "true", non-diecast eBay listings are
+/// rejected at save time (see ebay::is_diecast).
+pub const KEY_EBAY_FILTER_NON_DIECASTS: &str = "ebay.filter_non_diecasts";
 
 pub const ENTRY_DCR_PASSWORD: &str = "diecastregistry.password";
 pub const ENTRY_EBAY_OAUTH: &str = "ebay.oauth_token";

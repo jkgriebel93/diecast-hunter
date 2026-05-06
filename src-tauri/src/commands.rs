@@ -651,6 +651,71 @@ struct RegistryPickerRowRaw {
     wholesale_value_cents: Option<i64>,
 }
 
+// ----- eBay listing filter -----
+
+#[tauri::command]
+pub async fn get_ebay_filter_non_diecasts(
+    state: State<'_, AppState>,
+) -> AppResult<bool> {
+    match settings::get(&state.db.pool, settings::KEY_EBAY_FILTER_NON_DIECASTS).await? {
+        Some(s) => Ok(s != "false"),
+        None => Ok(true),
+    }
+}
+
+#[tauri::command]
+pub async fn set_ebay_filter_non_diecasts(
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> AppResult<()> {
+    settings::set(
+        &state.db.pool,
+        settings::KEY_EBAY_FILTER_NON_DIECASTS,
+        if enabled { "true" } else { "false" },
+    )
+    .await
+}
+
+#[derive(Serialize)]
+pub struct CleanupSummary {
+    pub examined: u32,
+    pub removed: u32,
+}
+
+/// Walk every eBay listing currently in the DB and remove ones whose
+/// category_path doesn't pass the diecast filter. Listings without
+/// category_path data (saved before M5b.3) are NOT touched — they pre-date
+/// the filter, and we can't safely classify them. Refresh those first if
+/// you want them considered.
+#[tauri::command]
+pub async fn remove_non_diecast_listings(
+    state: State<'_, AppState>,
+) -> AppResult<CleanupSummary> {
+    let pool = &state.db.pool;
+    let rows: Vec<(i64, Option<String>)> = sqlx::query_as(
+        "SELECT l.id, l.category_path
+         FROM listings l
+         JOIN sellers s ON s.id = l.seller_id
+         WHERE s.code = 'ebay' AND l.category_path IS NOT NULL",
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut summary = CleanupSummary {
+        examined: rows.len() as u32,
+        removed: 0,
+    };
+    for (id, path) in rows {
+        if !crate::ebay::is_diecast(path.as_deref()) {
+            sqlx::query("DELETE FROM listings WHERE id = ?")
+                .bind(id)
+                .execute(pool)
+                .await?;
+            summary.removed += 1;
+        }
+    }
+    Ok(summary)
+}
+
 // ----- Listing receiver (FB Marketplace browser-extension target) -----
 
 #[derive(Serialize)]

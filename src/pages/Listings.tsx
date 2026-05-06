@@ -60,10 +60,16 @@ export function Listings() {
     setAddError(null);
     try {
       const result = await api.addEbayListing(input.trim());
-      setAddMessage(
-        `${result.created ? "Added" : "Updated"}: ${result.title}`,
-      );
-      setInput("");
+      if (result.filtered_reason) {
+        setAddError(
+          `${result.filtered_reason}. To save anyway, turn off the diecast filter in Settings.`,
+        );
+      } else {
+        setAddMessage(
+          `${result.created ? "Added" : "Updated"}: ${result.title}`,
+        );
+        setInput("");
+      }
       await load();
     } catch (e) {
       setAddError(String(e));
@@ -252,6 +258,7 @@ export function Listings() {
         <div className="text-xs text-emerald-400">
           Watchlist: {watchlistSummary.created} new,{" "}
           {watchlistSummary.updated} updated,{" "}
+          {watchlistSummary.filtered} filtered (non-diecasts),{" "}
           {watchlistSummary.failed} failed across{" "}
           {watchlistSummary.pages_fetched} page
           {watchlistSummary.pages_fetched === 1 ? "" : "s"} (

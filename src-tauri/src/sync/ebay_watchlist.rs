@@ -16,6 +16,9 @@ pub struct WatchlistSyncSummary {
     pub created: u32,
     pub updated: u32,
     pub failed: u32,
+    /// Items eBay returned in the watchlist that we filtered out as
+    /// non-diecasts before persisting.
+    pub filtered: u32,
     pub pages_fetched: u32,
 }
 
@@ -68,6 +71,9 @@ pub async fn sync_watchlist(
                 Some(result.item_ids.len() as u32),
             );
             match ebay_listing::add_listing_from_input(pool, item_id).await {
+                Ok(res) if res.filtered_reason.is_some() => {
+                    summary.filtered += 1;
+                }
                 Ok(res) => {
                     if res.created {
                         summary.created += 1;
@@ -102,8 +108,8 @@ pub async fn sync_watchlist(
     .await?;
 
     progress.done(format!(
-        "Watchlist sync done: {} new, {} updated, {} failed.",
-        summary.created, summary.updated, summary.failed
+        "Watchlist sync done: {} new, {} updated, {} filtered, {} failed.",
+        summary.created, summary.updated, summary.filtered, summary.failed
     ));
 
     Ok(summary)
