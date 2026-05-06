@@ -46,6 +46,7 @@ pub async fn sync_watchlist(
     let mut summary = WatchlistSyncSummary::default();
     let mut page = 1u32;
     loop {
+        progress.check_cancelled()?;
         progress.step(
             format!("Fetching watchlist page {page}…"),
             Some(page),
@@ -56,6 +57,7 @@ pub async fn sync_watchlist(
         summary.items_seen += result.item_ids.len() as u32;
 
         for (i, item_id) in result.item_ids.iter().enumerate() {
+            progress.check_cancelled()?;
             progress.step(
                 format!(
                     "Importing item {} of {} (id {item_id})…",

@@ -29,6 +29,9 @@ pub enum AppError {
     #[error("not configured: {0}")]
     NotConfigured(String),
 
+    #[error("operation cancelled")]
+    Cancelled,
+
     #[error("config error: {0}")]
     Config(String),
 }

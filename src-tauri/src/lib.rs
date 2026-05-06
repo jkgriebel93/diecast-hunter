@@ -9,10 +9,18 @@ mod progress;
 mod settings;
 mod sync;
 
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+
 use tauri::Manager;
+use tokio::sync::Mutex;
 
 pub struct AppState {
     pub db: db::Db,
+    /// Cancel handle for the currently running long-running operation.
+    /// Set by long-running command handlers, flipped by the
+    /// `cancel_active_operation` command.
+    pub active_op_cancel: Mutex<Option<Arc<AtomicBool>>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -32,7 +40,10 @@ pub fn run() {
                 let data_dir = db::default_data_dir()?;
                 let database = db::Db::open(&data_dir).await?;
                 let pool = database.pool.clone();
-                handle.manage(AppState { db: database });
+                handle.manage(AppState {
+                    db: database,
+                    active_op_cancel: Mutex::new(None),
+                });
                 Ok::<_, error::AppError>(pool)
             })?;
 
@@ -84,6 +95,7 @@ pub fn run() {
             commands::search_dcr_production,
             commands::link_listing_to_registry,
             commands::prewarm_registry_by_driver,
+            commands::cancel_active_operation,
             commands::get_listing_receiver_status,
             commands::get_listing_receiver_secret,
             commands::regenerate_listing_receiver_secret,

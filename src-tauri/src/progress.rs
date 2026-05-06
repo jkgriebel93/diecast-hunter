@@ -1,14 +1,23 @@
-//! Progress event emitter used by long-running sync/enrich operations to
-//! drive the global ActivityBar in the frontend.
+//! Progress event emitter + cooperative cancellation token used by
+//! long-running sync/enrich operations.
 //!
-//! Each operation gets a `ProgressEmitter` carrying an op identifier (e.g.
-//! "prewarm", "watchlist") and an optional Tauri AppHandle. Calls to
-//! `step()` and `done()` emit a "progress" event the frontend listens for.
-//! When the AppHandle is None (tests, or callers that don't need progress)
-//! the emitter is a no-op.
+//! Each operation gets a `ProgressEmitter` carrying:
+//!   - an op identifier (e.g. "prewarm", "watchlist")
+//!   - an optional Tauri AppHandle for emitting "progress" events
+//!   - an Arc<AtomicBool> the orchestrator polls between iterations to
+//!     bail early when the user clicks Cancel.
+//!
+//! The cancel handle is shared with the AppState so a Tauri "cancel"
+//! command can flip it without holding a reference to the operation
+//! itself.
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
+
+use crate::error::{AppError, AppResult};
 
 #[derive(Clone, Serialize)]
 pub struct ProgressEvent {
@@ -18,12 +27,14 @@ pub struct ProgressEvent {
     pub total: Option<u32>,
     pub done: bool,
     pub error: bool,
+    pub cancelled: bool,
 }
 
 #[derive(Clone)]
 pub struct ProgressEmitter {
     app: Option<AppHandle>,
     op: String,
+    cancelled: Arc<AtomicBool>,
 }
 
 impl ProgressEmitter {
@@ -31,15 +42,37 @@ impl ProgressEmitter {
         Self {
             app: Some(app),
             op: op.into(),
+            cancelled: Arc::new(AtomicBool::new(false)),
         }
     }
 
     /// Headless emitter — useful when an orchestration is invoked outside
-    /// a Tauri command (e.g. in unit tests).
+    /// a Tauri command (e.g. in unit tests or from another op).
     pub fn null(op: impl Into<String>) -> Self {
         Self {
             app: None,
             op: op.into(),
+            cancelled: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Hand the cancel token out so the AppState can flip it from a
+    /// separate Tauri command.
+    pub fn cancel_handle(&self) -> Arc<AtomicBool> {
+        self.cancelled.clone()
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
+    /// Convenient `?`-able guard. Call before each loop iteration / before
+    /// each network round trip.
+    pub fn check_cancelled(&self) -> AppResult<()> {
+        if self.is_cancelled() {
+            Err(AppError::Cancelled)
+        } else {
+            Ok(())
         }
     }
 
@@ -49,15 +82,19 @@ impl ProgressEmitter {
         current: Option<u32>,
         total: Option<u32>,
     ) {
-        self.emit(label.into(), current, total, false, false);
+        self.emit(label.into(), current, total, false, false, false);
     }
 
     pub fn done(&self, label: impl Into<String>) {
-        self.emit(label.into(), None, None, true, false);
+        self.emit(label.into(), None, None, true, false, false);
     }
 
     pub fn fail(&self, label: impl Into<String>) {
-        self.emit(label.into(), None, None, true, true);
+        self.emit(label.into(), None, None, true, true, false);
+    }
+
+    pub fn cancelled_event(&self, label: impl Into<String>) {
+        self.emit(label.into(), None, None, true, false, true);
     }
 
     fn emit(
@@ -67,6 +104,7 @@ impl ProgressEmitter {
         total: Option<u32>,
         done: bool,
         error: bool,
+        cancelled: bool,
     ) {
         if let Some(app) = &self.app {
             let payload = ProgressEvent {
@@ -76,6 +114,7 @@ impl ProgressEmitter {
                 total,
                 done,
                 error,
+                cancelled,
             };
             if let Err(e) = app.emit("progress", payload) {
                 tracing::debug!("progress emit failed (non-fatal): {e}");

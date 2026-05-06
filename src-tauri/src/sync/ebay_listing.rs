@@ -101,6 +101,7 @@ pub async fn refresh_all_active(
         ..Default::default()
     };
     for (idx, (id,)) in rows.into_iter().enumerate() {
+        progress.check_cancelled()?;
         progress.step(
             format!("Refreshing eBay listing {} of {}…", idx + 1, total),
             Some((idx + 1) as u32),

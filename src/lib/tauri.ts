@@ -151,6 +151,7 @@ export const api = {
     invoke<string>("regenerate_listing_receiver_secret"),
   prewarmRegistryByDriver: (driverGuid: string) =>
     invoke<PrewarmSummary>("prewarm_registry_by_driver", { driverGuid }),
+  cancelActiveOperation: () => invoke<boolean>("cancel_active_operation"),
 };
 
 export interface PrewarmSummary {

@@ -75,6 +75,7 @@ async fn run_collection_sync(
     let mut summary = SyncSummary::default();
     let mut page_n = 1u32;
     loop {
+        progress.check_cancelled()?;
         progress.step(
             format!("Fetching My Garage page {page_n}…"),
             Some(page_n),

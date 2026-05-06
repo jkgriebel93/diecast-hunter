@@ -1,11 +1,52 @@
 use serde::Serialize;
 use sqlx::SqlitePool;
+use std::sync::atomic::Ordering;
 use tauri::State;
 
 use crate::error::{AppError, AppResult};
+use crate::progress::ProgressEmitter;
 use crate::settings;
 use crate::sync;
 use crate::AppState;
+
+/// Set the active cancel handle so the `cancel_active_operation` command
+/// can find it. Replaces any existing entry — only one long-running op runs
+/// at a time in practice (UI buttons gate that).
+async fn set_active_cancel(state: &State<'_, AppState>, progress: &ProgressEmitter) {
+    *state.active_op_cancel.lock().await = Some(progress.cancel_handle());
+}
+
+async fn clear_active_cancel(state: &State<'_, AppState>) {
+    *state.active_op_cancel.lock().await = None;
+}
+
+/// Emit the right closing progress event based on how the op finished.
+/// Successful runs emit their own `done` from inside the sync function;
+/// here we only handle errors and cancellations.
+fn finish_progress<T>(
+    progress: &ProgressEmitter,
+    result: &AppResult<T>,
+    op_label: &str,
+) {
+    match result {
+        Err(AppError::Cancelled) => {
+            progress.cancelled_event(format!("{op_label} cancelled."))
+        }
+        Err(e) => progress.fail(format!("{op_label} failed: {e}")),
+        Ok(_) => {}
+    }
+}
+
+#[tauri::command]
+pub async fn cancel_active_operation(state: State<'_, AppState>) -> AppResult<bool> {
+    let guard = state.active_op_cancel.lock().await;
+    if let Some(handle) = guard.as_ref() {
+        handle.store(true, Ordering::Release);
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
 
 #[derive(Serialize)]
 pub struct AppStatus {
@@ -99,11 +140,11 @@ pub async fn sync_dcr_collection(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> AppResult<sync::SyncSummary> {
-    let progress = crate::progress::ProgressEmitter::new(app, "sync");
+    let progress = ProgressEmitter::new(app, "sync");
+    set_active_cancel(&state, &progress).await;
     let result = sync::sync_dcr_collection_and_enrich(&state.db.pool, &progress).await;
-    if let Err(e) = &result {
-        progress.fail(format!("Sync failed: {e}"));
-    }
+    clear_active_cancel(&state).await;
+    finish_progress(&progress, &result, "Sync");
     result
 }
 
@@ -113,11 +154,11 @@ pub async fn refresh_registry_details(
     app: tauri::AppHandle,
     force: bool,
 ) -> AppResult<sync::EnrichSummary> {
-    let progress = crate::progress::ProgressEmitter::new(app, "enrich");
+    let progress = ProgressEmitter::new(app, "enrich");
+    set_active_cancel(&state, &progress).await;
     let result = sync::enrich_only(&state.db.pool, force, &progress).await;
-    if let Err(e) = &result {
-        progress.fail(format!("Enrichment failed: {e}"));
-    }
+    clear_active_cancel(&state).await;
+    finish_progress(&progress, &result, "Enrichment");
     result
 }
 
@@ -321,11 +362,11 @@ pub async fn refresh_all_ebay_listings(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> AppResult<sync::RefreshSummary> {
-    let progress = crate::progress::ProgressEmitter::new(app, "ebay_refresh_all");
+    let progress = ProgressEmitter::new(app, "ebay_refresh_all");
+    set_active_cancel(&state, &progress).await;
     let result = sync::refresh_all_active(&state.db.pool, &progress).await;
-    if let Err(e) = &result {
-        progress.fail(format!("Refresh failed: {e}"));
-    }
+    clear_active_cancel(&state).await;
+    finish_progress(&progress, &result, "Refresh");
     result
 }
 
@@ -334,11 +375,11 @@ pub async fn sync_ebay_watchlist(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> AppResult<sync::WatchlistSyncSummary> {
-    let progress = crate::progress::ProgressEmitter::new(app, "watchlist");
+    let progress = ProgressEmitter::new(app, "watchlist");
+    set_active_cancel(&state, &progress).await;
     let result = sync::sync_watchlist(&state.db.pool, &progress).await;
-    if let Err(e) = &result {
-        progress.fail(format!("Watchlist sync failed: {e}"));
-    }
+    clear_active_cancel(&state).await;
+    finish_progress(&progress, &result, "Watchlist sync");
     result
 }
 
@@ -748,11 +789,11 @@ pub async fn prewarm_registry_by_driver(
     app: tauri::AppHandle,
     driver_guid: String,
 ) -> AppResult<sync::PrewarmSummary> {
-    let progress = crate::progress::ProgressEmitter::new(app, "prewarm");
+    let progress = ProgressEmitter::new(app, "prewarm");
+    set_active_cancel(&state, &progress).await;
     let result = sync::prewarm_by_driver(&state.db.pool, &driver_guid, &progress).await;
-    if let Err(e) = &result {
-        progress.fail(format!("Pre-warm failed: {e}"));
-    }
+    clear_active_cancel(&state).await;
+    finish_progress(&progress, &result, "Pre-warm");
     result
 }
 

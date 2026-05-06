@@ -80,6 +80,7 @@ pub async fn prewarm_by_driver(
 
     let mut upserted = 0u32;
     for (i, r) in results.iter().enumerate() {
+        progress.check_cancelled()?;
         if i % 25 == 0 {
             progress.step(
                 format!(
@@ -165,6 +166,7 @@ async fn search_all_pages_with_progress(
 
     let stop_at = total.min(200);
     for page in (current + 1)..=stop_at {
+        progress.check_cancelled()?;
         progress.step(
             format!("Fetching page {page} of {total} for {driver_name}…"),
             Some(page),

@@ -58,6 +58,7 @@ pub async fn enrich_pending_registry_entries(
     };
 
     for (idx, (id, external_id, raw_json, _details_fetched_at)) in rows.into_iter().enumerate() {
+        progress.check_cancelled()?;
         let done = (idx + 1) as u32;
         progress.step(
             format!("Enriching registry entry {} of {}…", done, total),
