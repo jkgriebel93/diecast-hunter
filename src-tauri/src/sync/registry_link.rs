@@ -124,7 +124,13 @@ async fn run_targeted_enrichment(pool: &SqlitePool, entry_id: i64) -> AppResult<
     let client = DcrClient::new()?;
     client.login(&username, &password).await?;
 
-    let summary = dcr_registry::enrich_pending_registry_entries(pool, &client, false).await?;
+    let summary = dcr_registry::enrich_pending_registry_entries(
+        pool,
+        &client,
+        false,
+        &crate::progress::ProgressEmitter::null("registry_link"),
+    )
+    .await?;
     Ok(summary.enriched > 0)
 }
 

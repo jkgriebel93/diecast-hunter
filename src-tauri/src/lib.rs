@@ -5,6 +5,7 @@ mod ebay;
 mod error;
 mod listing_receiver;
 mod matcher;
+mod progress;
 mod settings;
 mod sync;
 

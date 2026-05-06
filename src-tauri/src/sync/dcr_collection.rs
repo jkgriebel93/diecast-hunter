@@ -4,6 +4,7 @@ use sqlx::SqlitePool;
 
 use crate::dcr::{CollectionItem, CollectionPage, DcrClient};
 use crate::error::{AppError, AppResult};
+use crate::progress::ProgressEmitter;
 use crate::settings;
 use crate::sync::dcr_registry::{enrich_pending_registry_entries, EnrichSummary};
 
@@ -24,23 +25,28 @@ pub struct SyncSummary {
 /// (same DcrClient = same cookie jar).
 pub async fn sync_dcr_collection_and_enrich(
     pool: &SqlitePool,
+    progress: &ProgressEmitter,
 ) -> AppResult<SyncSummary> {
+    progress.step("Logging in to diecastregistry.com…", None, None);
     let (username, password) = load_credentials(pool).await?;
 
     let client = DcrClient::new()?;
     client.login(&username, &password).await?;
 
-    let mut summary = run_collection_sync(pool, &client).await?;
+    let mut summary = run_collection_sync(pool, &client, progress).await?;
 
-    // Best-effort enrichment. If it fails, we still surface the collection
-    // sync result so the user sees their items.
-    match enrich_pending_registry_entries(pool, &client, false).await {
+    progress.step("Enriching registry entries…", None, None);
+    match enrich_pending_registry_entries(pool, &client, false, progress).await {
         Ok(es) => summary.enrichment = Some(es),
         Err(e) => {
             tracing::warn!("post-sync enrichment failed: {e}");
         }
     }
 
+    progress.done(format!(
+        "Sync complete: {} items, {} pages.",
+        summary.items_seen, summary.pages_fetched
+    ));
     Ok(summary)
 }
 
@@ -64,10 +70,16 @@ async fn load_credentials(pool: &SqlitePool) -> AppResult<(String, String)> {
 async fn run_collection_sync(
     pool: &SqlitePool,
     client: &DcrClient,
+    progress: &ProgressEmitter,
 ) -> AppResult<SyncSummary> {
     let mut summary = SyncSummary::default();
     let mut page_n = 1u32;
     loop {
+        progress.step(
+            format!("Fetching My Garage page {page_n}…"),
+            Some(page_n),
+            None,
+        );
         let path = if page_n == 1 {
             "/MyGarage".to_string()
         } else {
@@ -105,11 +117,21 @@ async fn run_collection_sync(
 /// Standalone enrichment trigger: log in fresh, then run an enrichment pass.
 /// Used by the manual "Refresh registry data" button. `force` ignores the
 /// 30-day cache.
-pub async fn enrich_only(pool: &SqlitePool, force: bool) -> AppResult<EnrichSummary> {
+pub async fn enrich_only(
+    pool: &SqlitePool,
+    force: bool,
+    progress: &ProgressEmitter,
+) -> AppResult<EnrichSummary> {
+    progress.step("Logging in to diecastregistry.com…", None, None);
     let (username, password) = load_credentials(pool).await?;
     let client = DcrClient::new()?;
     client.login(&username, &password).await?;
-    enrich_pending_registry_entries(pool, &client, force).await
+    let summary = enrich_pending_registry_entries(pool, &client, force, progress).await?;
+    progress.done(format!(
+        "Enrichment complete: {} of {} ({} failed, {} skipped).",
+        summary.enriched, summary.considered, summary.failed, summary.skipped
+    ));
+    Ok(summary)
 }
 
 async fn persist_item(

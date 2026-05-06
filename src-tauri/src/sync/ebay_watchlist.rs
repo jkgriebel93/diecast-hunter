@@ -6,6 +6,7 @@ use crate::ebay::{
     fetch_watchlist_page, get_user_access_token, EbayEnvironment, DEFAULT_SCOPES,
 };
 use crate::error::{AppError, AppResult};
+use crate::progress::ProgressEmitter;
 use crate::settings;
 use crate::sync::ebay_listing;
 
@@ -25,7 +26,10 @@ pub struct WatchlistSyncSummary {
 /// Idempotent: items already in the local listings table are upserted, not
 /// duplicated. Items that fail to enrich are counted as failed but don't
 /// abort the whole sync.
-pub async fn sync_watchlist(pool: &SqlitePool) -> AppResult<WatchlistSyncSummary> {
+pub async fn sync_watchlist(
+    pool: &SqlitePool,
+    progress: &ProgressEmitter,
+) -> AppResult<WatchlistSyncSummary> {
     let env_str = settings::get(pool, settings::KEY_EBAY_ENVIRONMENT)
         .await?
         .unwrap_or_else(|| "sandbox".to_string());
@@ -36,16 +40,31 @@ pub async fn sync_watchlist(pool: &SqlitePool) -> AppResult<WatchlistSyncSummary
     let cert_id = settings::secret_get(settings::ENTRY_EBAY_CERT_ID)?
         .ok_or_else(|| AppError::NotConfigured("eBay Cert ID not set".into()))?;
 
+    progress.step("Refreshing eBay user token…", None, None);
     let token = get_user_access_token(pool, env, &app_id, &cert_id, DEFAULT_SCOPES).await?;
 
     let mut summary = WatchlistSyncSummary::default();
     let mut page = 1u32;
     loop {
+        progress.step(
+            format!("Fetching watchlist page {page}…"),
+            Some(page),
+            None,
+        );
         let result = fetch_watchlist_page(env, &token, page, 200).await?;
         summary.pages_fetched += 1;
         summary.items_seen += result.item_ids.len() as u32;
 
-        for item_id in &result.item_ids {
+        for (i, item_id) in result.item_ids.iter().enumerate() {
+            progress.step(
+                format!(
+                    "Importing item {} of {} (id {item_id})…",
+                    i + 1,
+                    result.item_ids.len()
+                ),
+                Some((i + 1) as u32),
+                Some(result.item_ids.len() as u32),
+            );
             match ebay_listing::add_listing_from_input(pool, item_id).await {
                 Ok(res) => {
                     if res.created {
@@ -79,6 +98,11 @@ pub async fn sync_watchlist(pool: &SqlitePool) -> AppResult<WatchlistSyncSummary
         &Utc::now().timestamp().to_string(),
     )
     .await?;
+
+    progress.done(format!(
+        "Watchlist sync done: {} new, {} updated, {} failed.",
+        summary.created, summary.updated, summary.failed
+    ));
 
     Ok(summary)
 }

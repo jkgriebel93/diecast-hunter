@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes } from "react-router-dom";
+import { ActivityBar } from "@/components/ActivityBar";
 import { Sidebar } from "@/components/Sidebar";
 import { Dashboard } from "@/pages/Dashboard";
 import { Collection } from "@/pages/Collection";
@@ -8,6 +9,7 @@ import { Settings } from "@/pages/Settings";
 export default function App() {
   return (
     <div className="flex h-full">
+      <ActivityBar />
       <Sidebar />
       <main className="flex-1 overflow-auto">
         <Routes>

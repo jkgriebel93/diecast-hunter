@@ -4,6 +4,7 @@ use sqlx::SqlitePool;
 
 use crate::dcr::{parse_detail_page, DcrClient, RegistryDetail};
 use crate::error::{AppError, AppResult};
+use crate::progress::ProgressEmitter;
 
 /// Re-enrich entries last fetched more than this many seconds ago.
 const REFRESH_AFTER_SECONDS: i64 = 30 * 24 * 60 * 60; // 30 days
@@ -25,6 +26,7 @@ pub async fn enrich_pending_registry_entries(
     pool: &SqlitePool,
     client: &DcrClient,
     force: bool,
+    progress: &ProgressEmitter,
 ) -> AppResult<EnrichSummary> {
     let cutoff = Utc::now().timestamp() - REFRESH_AFTER_SECONDS;
     let rows: Vec<(i64, String, Option<String>, Option<i64>)> = if force {
@@ -49,12 +51,20 @@ pub async fn enrich_pending_registry_entries(
         .await?
     };
 
+    let total = rows.len() as u32;
     let mut summary = EnrichSummary {
-        considered: rows.len() as u32,
+        considered: total,
         ..Default::default()
     };
 
-    for (id, external_id, raw_json, _details_fetched_at) in rows {
+    for (idx, (id, external_id, raw_json, _details_fetched_at)) in rows.into_iter().enumerate() {
+        let done = (idx + 1) as u32;
+        progress.step(
+            format!("Enriching registry entry {} of {}…", done, total),
+            Some(done),
+            Some(total),
+        );
+
         let detail_url = match extract_detail_url(raw_json.as_deref()) {
             Some(u) => u,
             None => {

@@ -144,7 +144,7 @@ async fn search_all_pages_capped(
     Ok((all_results, pages_fetched))
 }
 
-fn build_form(token: &str, f: &ProductionSearchFilter) -> Vec<(String, String)> {
+pub(crate) fn build_form(token: &str, f: &ProductionSearchFilter) -> Vec<(String, String)> {
     let mut form = Vec::new();
     form.push(("__RequestVerificationToken".into(), token.to_string()));
     form.push(("ForSale".into(), String::new()));

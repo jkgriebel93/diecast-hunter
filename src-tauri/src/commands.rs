@@ -97,16 +97,28 @@ pub async fn set_setting(
 #[tauri::command]
 pub async fn sync_dcr_collection(
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
 ) -> AppResult<sync::SyncSummary> {
-    sync::sync_dcr_collection_and_enrich(&state.db.pool).await
+    let progress = crate::progress::ProgressEmitter::new(app, "sync");
+    let result = sync::sync_dcr_collection_and_enrich(&state.db.pool, &progress).await;
+    if let Err(e) = &result {
+        progress.fail(format!("Sync failed: {e}"));
+    }
+    result
 }
 
 #[tauri::command]
 pub async fn refresh_registry_details(
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
     force: bool,
 ) -> AppResult<sync::EnrichSummary> {
-    sync::enrich_only(&state.db.pool, force).await
+    let progress = crate::progress::ProgressEmitter::new(app, "enrich");
+    let result = sync::enrich_only(&state.db.pool, force, &progress).await;
+    if let Err(e) = &result {
+        progress.fail(format!("Enrichment failed: {e}"));
+    }
+    result
 }
 
 // ----- eBay -----
@@ -307,15 +319,27 @@ pub async fn refresh_ebay_listing(
 #[tauri::command]
 pub async fn refresh_all_ebay_listings(
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
 ) -> AppResult<sync::RefreshSummary> {
-    sync::refresh_all_active(&state.db.pool).await
+    let progress = crate::progress::ProgressEmitter::new(app, "ebay_refresh_all");
+    let result = sync::refresh_all_active(&state.db.pool, &progress).await;
+    if let Err(e) = &result {
+        progress.fail(format!("Refresh failed: {e}"));
+    }
+    result
 }
 
 #[tauri::command]
 pub async fn sync_ebay_watchlist(
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
 ) -> AppResult<sync::WatchlistSyncSummary> {
-    sync::sync_watchlist(&state.db.pool).await
+    let progress = crate::progress::ProgressEmitter::new(app, "watchlist");
+    let result = sync::sync_watchlist(&state.db.pool, &progress).await;
+    if let Err(e) = &result {
+        progress.fail(format!("Watchlist sync failed: {e}"));
+    }
+    result
 }
 
 #[derive(Serialize)]
@@ -721,9 +745,15 @@ pub async fn link_listing_to_registry(
 #[tauri::command]
 pub async fn prewarm_registry_by_driver(
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
     driver_guid: String,
 ) -> AppResult<sync::PrewarmSummary> {
-    sync::prewarm_by_driver(&state.db.pool, &driver_guid).await
+    let progress = crate::progress::ProgressEmitter::new(app, "prewarm");
+    let result = sync::prewarm_by_driver(&state.db.pool, &driver_guid, &progress).await;
+    if let Err(e) = &result {
+        progress.fail(format!("Pre-warm failed: {e}"));
+    }
+    result
 }
 
 /// Search registry entries for the manual-match picker. Empty `query` returns

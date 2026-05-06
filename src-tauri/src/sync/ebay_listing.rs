@@ -81,7 +81,10 @@ pub async fn refresh_listing(pool: &SqlitePool, listing_id: i64) -> AppResult<()
 
 /// Refresh every active eBay listing. Runs sequentially under the client's
 /// rate limiter.
-pub async fn refresh_all_active(pool: &SqlitePool) -> AppResult<RefreshSummary> {
+pub async fn refresh_all_active(
+    pool: &SqlitePool,
+    progress: &crate::progress::ProgressEmitter,
+) -> AppResult<RefreshSummary> {
     let rows: Vec<(i64,)> = sqlx::query_as(
         "SELECT l.id
          FROM listings l
@@ -92,11 +95,17 @@ pub async fn refresh_all_active(pool: &SqlitePool) -> AppResult<RefreshSummary> 
     .fetch_all(pool)
     .await?;
 
+    let total = rows.len() as u32;
     let mut summary = RefreshSummary {
-        considered: rows.len() as u32,
+        considered: total,
         ..Default::default()
     };
-    for (id,) in rows {
+    for (idx, (id,)) in rows.into_iter().enumerate() {
+        progress.step(
+            format!("Refreshing eBay listing {} of {}…", idx + 1, total),
+            Some((idx + 1) as u32),
+            Some(total),
+        );
         match refresh_listing(pool, id).await {
             Ok(()) => summary.refreshed += 1,
             Err(e) => {
@@ -105,6 +114,10 @@ pub async fn refresh_all_active(pool: &SqlitePool) -> AppResult<RefreshSummary> 
             }
         }
     }
+    progress.done(format!(
+        "Refresh complete: {} of {} ({} failed).",
+        summary.refreshed, summary.considered, summary.failed
+    ));
     Ok(summary)
 }
 

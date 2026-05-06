@@ -14,6 +14,7 @@ use crate::dcr::{
     search_all_pages, DcrClient, ProductionSearchFilter, ProductionSearchResult,
 };
 use crate::error::{AppError, AppResult};
+use crate::progress::ProgressEmitter;
 use crate::settings;
 
 #[derive(Debug, Default, Serialize, Clone)]
@@ -27,12 +28,14 @@ pub struct PrewarmSummary {
 pub async fn prewarm_by_driver(
     pool: &SqlitePool,
     driver_guid: &str,
+    progress: &ProgressEmitter,
 ) -> AppResult<PrewarmSummary> {
     if driver_guid.trim().is_empty() {
         return Err(AppError::Parse("driver_guid is required".into()));
     }
 
-    // Login first.
+    progress.step("Logging in to diecastregistry.com…", None, None);
+
     let username = settings::get(pool, settings::KEY_DCR_USERNAME)
         .await?
         .ok_or_else(|| {
@@ -49,9 +52,6 @@ pub async fn prewarm_by_driver(
     let client = DcrClient::new()?;
     client.login(&username, &password).await?;
 
-    // Look up the driver's display name from the cached form options so the
-    // UI summary can show "Pre-warmed N entries for Jeff Gordon" rather than
-    // the raw GUID.
     let driver_display: Option<(String,)> = sqlx::query_as(
         "SELECT display FROM registry_form_options
          WHERE field = 'driver' AND value = ?",
@@ -63,16 +63,33 @@ pub async fn prewarm_by_driver(
         .map(|(d,)| d)
         .unwrap_or_else(|| "(unknown driver)".to_string());
 
+    progress.step(
+        format!("Searching registry for {driver_name}…"),
+        None,
+        None,
+    );
+
     let filter = ProductionSearchFilter {
         driver_guids: vec![driver_guid.to_string()],
         ..Default::default()
     };
 
-    let (results, pages_fetched) = search_all_pages(&client, &filter).await?;
+    let (results, pages_fetched) =
+        search_all_pages_with_progress(&client, &filter, progress, &driver_name).await?;
     let results_seen = results.len() as u32;
 
     let mut upserted = 0u32;
-    for r in &results {
+    for (i, r) in results.iter().enumerate() {
+        if i % 25 == 0 {
+            progress.step(
+                format!(
+                    "Saving {} of {} entries for {}…",
+                    i, results_seen, driver_name
+                ),
+                Some(i as u32),
+                Some(results_seen),
+            );
+        }
         match upsert_stub_from_search(pool, r).await {
             Ok(()) => upserted += 1,
             Err(e) => tracing::warn!(
@@ -89,12 +106,77 @@ pub async fn prewarm_by_driver(
     )
     .await?;
 
+    progress.done(format!(
+        "Pre-warm complete: {upserted} entries for {driver_name}."
+    ));
+
     Ok(PrewarmSummary {
         driver_name,
         results_seen,
         registry_entries_upserted: upserted,
         pages_fetched,
     })
+}
+
+/// Drop-in alternative to dcr::search_all_pages that emits per-page progress
+/// via the supplied emitter. Implemented inline (rather than reaching into
+/// production_search internals) so we don't have to thread the emitter
+/// through the lower-level dcr module.
+async fn search_all_pages_with_progress(
+    client: &DcrClient,
+    filter: &ProductionSearchFilter,
+    progress: &ProgressEmitter,
+    driver_name: &str,
+) -> AppResult<(Vec<ProductionSearchResult>, u32)> {
+    progress.step("Applying filter…", None, None);
+    let initial = client.get_html("/Production").await?;
+    let token = crate::dcr::client::extract_form_token(&initial).ok_or_else(|| {
+        AppError::Parse("could not find anti-forgery token on /Production".into())
+    })?;
+    let form = crate::dcr::production_search::build_form(&token, filter);
+    let body = client
+        .post_form("/Production/UpdateFilter", &form)
+        .await?;
+
+    let first_page_html = match serde_json::from_str::<serde_json::Value>(&body) {
+        Ok(envelope) if envelope.get("redirect").and_then(|v| v.as_bool()).unwrap_or(false) => {
+            let url = envelope
+                .get("url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("/Production");
+            client.get_html(url).await?
+        }
+        _ => client.get_html("/Production").await?,
+    };
+
+    let (current, total) = {
+        let doc = scraper::Html::parse_document(&first_page_html);
+        crate::dcr::parse::parse_pagination(&doc)
+    };
+
+    progress.step(
+        format!("Fetching page 1 of {total} for {driver_name}…"),
+        Some(1),
+        Some(total),
+    );
+
+    let mut all_results = crate::dcr::production_search::parse_results(&first_page_html);
+    let mut pages_fetched = 1u32;
+
+    let stop_at = total.min(200);
+    for page in (current + 1)..=stop_at {
+        progress.step(
+            format!("Fetching page {page} of {total} for {driver_name}…"),
+            Some(page),
+            Some(total),
+        );
+        let html = client.get_html(&format!("/Production/{page}")).await?;
+        let mut more = crate::dcr::production_search::parse_results(&html);
+        all_results.append(&mut more);
+        pages_fetched += 1;
+    }
+
+    Ok((all_results, pages_fetched))
 }
 
 async fn upsert_stub_from_search(
