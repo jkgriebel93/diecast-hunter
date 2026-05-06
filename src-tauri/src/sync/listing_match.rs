@@ -11,6 +11,7 @@ use crate::error::AppResult;
 use crate::matcher::{
     best_match, DriverInfo, MatchableEntry, AUTO_MATCH_THRESHOLD, REVIEW_THRESHOLD,
 };
+use crate::progress::ProgressEmitter;
 
 #[derive(Debug, Default, Serialize, Clone)]
 pub struct MatchSummary {
@@ -39,7 +40,11 @@ pub async fn match_listing(pool: &SqlitePool, listing_id: i64) -> AppResult<()> 
 
 /// Re-match every listing. Loads the driver + entry tables once and reuses
 /// across all listings.
-pub async fn match_all(pool: &SqlitePool) -> AppResult<MatchSummary> {
+pub async fn match_all(
+    pool: &SqlitePool,
+    progress: &ProgressEmitter,
+) -> AppResult<MatchSummary> {
+    progress.step("Loading registry data…", None, None);
     let drivers = load_drivers(pool).await?;
     let entries = load_entries(pool).await?;
     let listings: Vec<(i64, String)> =
@@ -47,12 +52,25 @@ pub async fn match_all(pool: &SqlitePool) -> AppResult<MatchSummary> {
             .fetch_all(pool)
             .await?;
 
+    let total = listings.len() as u32;
     let mut summary = MatchSummary {
-        considered: listings.len() as u32,
+        considered: total,
         ..Default::default()
     };
 
-    for (id, title) in listings {
+    // The scoring loop is CPU-bound — checking cancellation per listing
+    // (rather than per-batch) keeps stop latency at a few ms even with a
+    // big registry table.
+    for (idx, (id, title)) in listings.into_iter().enumerate() {
+        progress.check_cancelled()?;
+        let done = (idx + 1) as u32;
+        if done == 1 || done % 25 == 0 || done == total {
+            progress.step(
+                format!("Matching listing {done} of {total}…"),
+                Some(done),
+                Some(total),
+            );
+        }
         let result = best_match(&title, &drivers, &entries);
         match result {
             Some(m) if m.score >= AUTO_MATCH_THRESHOLD => {
@@ -69,6 +87,10 @@ pub async fn match_all(pool: &SqlitePool) -> AppResult<MatchSummary> {
             }
         }
     }
+    progress.done(format!(
+        "Matched: {} auto-matched, {} need review, {} unmatched (of {}).",
+        summary.auto_matched, summary.needs_review, summary.unmatched, summary.considered
+    ));
     Ok(summary)
 }
 

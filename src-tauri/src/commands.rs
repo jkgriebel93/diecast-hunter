@@ -531,8 +531,14 @@ pub async fn list_listings(
 #[tauri::command]
 pub async fn rematch_all_listings(
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
 ) -> AppResult<sync::MatchSummary> {
-    sync::match_all(&state.db.pool).await
+    let progress = ProgressEmitter::new(app, "rematch");
+    set_active_cancel(&state, &progress).await;
+    let result = sync::match_all(&state.db.pool, &progress).await;
+    clear_active_cancel(&state).await;
+    finish_progress(&progress, &result, "Re-match");
+    result
 }
 
 /// Lock the current auto-match as user-confirmed so re-match-all won't
