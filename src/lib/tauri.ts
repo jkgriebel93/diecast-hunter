@@ -81,6 +81,8 @@ export const api = {
     invoke<DriverGroup[]>("list_drivers_with_counts"),
   listCollectionForDriver: (driverId: number) =>
     invoke<CollectionRow[]>("list_collection_for_driver", { driverId }),
+  listAllCollectionItems: () =>
+    invoke<CollectionRow[]>("list_all_collection_items"),
   getEbayCredentials: () =>
     invoke<EbayCredentialsState>("get_ebay_credentials"),
   saveEbayCredentials: (

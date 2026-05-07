@@ -69,6 +69,7 @@ pub fn run() {
             commands::refresh_registry_details,
             commands::list_drivers_with_counts,
             commands::list_collection_for_driver,
+            commands::list_all_collection_items,
             commands::get_ebay_credentials,
             commands::save_ebay_credentials,
             commands::clear_ebay_credentials,

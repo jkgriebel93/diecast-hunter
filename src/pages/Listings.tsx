@@ -12,6 +12,17 @@ import {
 } from "@/lib/tauri";
 
 type ViewMode = "flat" | "byDriver";
+type StatusFilter = "all" | "active" | "ended";
+type MatchFilter = "all" | "matched" | "unmatched";
+type SourceFilter = "all" | "ebay" | "fb";
+type SortMode =
+  | "newest"
+  | "price-asc"
+  | "price-desc"
+  | "total-asc"
+  | "deal-asc"
+  | "ending-soon"
+  | "title";
 
 export function Listings() {
   const [rows, setRows] = useState<ListingRow[] | null>(null);
@@ -21,6 +32,12 @@ export function Listings() {
   const [pickerListing, setPickerListing] = useState<ListingRow | null>(null);
   const [registrySearchListing, setRegistrySearchListing] =
     useState<ListingRow | null>(null);
+
+  const [searchText, setSearchText] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
+  const [matchFilter, setMatchFilter] = useState<MatchFilter>("all");
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+  const [sortMode, setSortMode] = useState<SortMode>("newest");
 
   const [input, setInput] = useState("");
   const [adding, setAdding] = useState(false);
@@ -164,6 +181,67 @@ export function Listings() {
     }
   }
 
+  const filteredRows = useMemo(() => {
+    if (!rows) return null;
+    const q = searchText.trim().toLowerCase();
+    let r = rows.filter((row) => {
+      if (q) {
+        const hay = [
+          row.title,
+          row.matched_driver_name,
+          row.matched_scheme_text,
+          row.seller_username,
+          row.matched_oem,
+          row.matched_brand,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (statusFilter === "active" && row.status !== "active") return false;
+      if (statusFilter === "ended" && row.status !== "ended") return false;
+      if (matchFilter === "matched" && row.registry_entry_id === null)
+        return false;
+      if (matchFilter === "unmatched" && row.registry_entry_id !== null)
+        return false;
+      if (sourceFilter !== "all" && row.seller_code !== sourceFilter)
+        return false;
+      return true;
+    });
+
+    const sorted = [...r];
+    sorted.sort((a, b) => {
+      const totalA =
+        a.price_cents !== null ? a.price_cents + (a.shipping_cents ?? 0) : null;
+      const totalB =
+        b.price_cents !== null ? b.price_cents + (b.shipping_cents ?? 0) : null;
+      const nullsLast = (av: number | null, bv: number | null) => {
+        if (av === null && bv === null) return 0;
+        if (av === null) return 1;
+        if (bv === null) return -1;
+        return av - bv;
+      };
+      switch (sortMode) {
+        case "newest":
+          return b.last_seen_at - a.last_seen_at;
+        case "price-asc":
+          return nullsLast(a.price_cents, b.price_cents);
+        case "price-desc":
+          return nullsLast(b.price_cents, a.price_cents);
+        case "total-asc":
+          return nullsLast(totalA, totalB);
+        case "deal-asc":
+          return nullsLast(a.deal_score, b.deal_score);
+        case "ending-soon":
+          return nullsLast(a.end_time, b.end_time);
+        case "title":
+          return a.title.localeCompare(b.title);
+      }
+    });
+    return sorted;
+  }, [rows, searchText, statusFilter, matchFilter, sourceFilter, sortMode]);
+
   async function onPickRegistryEntry(
     listingId: number,
     registryEntryId: number,
@@ -279,30 +357,92 @@ export function Listings() {
       )}
 
       {rows && rows.length > 0 && (
-        <div className="flex items-center gap-2 text-xs">
-          <span className="text-slate-500">View:</span>
-          <button
-            type="button"
-            className={`px-2 py-1 rounded border ${
-              viewMode === "flat"
-                ? "border-accent text-accent bg-accent/10"
-                : "border-border text-slate-400 hover:text-slate-100"
-            }`}
-            onClick={() => setViewMode("flat")}
-          >
-            Flat
-          </button>
-          <button
-            type="button"
-            className={`px-2 py-1 rounded border ${
-              viewMode === "byDriver"
-                ? "border-accent text-accent bg-accent/10"
-                : "border-border text-slate-400 hover:text-slate-100"
-            }`}
-            onClick={() => setViewMode("byDriver")}
-          >
-            By driver
-          </button>
+        <div className="card !p-3 space-y-2">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              className="input flex-1"
+              placeholder="Search title, driver, scheme, seller…"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+            />
+            <select
+              className="input !w-auto"
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as SortMode)}
+              title="Sort"
+            >
+              <option value="newest">Newest first</option>
+              <option value="price-asc">Price low → high</option>
+              <option value="price-desc">Price high → low</option>
+              <option value="total-asc">Total (price + ship) low → high</option>
+              <option value="deal-asc">Best deal first</option>
+              <option value="ending-soon">Ending soonest</option>
+              <option value="title">Title A → Z</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2 text-xs flex-wrap">
+            <FilterChips
+              label="Status"
+              value={statusFilter}
+              options={[
+                { value: "active", label: "Active" },
+                { value: "ended", label: "Ended" },
+                { value: "all", label: "All" },
+              ]}
+              onChange={(v) => setStatusFilter(v as StatusFilter)}
+            />
+            <FilterChips
+              label="Match"
+              value={matchFilter}
+              options={[
+                { value: "all", label: "All" },
+                { value: "matched", label: "Matched" },
+                { value: "unmatched", label: "Unmatched" },
+              ]}
+              onChange={(v) => setMatchFilter(v as MatchFilter)}
+            />
+            <FilterChips
+              label="Source"
+              value={sourceFilter}
+              options={[
+                { value: "all", label: "All" },
+                { value: "ebay", label: "eBay" },
+                { value: "fb", label: "Facebook" },
+              ]}
+              onChange={(v) => setSourceFilter(v as SourceFilter)}
+            />
+            <div className="ml-auto flex items-center gap-2">
+              <span className="text-slate-500">View:</span>
+              <button
+                type="button"
+                className={`px-2 py-1 rounded border ${
+                  viewMode === "flat"
+                    ? "border-accent text-accent bg-accent/10"
+                    : "border-border text-slate-400 hover:text-slate-100"
+                }`}
+                onClick={() => setViewMode("flat")}
+              >
+                Flat
+              </button>
+              <button
+                type="button"
+                className={`px-2 py-1 rounded border ${
+                  viewMode === "byDriver"
+                    ? "border-accent text-accent bg-accent/10"
+                    : "border-border text-slate-400 hover:text-slate-100"
+                }`}
+                onClick={() => setViewMode("byDriver")}
+              >
+                By driver
+              </button>
+            </div>
+          </div>
+          {filteredRows && filteredRows.length !== rows.length && (
+            <div className="text-xs text-slate-500">
+              Showing {filteredRows.length} of {rows.length} listings.
+            </div>
+          )}
         </div>
       )}
 
@@ -312,9 +452,13 @@ export function Listings() {
         <div className="card text-sm text-slate-400">
           No listings tracked yet. Add an eBay URL above.
         </div>
+      ) : filteredRows && filteredRows.length === 0 ? (
+        <div className="card text-sm text-slate-400">
+          No listings match the current filters.
+        </div>
       ) : viewMode === "flat" ? (
         <ul className="space-y-2">
-          {rows.map((r) => (
+          {(filteredRows ?? []).map((r) => (
             <ListingCard
               key={r.listing_id}
               row={r}
@@ -330,7 +474,7 @@ export function Listings() {
         </ul>
       ) : (
         <GroupedByDriver
-          rows={rows}
+          rows={filteredRows ?? []}
           refreshingId={refreshingId}
           onRefresh={onRefreshOne}
           onConfirmMatch={onConfirmMatch}
@@ -1150,6 +1294,38 @@ function RegistrySearchDialog({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function FilterChips({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-slate-500">{label}:</span>
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          className={`px-2 py-0.5 rounded border text-[11px] ${
+            value === opt.value
+              ? "border-accent text-accent bg-accent/10"
+              : "border-border text-slate-400 hover:text-slate-100"
+          }`}
+          onClick={() => onChange(opt.value)}
+        >
+          {opt.label}
+        </button>
+      ))}
     </div>
   );
 }

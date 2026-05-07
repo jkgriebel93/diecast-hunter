@@ -1044,9 +1044,21 @@ pub async fn list_collection_for_driver(
     state: State<'_, AppState>,
     driver_id: i64,
 ) -> AppResult<Vec<CollectionRow>> {
-    let pool = &state.db.pool;
-    let rows: Vec<CollectionRowRaw> = sqlx::query_as(
-        "SELECT c.id,
+    fetch_collection_rows(&state.db.pool, Some(driver_id)).await
+}
+
+#[tauri::command]
+pub async fn list_all_collection_items(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<CollectionRow>> {
+    fetch_collection_rows(&state.db.pool, None).await
+}
+
+async fn fetch_collection_rows(
+    pool: &SqlitePool,
+    driver_id: Option<i64>,
+) -> AppResult<Vec<CollectionRow>> {
+    let base = "SELECT c.id,
                 c.external_id,
                 d.id AS driver_id,
                 d.name AS driver_name,
@@ -1068,22 +1080,27 @@ pub async fn list_collection_for_driver(
                 c.raw_json
          FROM my_collection c
          JOIN registry_entries re ON re.id = c.registry_entry_id
-         JOIN drivers d ON d.id = re.driver_id
-         WHERE d.id = ?
-         ORDER BY re.year DESC, c.id DESC",
-    )
-    .bind(driver_id)
-    .fetch_all(pool)
-    .await?;
+         JOIN drivers d ON d.id = re.driver_id";
+    let rows: Vec<CollectionRowRaw> = match driver_id {
+        Some(id) => {
+            sqlx::query_as(&format!(
+                "{base} WHERE d.id = ? ORDER BY re.year DESC, c.id DESC"
+            ))
+            .bind(id)
+            .fetch_all(pool)
+            .await?
+        }
+        None => {
+            sqlx::query_as(&format!(
+                "{base} ORDER BY d.name COLLATE NOCASE, re.year DESC, c.id DESC"
+            ))
+            .fetch_all(pool)
+            .await?
+        }
+    };
 
     let mut out = Vec::with_capacity(rows.len());
     for r in rows {
-        // The collection's raw_json is the original list-page scrape; it
-        // carries the thumbnail image_url and detail_url (which the registry
-        // row doesn't, since enrichment overwrites raw_json with detail-page
-        // facts). Fall back to the registry's scheme_text first since
-        // detail-page text is authoritative; otherwise use the list-page
-        // text we captured originally.
         let coll_json: serde_json::Value = r
             .raw_json
             .as_deref()
