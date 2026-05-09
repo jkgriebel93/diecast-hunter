@@ -25,17 +25,27 @@
  *     Plain "ok" — useful for confirming the deploy is up.
  */
 
-interface Env {
+export interface Env {
   DELETIONS: KVNamespace;
   EBAY_VERIFICATION_TOKEN: string;
   APP_SHARED_SECRET: string;
   ENDPOINT_URL: string;
+  // eBay app credentials (client_credentials grant) used to fetch the
+  // notification public key. Both come from `wrangler secret put`.
+  EBAY_CLIENT_ID: string;
+  EBAY_CLIENT_SECRET: string;
+  // Separate KV namespace caching the app access token and per-kid public
+  // keys. Kept apart from DELETIONS so cache writes don't pollute the
+  // deletion record set (and vice versa).
+  EBAY_KEY_CACHE: KVNamespace;
 }
 
 interface DeletionRecord {
   received_at: number;
   raw: unknown;
 }
+
+import { verifyEbaySignature } from "./ebay-signature";
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
@@ -98,27 +108,54 @@ async function handleVerification(url: URL, env: Env): Promise<Response> {
   );
 }
 
-async function handleNotification(req: Request, env: Env): Promise<Response> {
+export async function handleNotification(
+  req: Request,
+  env: Env,
+): Promise<Response> {
+  // Authenticity gate. The endpoint is publicly registered with eBay so the
+  // URL is discoverable; without this gate every drive-by POST writes a KV
+  // record. eBay always sends `x-ebay-signature` with a real notification.
+  const sigHeader = req.headers.get("x-ebay-signature");
+  if (!sigHeader) {
+    return new Response("missing signature", { status: 412 });
+  }
+
+  // Read raw bytes — the signature covers exact bytes, so we cannot
+  // re-serialize from a parsed object.
+  const rawBody = await req.arrayBuffer();
+
+  let verified: boolean;
+  try {
+    verified = await verifyEbaySignature(sigHeader, rawBody, env);
+  } catch (err) {
+    console.error("signature verification error", err);
+    return new Response("signature verification failed", { status: 412 });
+  }
+  if (!verified) {
+    return new Response("invalid signature", { status: 412 });
+  }
+
   let body: unknown;
   try {
-    body = await req.json();
+    body = JSON.parse(new TextDecoder().decode(rawBody));
   } catch {
     return new Response("invalid json", { status: 400 });
   }
 
-  // eBay's payload shape (subset we care about):
-  //   { notification: { notificationId: "...", data: { username, userId, eiasToken } } }
-  // We persist the whole payload as-is and key by notificationId so duplicate
-  // deliveries are idempotent.
-  const id = extractNotificationId(body) ?? crypto.randomUUID();
+  // A signed-but-malformed payload is a schema violation, not a retry. Don't
+  // invent a fallback id — that path is what allowed unbounded KV growth.
+  const id = extractNotificationId(body);
+  if (!id) {
+    console.warn("verified notification missing notificationId");
+    return new Response("missing notificationId", { status: 400 });
+  }
+
+  // Idempotent: same notificationId → same key, no growth on retries.
   const record: DeletionRecord = {
     received_at: Date.now(),
     raw: body,
   };
   await env.DELETIONS.put(`deletion:${id}`, JSON.stringify(record));
-
-  // eBay requires a fast 2xx ack. Return immediately; processing happens on
-  // the desktop side when it polls /api/pending-deletions.
   return new Response("ok", { status: 200 });
 }
 
