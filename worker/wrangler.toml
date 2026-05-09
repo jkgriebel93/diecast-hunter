@@ -9,7 +9,7 @@ ENDPOINT_URL = "https://diecast-hunter-ebay.johnkgriebel.workers.dev/marketplace
 #   wrangler kv namespace create DELETIONS
 [[kv_namespaces]]
 binding = "DELETIONS"
-id = "698ce6ff67ef4a1a8bdd18d605dd1cd3"
+id = "05f981ddfc9c41dda3789faf7cb7a309"
 
 # Cache for the eBay app access token and per-kid notification public keys.
 # Kept separate from DELETIONS on purpose. Before the first deploy run:
