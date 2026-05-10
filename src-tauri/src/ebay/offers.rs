@@ -65,14 +65,26 @@ pub async fn fetch_received_offers(
 </GetMyeBayBuyingRequest>"#;
 
     let xml = trading_post(env, iaf_token, "GetMyeBayBuying", body).await?;
-    let (offers, watched_count, items_with_offers) = parse_offers_response_with_stats(&xml)?;
-    // Diagnostic: if the watchlist comes back populated but no offers,
-    // either the seller hasn't sent any (expected) or the API isn't
-    // returning offer details at this DetailLevel (the next thing to try
-    // is a per-item GetItem follow-up).
+    let (offers, stats) = parse_offers_response_with_stats(&xml)?;
+    // Diagnostic — distinguishes "auth/scope failed" (zero items) from
+    // "no offers exist right now" (items present, BestOfferDetails
+    // absent or empty) from "offers exist but eBay didn't include them
+    // inline" (BestOfferDetails present with non-zero count, but no
+    // inline <BestOffer>). The third case is our cue to add a per-item
+    // GetItem follow-up.
     tracing::info!(
-        "ebay offers: watchlist returned {watched_count} item(s), {items_with_offers} with offers"
+        "ebay offers diagnostic: items={}, with_BestOfferDetails={}, with_BestOfferCount>0={}, with_inline_offer={}",
+        stats.watched_count,
+        stats.items_with_best_offer_details,
+        stats.items_with_nonzero_count,
+        stats.items_with_inline_offer,
     );
+    if let Some(sample) = stats.sample_best_offer_details {
+        // Trim so we don't spam the log. ~600 chars is enough to see
+        // the <BestOfferDetails> shape without flooding.
+        let trimmed: String = sample.chars().take(600).collect();
+        tracing::info!("ebay offers: sample BestOfferDetails XML: {trimmed}");
+    }
     Ok(offers)
 }
 
@@ -157,15 +169,26 @@ static OFFER_BLOCK_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?s)<BestOffer>(.*?)</BestOffer>").unwrap());
 
 pub fn parse_offers_response(xml: &str) -> AppResult<Vec<ReceivedOffer>> {
-    parse_offers_response_with_stats(xml).map(|(o, _, _)| o)
+    parse_offers_response_with_stats(xml).map(|(o, _)| o)
 }
 
-/// Like parse_offers_response, but also returns (watched_item_count,
-/// items_with_offer_count) so the caller can log a diagnostic when the
-/// list comes back empty.
+/// Diagnostic counters returned alongside the parsed offers so the
+/// caller can log what shape eBay actually sent us.
+#[derive(Debug, Default, Clone)]
+pub struct OffersStats {
+    pub watched_count: usize,
+    pub items_with_best_offer_details: usize,
+    pub items_with_nonzero_count: usize,
+    pub items_with_inline_offer: usize,
+    /// XML fragment of the first item's <BestOfferDetails> section, if
+    /// any. Used to print a one-off sample so we know whether eBay sent
+    /// inline offer data or just a summary.
+    pub sample_best_offer_details: Option<String>,
+}
+
 pub fn parse_offers_response_with_stats(
     xml: &str,
-) -> AppResult<(Vec<ReceivedOffer>, usize, usize)> {
+) -> AppResult<(Vec<ReceivedOffer>, OffersStats)> {
     if FAILURE_RE.is_match(xml) {
         let detail = LONG_MESSAGE_RE
             .captures(xml)
@@ -175,21 +198,34 @@ pub fn parse_offers_response_with_stats(
     }
 
     let mut out: Vec<ReceivedOffer> = Vec::new();
-    let mut watched_count = 0usize;
-    let mut items_with_offers = 0usize;
+    let mut stats = OffersStats::default();
     for cap in ITEM_BLOCK_RE.captures_iter(xml) {
         let item_xml = cap.get(1).map(|m| m.as_str()).unwrap_or("");
         let item_id = match extract_text(item_xml, "ItemID") {
             Some(id) => id,
             None => continue, // not a real item block
         };
-        watched_count += 1;
+        stats.watched_count += 1;
         let item_title =
             extract_text(item_xml, "Title").unwrap_or_else(|| "(untitled)".to_string());
         let item_web_url = extract_text(item_xml, "ViewItemURL");
         let item_image_url = extract_text(item_xml, "GalleryURL");
         let item_current_price_cents = extract_text(item_xml, "CurrentPrice")
             .and_then(|s| dollars_string_to_cents(&s));
+
+        let bod = extract_text(item_xml, "BestOfferDetails");
+        if let Some(bod_text) = &bod {
+            stats.items_with_best_offer_details += 1;
+            let count = extract_text(bod_text, "BestOfferCount")
+                .and_then(|s| s.parse::<i64>().ok())
+                .unwrap_or(0);
+            if count > 0 {
+                stats.items_with_nonzero_count += 1;
+            }
+            if stats.sample_best_offer_details.is_none() {
+                stats.sample_best_offer_details = Some(bod_text.clone());
+            }
+        }
 
         let mut produced_for_this_item = false;
         for offer_cap in OFFER_BLOCK_RE.captures_iter(item_xml) {
@@ -230,10 +266,10 @@ pub fn parse_offers_response_with_stats(
             });
         }
         if produced_for_this_item {
-            items_with_offers += 1;
+            stats.items_with_inline_offer += 1;
         }
     }
-    Ok((out, watched_count, items_with_offers))
+    Ok((out, stats))
 }
 
 /// Extract the text between the first `<tag ...>` ... `</tag>`. Handles
@@ -287,10 +323,20 @@ mod tests {
 
     #[test]
     fn parses_fixture() {
-        let (offers, watched, with_offers) =
-            parse_offers_response_with_stats(FIXTURE).unwrap();
-        assert_eq!(watched, 3, "fixture has 3 watched items");
-        assert_eq!(with_offers, 1, "only one item has a seller offer");
+        let (offers, stats) = parse_offers_response_with_stats(FIXTURE).unwrap();
+        assert_eq!(stats.watched_count, 3, "fixture has 3 watched items");
+        assert_eq!(
+            stats.items_with_best_offer_details, 3,
+            "all three items carry a BestOfferDetails block"
+        );
+        assert_eq!(
+            stats.items_with_nonzero_count, 1,
+            "only one item has BestOfferCount > 0"
+        );
+        assert_eq!(
+            stats.items_with_inline_offer, 1,
+            "and that one carries an inline <BestOffer>"
+        );
         assert_eq!(offers.len(), 1);
 
         let seller_offer = &offers[0];
@@ -330,11 +376,10 @@ mod tests {
     </PaginationResult>
   </WatchList>
 </GetMyeBayBuyingResponse>"#;
-        let (offers, watched, with_offers) =
-            parse_offers_response_with_stats(xml).unwrap();
+        let (offers, stats) = parse_offers_response_with_stats(xml).unwrap();
         assert_eq!(offers.len(), 0);
-        assert_eq!(watched, 0);
-        assert_eq!(with_offers, 0);
+        assert_eq!(stats.watched_count, 0);
+        assert_eq!(stats.items_with_inline_offer, 0);
     }
 
     #[test]
@@ -360,11 +405,15 @@ mod tests {
     </ItemArray>
   </WatchList>
 </GetMyeBayBuyingResponse>"#;
-        let (offers, watched, with_offers) =
-            parse_offers_response_with_stats(xml).unwrap();
+        let (offers, stats) = parse_offers_response_with_stats(xml).unwrap();
         assert_eq!(offers.len(), 0);
-        assert_eq!(watched, 2);
-        assert_eq!(with_offers, 0);
+        assert_eq!(stats.watched_count, 2);
+        assert_eq!(stats.items_with_inline_offer, 0);
+        // First item has a BestOfferDetails block (with count 0); second
+        // doesn't. Expect exactly one BOD-present and zero non-zero
+        // counts.
+        assert_eq!(stats.items_with_best_offer_details, 1);
+        assert_eq!(stats.items_with_nonzero_count, 0);
     }
 
     #[test]
