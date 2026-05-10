@@ -84,6 +84,8 @@ pub fn run() {
             commands::search_ebay_listings,
             commands::watch_ebay_listing,
             commands::unwatch_ebay_listing,
+            commands::list_ebay_offers,
+            commands::decline_ebay_offer,
             commands::refresh_ebay_listing,
             commands::refresh_all_ebay_listings,
             commands::sync_ebay_watchlist,

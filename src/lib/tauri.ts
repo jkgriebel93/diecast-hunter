@@ -124,6 +124,9 @@ export const api = {
     invoke<AddListingResult>("watch_ebay_listing", { input }),
   unwatchEbayListing: (listingId: number) =>
     invoke<void>("unwatch_ebay_listing", { listingId }),
+  listEbayOffers: () => invoke<ReceivedOffer[]>("list_ebay_offers"),
+  declineEbayOffer: (itemId: string, offerId: string) =>
+    invoke<void>("decline_ebay_offer", { itemId, offerId }),
   refreshEbayListing: (listingId: number) =>
     invoke<void>("refresh_ebay_listing", { listingId }),
   refreshAllEbayListings: () =>
@@ -309,6 +312,24 @@ export interface EbaySearchPage {
   limit: number;
   offset: number;
   has_more: boolean;
+}
+
+export interface ReceivedOffer {
+  item_id: string;
+  item_title: string;
+  item_web_url: string | null;
+  item_image_url: string | null;
+  item_current_price_cents: number | null;
+  offer_id: string;
+  /** "Pending" | "Countered" | "Accepted" | "Declined" | "Expired" | "Retracted" — pass-through. */
+  offer_status: string;
+  offer_price_cents: number | null;
+  offer_currency: string;
+  /** "BestOffer" (buyer-initiated) | "CounterOffer" (seller counter). */
+  offer_type: string | null;
+  expiration_time: number | null;
+  buyer_message: string | null;
+  seller_message: string | null;
 }
 
 export interface RefreshSummary {

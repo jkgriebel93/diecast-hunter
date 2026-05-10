@@ -378,6 +378,24 @@ pub async fn unwatch_ebay_listing(
 }
 
 #[tauri::command]
+pub async fn list_ebay_offers(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<crate::ebay::ReceivedOffer>> {
+    let (env, token) = crate::ebay::user_iaf_token(&state.db.pool).await?;
+    crate::ebay::fetch_received_offers(env, &token).await
+}
+
+#[tauri::command]
+pub async fn decline_ebay_offer(
+    state: State<'_, AppState>,
+    item_id: String,
+    offer_id: String,
+) -> AppResult<()> {
+    let (env, token) = crate::ebay::user_iaf_token(&state.db.pool).await?;
+    crate::ebay::decline_offer(env, &token, &item_id, &offer_id).await
+}
+
+#[tauri::command]
 pub async fn refresh_ebay_listing(
     state: State<'_, AppState>,
     listing_id: i64,
