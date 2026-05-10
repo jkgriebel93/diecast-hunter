@@ -1,5 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
-import { api, formatCents, type ReceivedOffer } from "@/lib/tauri";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  api,
+  formatCents,
+  type ItemProbeResult,
+  type ReceivedOffer,
+} from "@/lib/tauri";
 
 type StatusFilter = "actionable" | "all";
 
@@ -19,6 +24,11 @@ export function Offers() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("actionable");
 
+  const [probeInput, setProbeInput] = useState("");
+  const [probing, setProbing] = useState(false);
+  const [probeResult, setProbeResult] = useState<ItemProbeResult | null>(null);
+  const [probeError, setProbeError] = useState<string | null>(null);
+
   async function load() {
     setLoading(true);
     setError(null);
@@ -35,6 +45,23 @@ export function Offers() {
   useEffect(() => {
     void load();
   }, []);
+
+  async function onProbe(e: FormEvent) {
+    e.preventDefault();
+    const id = probeInput.trim();
+    if (!id) return;
+    setProbing(true);
+    setProbeError(null);
+    setProbeResult(null);
+    try {
+      const result = await api.probeEbayItemForOffers(id);
+      setProbeResult(result);
+    } catch (err) {
+      setProbeError(String(err));
+    } finally {
+      setProbing(false);
+    }
+  }
 
   async function onDecline(offer: ReceivedOffer) {
     const ok = window.confirm(
@@ -80,6 +107,54 @@ export function Offers() {
           {loading ? "Loading…" : "Refresh"}
         </button>
       </header>
+
+      <section className="card space-y-2 border-amber-500/30">
+        <div className="text-xs text-amber-400/90">
+          Diagnostic — paste the item id of a watched listing where you're
+          expecting a Send-Offer-to-Buyer offer. We'll fetch the item via
+          Trading API GetItem with the buyer's token and report which
+          offer-related fields (if any) come back.
+        </div>
+        <form onSubmit={onProbe} className="flex items-center gap-2">
+          <input
+            className="input flex-1"
+            type="text"
+            value={probeInput}
+            onChange={(e) => setProbeInput(e.target.value)}
+            placeholder="eBay item id, e.g. 117018958879"
+            autoComplete="off"
+          />
+          <button
+            className="btn-secondary shrink-0"
+            type="submit"
+            disabled={probing || !probeInput.trim()}
+          >
+            {probing ? "Probing…" : "Probe"}
+          </button>
+        </form>
+        {probeError && (
+          <div className="text-xs text-red-400">{probeError}</div>
+        )}
+        {probeResult && (
+          <div className="text-xs text-slate-300 font-mono space-y-0.5">
+            <div>response: {probeResult.response_size_bytes} bytes</div>
+            <div>&lt;BestOfferDetails: {probeResult.best_offer_details_count}</div>
+            <div>&lt;BestOffer&gt;: {probeResult.best_offer_inline_count}</div>
+            <div>
+              &lt;BestOffer (with attrs): {probeResult.best_offer_with_attrs_count}
+            </div>
+            <div>BestOfferEnabled: {probeResult.best_offer_enabled_count}</div>
+            <div>
+              &lt;BestOfferCount&gt;: {probeResult.best_offer_count_tag_count}
+            </div>
+            <div>BestOfferID: {probeResult.best_offer_id_count}</div>
+            <div>SellerOffer: {probeResult.seller_offer_count}</div>
+            <div className="text-slate-500 break-all">
+              dump: {probeResult.dump_path}
+            </div>
+          </div>
+        )}
+      </section>
 
       {error && (
         <div className="card border-red-500/40 text-red-300 text-sm">

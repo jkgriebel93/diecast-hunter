@@ -396,6 +396,15 @@ pub async fn decline_ebay_offer(
 }
 
 #[tauri::command]
+pub async fn probe_ebay_item_for_offers(
+    state: State<'_, AppState>,
+    item_id: String,
+) -> AppResult<crate::ebay::ItemProbeResult> {
+    let (env, token) = crate::ebay::user_iaf_token(&state.db.pool).await?;
+    crate::ebay::probe_item(env, &token, item_id.trim()).await
+}
+
+#[tauri::command]
 pub async fn refresh_ebay_listing(
     state: State<'_, AppState>,
     listing_id: i64,

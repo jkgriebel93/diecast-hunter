@@ -110,6 +110,86 @@ pub async fn fetch_received_offers(
     Ok(offers)
 }
 
+/// Result of a one-shot Trading-API GetItem probe — used while we figure
+/// out which buyer-side endpoint actually exposes Send-Offer-to-Buyer
+/// data. Returns substring counts for offer-related XML fragments and a
+/// path to a temp file containing the full response.
+#[derive(Debug, Clone, Serialize)]
+pub struct ItemProbeResult {
+    pub item_id: String,
+    pub dump_path: String,
+    pub best_offer_details_count: usize,
+    pub best_offer_inline_count: usize,
+    pub best_offer_with_attrs_count: usize,
+    pub best_offer_enabled_count: usize,
+    pub best_offer_count_tag_count: usize,
+    pub best_offer_id_count: usize,
+    pub seller_offer_count: usize,
+    pub response_size_bytes: usize,
+}
+
+/// Probe a single watched item via Trading API GetItem with the buyer's
+/// IAF token. Diagnostic-only — gives us the full GetItem response so we
+/// can see whether eBay surfaces Send-Offer-to-Buyer info there (and if
+/// so under what tag), without making 200+ calls fanning out from the
+/// watchlist.
+pub async fn probe_item(
+    env: EbayEnvironment,
+    iaf_token: &str,
+    item_id: &str,
+) -> AppResult<ItemProbeResult> {
+    if !is_safe_id(item_id) {
+        return Err(AppError::Parse(format!(
+            "refusing to send malformed item id: {item_id:?}"
+        )));
+    }
+    let body = format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ItemID>{item_id}</ItemID>
+  <DetailLevel>ReturnAll</DetailLevel>
+  <IncludeItemSpecifics>true</IncludeItemSpecifics>
+</GetItemRequest>"#
+    );
+    let xml = trading_post(env, iaf_token, "GetItem", &body).await?;
+
+    let path = std::env::temp_dir().join(format!(
+        "diecast_getitem_{}_{}.xml",
+        item_id,
+        chrono::Utc::now().timestamp()
+    ));
+    if let Err(e) = std::fs::write(&path, xml.as_bytes()) {
+        tracing::warn!("ebay probe: failed to write dump: {e}");
+    }
+
+    let count = |needle: &str| xml.matches(needle).count();
+    let result = ItemProbeResult {
+        item_id: item_id.to_string(),
+        dump_path: path.to_string_lossy().into_owned(),
+        best_offer_details_count: count("<BestOfferDetails"),
+        best_offer_inline_count: count("<BestOffer>"),
+        best_offer_with_attrs_count: count("<BestOffer "),
+        best_offer_enabled_count: count("BestOfferEnabled"),
+        best_offer_count_tag_count: count("<BestOfferCount>"),
+        best_offer_id_count: count("BestOfferID"),
+        seller_offer_count: count("SellerOffer"),
+        response_size_bytes: xml.len(),
+    };
+    tracing::info!(
+        "ebay GetItem probe ({item_id}): {} bytes, BestOfferDetails={}, <BestOffer>={}, <BestOffer (attrs)={}, BestOfferEnabled={}, BestOfferCount={}, BestOfferID={}, SellerOffer={}",
+        result.response_size_bytes,
+        result.best_offer_details_count,
+        result.best_offer_inline_count,
+        result.best_offer_with_attrs_count,
+        result.best_offer_enabled_count,
+        result.best_offer_count_tag_count,
+        result.best_offer_id_count,
+        result.seller_offer_count,
+    );
+    tracing::info!("ebay GetItem probe: dumped raw response to {}", result.dump_path);
+    Ok(result)
+}
+
 /// Decline a single Best Offer / counter-offer the user is involved with.
 /// "Already declined / expired" responses from eBay are treated as
 /// success — the caller's intent is satisfied either way.
