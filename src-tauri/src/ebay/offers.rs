@@ -66,12 +66,6 @@ pub async fn fetch_received_offers(
 
     let xml = trading_post(env, iaf_token, "GetMyeBayBuying", body).await?;
     let (offers, stats) = parse_offers_response_with_stats(&xml)?;
-    // Diagnostic — distinguishes "auth/scope failed" (zero items) from
-    // "no offers exist right now" (items present, BestOfferDetails
-    // absent or empty) from "offers exist but eBay didn't include them
-    // inline" (BestOfferDetails present with non-zero count, but no
-    // inline <BestOffer>). The third case is our cue to add a per-item
-    // GetItem follow-up.
     tracing::info!(
         "ebay offers diagnostic: items={}, with_BestOfferDetails={}, with_BestOfferCount>0={}, with_inline_offer={}",
         stats.watched_count,
@@ -80,10 +74,38 @@ pub async fn fetch_received_offers(
         stats.items_with_inline_offer,
     );
     if let Some(sample) = stats.sample_best_offer_details {
-        // Trim so we don't spam the log. ~600 chars is enough to see
-        // the <BestOfferDetails> shape without flooding.
         let trimmed: String = sample.chars().take(600).collect();
         tracing::info!("ebay offers: sample BestOfferDetails XML: {trimmed}");
+    }
+    // When we got items but no offer markup at all, log substring counts
+    // for every plausible offer-related fragment so we can tell whether
+    // (a) eBay didn't include offer data under any tag name, or (b) it's
+    // there but we're looking for the wrong tag. Also drop the raw XML
+    // to a temp file for inspection.
+    if stats.items_with_best_offer_details == 0 && stats.watched_count > 0 {
+        let count = |needle: &str| xml.matches(needle).count();
+        tracing::info!(
+            "ebay offers fragments: <BestOfferDetails={}, <BestOffer>={}, <BestOffer (with attrs)={}, BestOfferEnabled={}, BestOfferCount={}, BestOfferID={}, SellerOffer={}, OfferID={}",
+            count("<BestOfferDetails"),
+            count("<BestOffer>"),
+            count("<BestOffer "),
+            count("BestOfferEnabled"),
+            count("BestOfferCount"),
+            count("BestOfferID"),
+            count("SellerOffer"),
+            count("OfferID"),
+        );
+        let path = std::env::temp_dir().join(format!(
+            "diecast_offers_{}.xml",
+            chrono::Utc::now().timestamp()
+        ));
+        match std::fs::write(&path, xml.as_bytes()) {
+            Ok(()) => tracing::info!(
+                "ebay offers: dumped raw response to {} for inspection",
+                path.display()
+            ),
+            Err(e) => tracing::warn!("ebay offers: failed to dump raw response: {e}"),
+        }
     }
     Ok(offers)
 }
