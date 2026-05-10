@@ -3,8 +3,8 @@ use serde::Serialize;
 use sqlx::SqlitePool;
 
 use crate::ebay::{
-    add_to_watchlist, extract_legacy_item_id, fetch_watchlist_page, get_user_access_token,
-    legacy_id_from_v1, remove_from_watchlist, EbayEnvironment, DEFAULT_SCOPES,
+    add_to_watchlist, extract_legacy_item_id, fetch_watchlist_page, legacy_id_from_v1,
+    remove_from_watchlist, user_iaf_token,
 };
 use crate::error::{AppError, AppResult};
 use crate::progress::ProgressEmitter;
@@ -36,7 +36,7 @@ pub async fn sync_watchlist(
 ) -> AppResult<WatchlistSyncSummary> {
     let (env, token) = {
         progress.step("Refreshing eBay user token…", None, None);
-        user_token_for_trading(pool).await?
+        user_iaf_token(pool).await?
     };
 
     let mut summary = WatchlistSyncSummary::default();
@@ -123,7 +123,7 @@ pub async fn watch_and_save(
         )
     })?;
 
-    let (env, token) = user_token_for_trading(pool).await?;
+    let (env, token) = user_iaf_token(pool).await?;
     add_to_watchlist(env, &token, &legacy_id).await?;
 
     // Local mirror. Reuses the diecast-filter + listing_history + matcher
@@ -150,7 +150,7 @@ pub async fn unwatch_and_delete(pool: &SqlitePool, listing_id: i64) -> AppResult
     })?;
     let legacy_id = legacy_id_from_v1(&external_id).unwrap_or_else(|| external_id.clone());
 
-    let (env, token) = user_token_for_trading(pool).await?;
+    let (env, token) = user_iaf_token(pool).await?;
     remove_from_watchlist(env, &token, &legacy_id).await?;
 
     sqlx::query("DELETE FROM listings WHERE id = ?")
@@ -160,15 +160,3 @@ pub async fn unwatch_and_delete(pool: &SqlitePool, listing_id: i64) -> AppResult
     Ok(())
 }
 
-async fn user_token_for_trading(pool: &SqlitePool) -> AppResult<(EbayEnvironment, String)> {
-    let env_str = settings::get(pool, settings::KEY_EBAY_ENVIRONMENT)
-        .await?
-        .unwrap_or_else(|| "sandbox".to_string());
-    let env = EbayEnvironment::from_str(&env_str);
-    let app_id = settings::secret_get(settings::ENTRY_EBAY_APP_ID)?
-        .ok_or_else(|| AppError::NotConfigured("eBay App ID not set".into()))?;
-    let cert_id = settings::secret_get(settings::ENTRY_EBAY_CERT_ID)?
-        .ok_or_else(|| AppError::NotConfigured("eBay Cert ID not set".into()))?;
-    let token = get_user_access_token(pool, env, &app_id, &cert_id, DEFAULT_SCOPES).await?;
-    Ok((env, token))
-}

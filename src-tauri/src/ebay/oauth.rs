@@ -157,6 +157,22 @@ pub async fn get_user_access_token(
         .ok_or_else(|| AppError::Config("user access token missing after refresh".into()))
 }
 
+/// Convenience: resolve the configured environment + app credentials and
+/// return a refreshed user IAF token suitable for Trading API calls.
+/// Centralizes the boilerplate used by every Trading-API entry point.
+pub async fn user_iaf_token(pool: &SqlitePool) -> AppResult<(EbayEnvironment, String)> {
+    let env_str = settings::get(pool, settings::KEY_EBAY_ENVIRONMENT)
+        .await?
+        .unwrap_or_else(|| "sandbox".to_string());
+    let env = EbayEnvironment::from_str(&env_str);
+    let app_id = settings::secret_get(settings::ENTRY_EBAY_APP_ID)?
+        .ok_or_else(|| AppError::NotConfigured("eBay App ID not set".into()))?;
+    let cert_id = settings::secret_get(settings::ENTRY_EBAY_CERT_ID)?
+        .ok_or_else(|| AppError::NotConfigured("eBay Cert ID not set".into()))?;
+    let token = get_user_access_token(pool, env, &app_id, &cert_id, DEFAULT_SCOPES).await?;
+    Ok((env, token))
+}
+
 pub async fn disconnect(pool: &SqlitePool, env: EbayEnvironment) -> AppResult<()> {
     settings::secret_delete(&settings::ebay_user_refresh_token_entry(env.as_str()))?;
     settings::delete(pool, &settings::ebay_user_access_token_key(env.as_str())).await?;
