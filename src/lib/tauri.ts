@@ -131,6 +131,8 @@ export const api = {
     invoke<ItemProbeResult>("probe_ebay_item_for_offers", { itemId }),
   probeEbayMessagesForOffers: () =>
     invoke<MessagesProbeResult>("probe_ebay_messages_for_offers"),
+  probeEbayMessageBody: (messageId: string) =>
+    invoke<string>("probe_ebay_message_body", { messageId }),
   refreshEbayListing: (listingId: number) =>
     invoke<void>("refresh_ebay_listing", { listingId }),
   refreshAllEbayListings: () =>

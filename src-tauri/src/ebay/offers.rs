@@ -273,6 +273,46 @@ pub async fn probe_messages(
     Ok(result)
 }
 
+/// Probe a single message's full body via GetMyMessages with
+/// DetailLevel=ReturnMessages. Used to see what the HTML offer body
+/// actually looks like so we can write a real BestOfferID / offer-price
+/// parser without guessing.
+pub async fn probe_message_body(
+    env: EbayEnvironment,
+    iaf_token: &str,
+    message_id: &str,
+) -> AppResult<String> {
+    if !is_safe_id(message_id) {
+        return Err(AppError::Parse(format!(
+            "refusing to send malformed message id: {message_id:?}"
+        )));
+    }
+    let body = format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<GetMyMessagesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <DetailLevel>ReturnMessages</DetailLevel>
+  <MessageIDs>
+    <MessageID>{message_id}</MessageID>
+  </MessageIDs>
+</GetMyMessagesRequest>"#
+    );
+    let xml = trading_post(env, iaf_token, "GetMyMessages", &body).await?;
+    let path = std::env::temp_dir().join(format!(
+        "diecast_message_body_{}_{}.xml",
+        message_id,
+        chrono::Utc::now().timestamp()
+    ));
+    if let Err(e) = std::fs::write(&path, xml.as_bytes()) {
+        tracing::warn!("ebay message body probe: failed to write dump: {e}");
+    }
+    tracing::info!(
+        "ebay message body probe ({message_id}): {} bytes, dumped to {}",
+        xml.len(),
+        path.display()
+    );
+    Ok(path.to_string_lossy().into_owned())
+}
+
 /// Decline a single Best Offer / counter-offer the user is involved with.
 /// "Already declined / expired" responses from eBay are treated as
 /// success — the caller's intent is satisfied either way.

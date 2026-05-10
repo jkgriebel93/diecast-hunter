@@ -413,6 +413,15 @@ pub async fn probe_ebay_messages_for_offers(
 }
 
 #[tauri::command]
+pub async fn probe_ebay_message_body(
+    state: State<'_, AppState>,
+    message_id: String,
+) -> AppResult<String> {
+    let (env, token) = crate::ebay::user_iaf_token(&state.db.pool).await?;
+    crate::ebay::probe_message_body(env, &token, message_id.trim()).await
+}
+
+#[tauri::command]
 pub async fn refresh_ebay_listing(
     state: State<'_, AppState>,
     listing_id: i64,

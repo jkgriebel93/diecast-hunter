@@ -37,6 +37,11 @@ export function Offers() {
     null,
   );
 
+  const [bodyProbeInput, setBodyProbeInput] = useState("");
+  const [bodyProbing, setBodyProbing] = useState(false);
+  const [bodyProbePath, setBodyProbePath] = useState<string | null>(null);
+  const [bodyProbeError, setBodyProbeError] = useState<string | null>(null);
+
   async function load() {
     setLoading(true);
     setError(null);
@@ -82,6 +87,23 @@ export function Offers() {
       setMessagesProbeError(String(err));
     } finally {
       setMessagesProbing(false);
+    }
+  }
+
+  async function onProbeBody(e: FormEvent) {
+    e.preventDefault();
+    const id = bodyProbeInput.trim();
+    if (!id) return;
+    setBodyProbing(true);
+    setBodyProbeError(null);
+    setBodyProbePath(null);
+    try {
+      const path = await api.probeEbayMessageBody(id);
+      setBodyProbePath(path);
+    } catch (err) {
+      setBodyProbeError(String(err));
+    } finally {
+      setBodyProbing(false);
     }
   }
 
@@ -218,6 +240,32 @@ export function Offers() {
             <div className="text-slate-500 break-all">
               dump: {messagesProbeResult.dump_path}
             </div>
+          </div>
+        )}
+
+        <form onSubmit={onProbeBody} className="flex items-center gap-2 pt-2 border-t border-border">
+          <input
+            className="input flex-1"
+            type="text"
+            value={bodyProbeInput}
+            onChange={(e) => setBodyProbeInput(e.target.value)}
+            placeholder="MessageID (e.g. 208284128583) to fetch full body"
+            autoComplete="off"
+          />
+          <button
+            className="btn-secondary shrink-0"
+            type="submit"
+            disabled={bodyProbing || !bodyProbeInput.trim()}
+          >
+            {bodyProbing ? "Fetching…" : "Probe body"}
+          </button>
+        </form>
+        {bodyProbeError && (
+          <div className="text-xs text-red-400">{bodyProbeError}</div>
+        )}
+        {bodyProbePath && (
+          <div className="text-xs text-slate-300 font-mono break-all">
+            dumped to: {bodyProbePath}
           </div>
         )}
       </section>
