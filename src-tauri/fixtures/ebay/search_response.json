@@ -1,0 +1,36 @@
+{
+  "href": "https://api.ebay.com/buy/browse/v1/item_summary/search?category_ids=222&q=jeff+gordon&limit=2&offset=0",
+  "total": 314,
+  "next": "https://api.ebay.com/buy/browse/v1/item_summary/search?category_ids=222&q=jeff+gordon&limit=2&offset=2",
+  "limit": 2,
+  "offset": 0,
+  "itemSummaries": [
+    {
+      "itemId": "v1|123456789012|0",
+      "legacyItemId": "123456789012",
+      "title": "2002 Jeff Gordon #24 Pepsi Daytona 1:24 Action ARC NASCAR Diecast",
+      "image": { "imageUrl": "https://i.ebayimg.com/images/g/abc/s-l1600.jpg" },
+      "price": { "value": "49.95", "currency": "USD" },
+      "shippingOptions": [
+        { "shippingCost": { "value": "7.50", "currency": "USD" }, "shippingCostType": "FIXED" }
+      ],
+      "itemWebUrl": "https://www.ebay.com/itm/123456789012",
+      "seller": { "username": "diecast_seller_42", "feedbackPercentage": "99.8", "feedbackScore": 4271 },
+      "condition": "New",
+      "buyingOptions": ["FIXED_PRICE"],
+      "itemEndDate": "2026-08-01T12:00:00.000Z"
+    },
+    {
+      "itemId": "v1|234567890123|0",
+      "legacyItemId": "234567890123",
+      "title": "1998 Jeff Gordon #24 DuPont 1:24 Action NASCAR Diecast Auction",
+      "image": { "imageUrl": "https://i.ebayimg.com/images/g/def/s-l1600.jpg" },
+      "price": { "value": "12.50", "currency": "USD" },
+      "itemWebUrl": "https://www.ebay.com/itm/234567890123",
+      "seller": { "username": "racing_collectibles", "feedbackPercentage": "100.0" },
+      "condition": "Used",
+      "buyingOptions": ["AUCTION"],
+      "itemEndDate": "2026-05-12T20:00:00.000Z"
+    }
+  ]
+}

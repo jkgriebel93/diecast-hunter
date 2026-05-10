@@ -4,6 +4,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { Dashboard } from "@/pages/Dashboard";
 import { Collection } from "@/pages/Collection";
 import { Listings } from "@/pages/Listings";
+import { Browse } from "@/pages/Browse";
 import { Settings } from "@/pages/Settings";
 
 export default function App() {
@@ -17,6 +18,7 @@ export default function App() {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/collection" element={<Collection />} />
           <Route path="/listings" element={<Listings />} />
+          <Route path="/browse" element={<Browse />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>
