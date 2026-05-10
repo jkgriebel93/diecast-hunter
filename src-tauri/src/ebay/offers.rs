@@ -5,6 +5,7 @@
 //! goes through RespondToBestOffer; accepting deep-links to eBay so its
 //! anti-fraud checks can run during checkout.
 
+use std::collections::HashMap;
 use std::error::Error as _;
 use std::time::Duration;
 
@@ -190,6 +191,88 @@ pub async fn probe_item(
     Ok(result)
 }
 
+/// Result of the GetMyMessages probe. Each <MessageType> seen is
+/// reported with its count so we can spot the type that flags
+/// Send-Offer-to-Buyer notifications.
+#[derive(Debug, Clone, Serialize)]
+pub struct MessagesProbeResult {
+    pub dump_path: String,
+    pub response_size_bytes: usize,
+    pub message_count: usize,
+    pub item_id_count: usize,
+    pub offer_keyword_count: usize,
+    pub sent_you_keyword_count: usize,
+    /// (MessageType value, count). Sorted descending by count.
+    pub message_types: Vec<(String, usize)>,
+}
+
+/// Probe Trading API GetMyMessages over the last 30 days. Returns
+/// substring + MessageType breakdown so we can identify whether
+/// Send-Offer-to-Buyer notifications come through here and what
+/// <MessageType> value flags them.
+pub async fn probe_messages(
+    env: EbayEnvironment,
+    iaf_token: &str,
+) -> AppResult<MessagesProbeResult> {
+    let now = chrono::Utc::now();
+    let start = now - chrono::Duration::days(30);
+    let body = format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<GetMyMessagesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <DetailLevel>ReturnHeaders</DetailLevel>
+  <Pagination>
+    <EntriesPerPage>200</EntriesPerPage>
+    <PageNumber>1</PageNumber>
+  </Pagination>
+  <StartTime>{}</StartTime>
+  <EndTime>{}</EndTime>
+</GetMyMessagesRequest>"#,
+        start.to_rfc3339(),
+        now.to_rfc3339(),
+    );
+    let xml = trading_post(env, iaf_token, "GetMyMessages", &body).await?;
+
+    let path = std::env::temp_dir().join(format!(
+        "diecast_messages_{}.xml",
+        now.timestamp()
+    ));
+    if let Err(e) = std::fs::write(&path, xml.as_bytes()) {
+        tracing::warn!("ebay messages probe: failed to write dump: {e}");
+    }
+
+    let xml_lower = xml.to_lowercase();
+    let mut type_counts: HashMap<String, usize> = HashMap::new();
+    for cap in MESSAGE_TYPE_RE.captures_iter(&xml) {
+        if let Some(m) = cap.get(1) {
+            *type_counts.entry(m.as_str().to_string()).or_insert(0) += 1;
+        }
+    }
+    let mut message_types: Vec<(String, usize)> =
+        type_counts.into_iter().collect();
+    message_types.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let result = MessagesProbeResult {
+        dump_path: path.to_string_lossy().into_owned(),
+        response_size_bytes: xml.len(),
+        message_count: xml.matches("<Message>").count(),
+        item_id_count: xml.matches("<ItemID>").count(),
+        offer_keyword_count: xml_lower.matches("offer").count(),
+        sent_you_keyword_count: xml_lower.matches("sent you").count(),
+        message_types,
+    };
+    tracing::info!(
+        "ebay messages probe: {} bytes, messages={}, item_ids={}, offer_keyword={}, sent_you_keyword={}, types={:?}",
+        result.response_size_bytes,
+        result.message_count,
+        result.item_id_count,
+        result.offer_keyword_count,
+        result.sent_you_keyword_count,
+        result.message_types,
+    );
+    tracing::info!("ebay messages probe: dumped raw response to {}", result.dump_path);
+    Ok(result)
+}
+
 /// Decline a single Best Offer / counter-offer the user is involved with.
 /// "Already declined / expired" responses from eBay are treated as
 /// success — the caller's intent is satisfied either way.
@@ -269,6 +352,8 @@ static ITEM_BLOCK_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?s)<Item>(.*?)</Item>").unwrap());
 static OFFER_BLOCK_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?s)<BestOffer>(.*?)</BestOffer>").unwrap());
+static MESSAGE_TYPE_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"<MessageType>([^<]+)</MessageType>").unwrap());
 
 pub fn parse_offers_response(xml: &str) -> AppResult<Vec<ReceivedOffer>> {
     parse_offers_response_with_stats(xml).map(|(o, _)| o)

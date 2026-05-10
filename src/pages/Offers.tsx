@@ -3,6 +3,7 @@ import {
   api,
   formatCents,
   type ItemProbeResult,
+  type MessagesProbeResult,
   type ReceivedOffer,
 } from "@/lib/tauri";
 
@@ -28,6 +29,13 @@ export function Offers() {
   const [probing, setProbing] = useState(false);
   const [probeResult, setProbeResult] = useState<ItemProbeResult | null>(null);
   const [probeError, setProbeError] = useState<string | null>(null);
+
+  const [messagesProbing, setMessagesProbing] = useState(false);
+  const [messagesProbeResult, setMessagesProbeResult] =
+    useState<MessagesProbeResult | null>(null);
+  const [messagesProbeError, setMessagesProbeError] = useState<string | null>(
+    null,
+  );
 
   async function load() {
     setLoading(true);
@@ -60,6 +68,20 @@ export function Offers() {
       setProbeError(String(err));
     } finally {
       setProbing(false);
+    }
+  }
+
+  async function onProbeMessages() {
+    setMessagesProbing(true);
+    setMessagesProbeError(null);
+    setMessagesProbeResult(null);
+    try {
+      const result = await api.probeEbayMessagesForOffers();
+      setMessagesProbeResult(result);
+    } catch (err) {
+      setMessagesProbeError(String(err));
+    } finally {
+      setMessagesProbing(false);
     }
   }
 
@@ -151,6 +173,50 @@ export function Offers() {
             <div>SellerOffer: {probeResult.seller_offer_count}</div>
             <div className="text-slate-500 break-all">
               dump: {probeResult.dump_path}
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="card space-y-2 border-amber-500/30">
+        <div className="text-xs text-amber-400/90">
+          Diagnostic — fetch your eBay My-Messages inbox for the last 30
+          days and report the breakdown of MessageType values. If
+          Send-Offer-to-Buyer notifications land here, one of the types
+          should match.
+        </div>
+        <button
+          className="btn-secondary"
+          type="button"
+          onClick={onProbeMessages}
+          disabled={messagesProbing}
+        >
+          {messagesProbing ? "Probing messages…" : "Probe messages"}
+        </button>
+        {messagesProbeError && (
+          <div className="text-xs text-red-400">{messagesProbeError}</div>
+        )}
+        {messagesProbeResult && (
+          <div className="text-xs text-slate-300 font-mono space-y-0.5">
+            <div>response: {messagesProbeResult.response_size_bytes} bytes</div>
+            <div>&lt;Message&gt;: {messagesProbeResult.message_count}</div>
+            <div>&lt;ItemID&gt;: {messagesProbeResult.item_id_count}</div>
+            <div>"offer" (CI): {messagesProbeResult.offer_keyword_count}</div>
+            <div>"sent you" (CI): {messagesProbeResult.sent_you_keyword_count}</div>
+            <div className="pt-1">MessageType breakdown:</div>
+            {messagesProbeResult.message_types.length === 0 ? (
+              <div className="pl-3 text-slate-500">
+                (no &lt;MessageType&gt; tags found)
+              </div>
+            ) : (
+              messagesProbeResult.message_types.map(([type, count]) => (
+                <div key={type} className="pl-3">
+                  {count}× {type}
+                </div>
+              ))
+            )}
+            <div className="text-slate-500 break-all">
+              dump: {messagesProbeResult.dump_path}
             </div>
           </div>
         )}

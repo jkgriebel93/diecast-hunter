@@ -87,6 +87,7 @@ pub fn run() {
             commands::list_ebay_offers,
             commands::decline_ebay_offer,
             commands::probe_ebay_item_for_offers,
+            commands::probe_ebay_messages_for_offers,
             commands::refresh_ebay_listing,
             commands::refresh_all_ebay_listings,
             commands::sync_ebay_watchlist,

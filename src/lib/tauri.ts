@@ -129,6 +129,8 @@ export const api = {
     invoke<void>("decline_ebay_offer", { itemId, offerId }),
   probeEbayItemForOffers: (itemId: string) =>
     invoke<ItemProbeResult>("probe_ebay_item_for_offers", { itemId }),
+  probeEbayMessagesForOffers: () =>
+    invoke<MessagesProbeResult>("probe_ebay_messages_for_offers"),
   refreshEbayListing: (listingId: number) =>
     invoke<void>("refresh_ebay_listing", { listingId }),
   refreshAllEbayListings: () =>
@@ -327,6 +329,17 @@ export interface ItemProbeResult {
   best_offer_id_count: number;
   seller_offer_count: number;
   response_size_bytes: number;
+}
+
+export interface MessagesProbeResult {
+  dump_path: string;
+  response_size_bytes: number;
+  message_count: number;
+  item_id_count: number;
+  offer_keyword_count: number;
+  sent_you_keyword_count: number;
+  /** [MessageType, count] tuples, sorted descending by count. */
+  message_types: [string, number][];
 }
 
 export interface ReceivedOffer {

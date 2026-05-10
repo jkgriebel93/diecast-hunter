@@ -20,7 +20,8 @@ pub use oauth::{
     OauthStatus, DEFAULT_SCOPES,
 };
 pub use offers::{
-    decline_offer, fetch_received_offers, probe_item, ItemProbeResult, ReceivedOffer,
+    decline_offer, fetch_received_offers, probe_item, probe_messages, ItemProbeResult,
+    MessagesProbeResult, ReceivedOffer,
 };
 pub use parse::{extract_legacy_item_id, legacy_id_from_v1};
 pub use search::{search_diecasts, SearchFilters, SearchPage};
