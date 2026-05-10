@@ -362,6 +362,22 @@ pub async fn search_ebay_listings(
 }
 
 #[tauri::command]
+pub async fn watch_ebay_listing(
+    state: State<'_, AppState>,
+    input: String,
+) -> AppResult<sync::AddListingResult> {
+    sync::watch_and_save(&state.db.pool, &input).await
+}
+
+#[tauri::command]
+pub async fn unwatch_ebay_listing(
+    state: State<'_, AppState>,
+    listing_id: i64,
+) -> AppResult<()> {
+    sync::unwatch_and_delete(&state.db.pool, listing_id).await
+}
+
+#[tauri::command]
 pub async fn refresh_ebay_listing(
     state: State<'_, AppState>,
     listing_id: i64,

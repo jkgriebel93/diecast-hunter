@@ -120,6 +120,10 @@ export const api = {
       limit,
       offset,
     }),
+  watchEbayListing: (input: string) =>
+    invoke<AddListingResult>("watch_ebay_listing", { input }),
+  unwatchEbayListing: (listingId: number) =>
+    invoke<void>("unwatch_ebay_listing", { listingId }),
   refreshEbayListing: (listingId: number) =>
     invoke<void>("refresh_ebay_listing", { listingId }),
   refreshAllEbayListings: () =>

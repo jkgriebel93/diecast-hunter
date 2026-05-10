@@ -45,6 +45,7 @@ export function Listings() {
   const [addError, setAddError] = useState<string | null>(null);
 
   const [refreshingId, setRefreshingId] = useState<number | null>(null);
+  const [unwatchingId, setUnwatchingId] = useState<number | null>(null);
   const [bulkRefreshing, setBulkRefreshing] = useState(false);
   const [bulkSummary, setBulkSummary] =
     useState<RefreshSummary | null>(null);
@@ -104,6 +105,23 @@ export function Listings() {
       setError(String(e));
     } finally {
       setRefreshingId(null);
+    }
+  }
+
+  async function onUnwatch(row: ListingRow) {
+    const ok = window.confirm(
+      `Remove this listing from your eBay watchlist and delete its local row (including price history)?\n\n${row.title}`,
+    );
+    if (!ok) return;
+    setUnwatchingId(row.listing_id);
+    setError(null);
+    try {
+      await api.unwatchEbayListing(row.listing_id);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setUnwatchingId(null);
     }
   }
 
@@ -463,7 +481,9 @@ export function Listings() {
               key={r.listing_id}
               row={r}
               refreshing={refreshingId === r.listing_id}
+              unwatching={unwatchingId === r.listing_id}
               onRefresh={() => onRefreshOne(r.listing_id)}
+              onUnwatch={() => onUnwatch(r)}
               onConfirmMatch={() => onConfirmMatch(r.listing_id)}
               onClearMatch={() => onClearMatch(r.listing_id)}
               onRejectMatch={() => onRejectMatch(r.listing_id)}
@@ -476,7 +496,9 @@ export function Listings() {
         <GroupedByDriver
           rows={filteredRows ?? []}
           refreshingId={refreshingId}
+          unwatchingId={unwatchingId}
           onRefresh={onRefreshOne}
+          onUnwatch={onUnwatch}
           onConfirmMatch={onConfirmMatch}
           onClearMatch={onClearMatch}
           onRejectMatch={onRejectMatch}
@@ -512,7 +534,9 @@ export function Listings() {
 function ListingCard({
   row,
   refreshing,
+  unwatching,
   onRefresh,
+  onUnwatch,
   onConfirmMatch,
   onClearMatch,
   onRejectMatch,
@@ -521,7 +545,9 @@ function ListingCard({
 }: {
   row: ListingRow;
   refreshing: boolean;
+  unwatching: boolean;
   onRefresh: () => void;
+  onUnwatch: () => void;
   onConfirmMatch: () => void;
   onClearMatch: () => void;
   onRejectMatch: () => void;
@@ -623,6 +649,17 @@ function ListingCard({
           >
             {refreshing ? "Refreshing…" : "Refresh"}
           </button>
+          {row.seller_code === "ebay" && (
+            <button
+              className="text-xs text-slate-500 hover:text-red-300"
+              type="button"
+              onClick={onUnwatch}
+              disabled={unwatching}
+              title="Remove from your eBay watchlist and delete this local row"
+            >
+              {unwatching ? "Removing…" : "Remove from watchlist"}
+            </button>
+          )}
           {matched && !row.match_user_confirmed && (
             <button
               className="text-xs text-emerald-400 hover:text-emerald-300"
@@ -738,7 +775,9 @@ function DealBadge({ score }: { score: number }) {
 function GroupedByDriver({
   rows,
   refreshingId,
+  unwatchingId,
   onRefresh,
+  onUnwatch,
   onConfirmMatch,
   onClearMatch,
   onRejectMatch,
@@ -747,7 +786,9 @@ function GroupedByDriver({
 }: {
   rows: ListingRow[];
   refreshingId: number | null;
+  unwatchingId: number | null;
   onRefresh: (id: number) => void;
+  onUnwatch: (row: ListingRow) => void;
   onConfirmMatch: (id: number) => void;
   onClearMatch: (id: number) => void;
   onRejectMatch: (id: number) => void;
@@ -797,7 +838,9 @@ function GroupedByDriver({
                   <ListingCard
                     row={r}
                     refreshing={refreshingId === r.listing_id}
+                    unwatching={unwatchingId === r.listing_id}
                     onRefresh={() => onRefresh(r.listing_id)}
+                    onUnwatch={() => onUnwatch(r)}
                     onConfirmMatch={() => onConfirmMatch(r.listing_id)}
                     onClearMatch={() => onClearMatch(r.listing_id)}
                     onRejectMatch={() => onRejectMatch(r.listing_id)}

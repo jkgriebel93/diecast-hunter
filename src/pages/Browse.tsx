@@ -1,4 +1,4 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import {
   api,
   formatCents,
@@ -32,8 +32,8 @@ const SORT_OPTIONS: { value: string; label: string }[] = [
  * Browse eBay's diecast catalog. Backed by the Browse API search endpoint;
  * results are constrained to "Diecast & Toy Vehicles" so they stay aligned
  * with the rest of the app's diecast filter. Each card has an inline
- * "Save" action that mirrors the listing into the local DB via the existing
- * add-listing path. Adding to the actual eBay watchlist arrives in stage 2.
+ * Watch / Unwatch toggle that adds the item to the user's eBay watchlist
+ * via the Trading API and mirrors it into the local listings table.
  */
 export function Browse() {
   const [query, setQuery] = useState("");
@@ -47,9 +47,32 @@ export function Browse() {
   const [offset, setOffset] = useState(0);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [savingItemId, setSavingItemId] = useState<string | null>(null);
-  const [savedItemIds, setSavedItemIds] = useState<Set<string>>(new Set());
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [busyItemId, setBusyItemId] = useState<string | null>(null);
+  /** itemId → local listings.id. Populated from existing saved listings on
+   *  mount and after every watch/unwatch so the UI can flip the button. */
+  const [watchedByItemId, setWatchedByItemId] = useState<Map<string, number>>(
+    new Map(),
+  );
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    void loadWatched();
+  }, []);
+
+  async function loadWatched() {
+    try {
+      const rows = await api.listListings();
+      const m = new Map<string, number>();
+      for (const r of rows) {
+        if (r.seller_code === "ebay") m.set(r.external_id, r.listing_id);
+      }
+      setWatchedByItemId(m);
+    } catch (e) {
+      // Non-fatal — Watch buttons just won't reflect existing watchlist
+      // membership. Surface as a soft warning.
+      setError(`Couldn't load existing saved listings: ${e}`);
+    }
+  }
 
   function buildFilters(): EbaySearchFilters {
     const minCents = parseDollarsToCents(priceMin);
@@ -87,28 +110,55 @@ export function Browse() {
     await runSearch(0);
   }
 
-  async function onSave(item: EbaySearchItem) {
-    setSavingItemId(item.item_id);
-    setSaveMessage(null);
+  async function onWatch(item: EbaySearchItem) {
+    setBusyItemId(item.item_id);
+    setActionMessage(null);
     setError(null);
     try {
-      const result = await api.addEbayListing(
+      const result = await api.watchEbayListing(
         item.legacy_item_id ?? item.web_url,
       );
       if (result.filtered_reason) {
+        // The eBay-side AddToWatchList already succeeded by this point —
+        // tell the user so the UI state isn't confusing.
         setError(
-          `${result.filtered_reason}. To save anyway, turn off the diecast filter in Settings.`,
+          `Added to eBay watchlist, but local save was filtered: ${result.filtered_reason}. To track locally too, turn off the diecast filter in Settings and try again.`,
         );
-      } else {
-        setSavedItemIds((prev) => new Set(prev).add(item.item_id));
-        setSaveMessage(
-          `${result.created ? "Saved" : "Updated"}: ${result.title}`,
+      } else if (result.listing_id !== null) {
+        setWatchedByItemId((prev) => {
+          const next = new Map(prev);
+          next.set(item.item_id, result.listing_id!);
+          return next;
+        });
+        setActionMessage(
+          `${result.created ? "Watched" : "Updated"}: ${result.title}`,
         );
       }
     } catch (e) {
       setError(String(e));
     } finally {
-      setSavingItemId(null);
+      setBusyItemId(null);
+    }
+  }
+
+  async function onUnwatch(item: EbaySearchItem) {
+    const listingId = watchedByItemId.get(item.item_id);
+    if (listingId === undefined) return;
+    setBusyItemId(item.item_id);
+    setActionMessage(null);
+    setError(null);
+    try {
+      await api.unwatchEbayListing(listingId);
+      setWatchedByItemId((prev) => {
+        const next = new Map(prev);
+        next.delete(item.item_id);
+        return next;
+      });
+      setActionMessage(`Removed from watchlist: ${item.title}`);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusyItemId(null);
     }
   }
 
@@ -132,8 +182,8 @@ export function Browse() {
       <header>
         <h2 className="text-2xl font-semibold">Browse eBay</h2>
         <p className="text-sm text-slate-500">
-          Search the diecast catalog on eBay. Save listings locally to track
-          their price; full watchlist sync ships in the next stage.
+          Search the diecast catalog on eBay. Watch a listing to add it to
+          your eBay watchlist and track it locally.
         </p>
       </header>
 
@@ -219,8 +269,8 @@ export function Browse() {
           {error}
         </div>
       )}
-      {saveMessage && (
-        <div className="text-xs text-emerald-400">{saveMessage}</div>
+      {actionMessage && (
+        <div className="text-xs text-emerald-400">{actionMessage}</div>
       )}
 
       {page && (
@@ -265,9 +315,10 @@ export function Browse() {
             <SearchCard
               key={item.item_id}
               item={item}
-              saving={savingItemId === item.item_id}
-              saved={savedItemIds.has(item.item_id)}
-              onSave={() => onSave(item)}
+              busy={busyItemId === item.item_id}
+              watched={watchedByItemId.has(item.item_id)}
+              onWatch={() => onWatch(item)}
+              onUnwatch={() => onUnwatch(item)}
             />
           ))}
         </ul>
@@ -278,14 +329,16 @@ export function Browse() {
 
 function SearchCard({
   item,
-  saving,
-  saved,
-  onSave,
+  busy,
+  watched,
+  onWatch,
+  onUnwatch,
 }: {
   item: EbaySearchItem;
-  saving: boolean;
-  saved: boolean;
-  onSave: () => void;
+  busy: boolean;
+  watched: boolean;
+  onWatch: () => void;
+  onUnwatch: () => void;
 }) {
   const total =
     item.price_cents !== null
@@ -354,15 +407,27 @@ function SearchCard({
         >
           View on eBay →
         </a>
-        <button
-          type="button"
-          className="text-slate-300 hover:text-slate-100 disabled:opacity-50"
-          onClick={onSave}
-          disabled={saving || saved}
-          title="Save to local listings for tracking"
-        >
-          {saved ? "✓ Saved" : saving ? "Saving…" : "Save"}
-        </button>
+        {watched ? (
+          <button
+            type="button"
+            className="text-slate-300 hover:text-red-300 disabled:opacity-50"
+            onClick={onUnwatch}
+            disabled={busy}
+            title="Remove from your eBay watchlist and stop tracking locally"
+          >
+            {busy ? "Unwatching…" : "✓ Watching · Unwatch"}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="text-slate-300 hover:text-slate-100 disabled:opacity-50"
+            onClick={onWatch}
+            disabled={busy}
+            title="Add to your eBay watchlist and track locally"
+          >
+            {busy ? "Watching…" : "Watch"}
+          </button>
+        )}
       </div>
     </li>
   );

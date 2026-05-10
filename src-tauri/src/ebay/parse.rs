@@ -19,6 +19,20 @@ pub fn extract_legacy_item_id(input: &str) -> Option<String> {
     ITEM_ID_RE.captures(s)?.name("id").map(|m| m.as_str().to_string())
 }
 
+/// Browse API v1 ids look like "v1|123456789012|0" or
+/// "v1|123456789012|987654321"; the middle segment is the legacy id eBay
+/// surfaces in URLs and Trading-API requests.
+pub fn legacy_id_from_v1(v1: &str) -> Option<String> {
+    let mut parts = v1.split('|');
+    let _ = parts.next()?;
+    let legacy = parts.next()?;
+    if !legacy.is_empty() && legacy.chars().all(|c| c.is_ascii_digit()) {
+        Some(legacy.to_string())
+    } else {
+        None
+    }
+}
+
 pub fn dollars_string_to_cents(s: &str) -> Option<i64> {
     let cleaned: String = s
         .chars()
@@ -85,5 +99,20 @@ mod tests {
         assert_eq!(dollars_string_to_cents("29.99"), Some(2999));
         assert_eq!(dollars_string_to_cents("100.00"), Some(10000));
         assert_eq!(dollars_string_to_cents("0.50"), Some(50));
+    }
+
+    #[test]
+    fn legacy_from_v1_id() {
+        assert_eq!(
+            legacy_id_from_v1("v1|123456789012|0").as_deref(),
+            Some("123456789012")
+        );
+        assert_eq!(
+            legacy_id_from_v1("v1|123456789012|987654321").as_deref(),
+            Some("123456789012")
+        );
+        assert_eq!(legacy_id_from_v1("123456789012"), None);
+        assert_eq!(legacy_id_from_v1("v1|abc|0"), None);
+        assert_eq!(legacy_id_from_v1(""), None);
     }
 }

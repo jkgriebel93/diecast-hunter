@@ -15,7 +15,9 @@ pub use ebay_listing::{
     add_listing_from_input, refresh_all_active, refresh_listing, AddListingResult,
     RefreshSummary,
 };
-pub use ebay_watchlist::{sync_watchlist, WatchlistSyncSummary};
+pub use ebay_watchlist::{
+    sync_watchlist, unwatch_and_delete, watch_and_save, WatchlistSyncSummary,
+};
 pub use fb_listing::{upsert_from_payload, FbListingPayload, FbSaveResult};
 pub use listing_match::{match_all, MatchSummary};
 pub use registry_link::{link_listing_to_registry, LinkResult};
