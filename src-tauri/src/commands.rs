@@ -350,6 +350,18 @@ pub async fn add_ebay_listing(
 }
 
 #[tauri::command]
+pub async fn search_ebay_listings(
+    state: State<'_, AppState>,
+    query: String,
+    filters: crate::ebay::SearchFilters,
+    limit: u32,
+    offset: u32,
+) -> AppResult<crate::ebay::SearchPage> {
+    let client = crate::ebay::EbayClient::from_settings(state.db.pool.clone()).await?;
+    crate::ebay::search_diecasts(&client, &query, &filters, limit, offset).await
+}
+
+#[tauri::command]
 pub async fn refresh_ebay_listing(
     state: State<'_, AppState>,
     listing_id: i64,

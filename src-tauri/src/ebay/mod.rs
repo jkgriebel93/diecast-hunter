@@ -7,6 +7,7 @@ pub mod category;
 pub mod client;
 pub mod oauth;
 pub mod parse;
+pub mod search;
 pub mod trading;
 
 pub use category::is_diecast;
@@ -18,4 +19,5 @@ pub use oauth::{
     OauthStatus, DEFAULT_SCOPES,
 };
 pub use parse::extract_legacy_item_id;
+pub use search::{search_diecasts, SearchFilters, SearchPage};
 pub use trading::fetch_watchlist_page;

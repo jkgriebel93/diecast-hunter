@@ -108,6 +108,18 @@ export const api = {
   disconnectEbayOauth: () => invoke<void>("disconnect_ebay_oauth"),
   addEbayListing: (input: string) =>
     invoke<AddListingResult>("add_ebay_listing", { input }),
+  searchEbayListings: (
+    query: string,
+    filters: EbaySearchFilters,
+    limit: number,
+    offset: number,
+  ) =>
+    invoke<EbaySearchPage>("search_ebay_listings", {
+      query,
+      filters,
+      limit,
+      offset,
+    }),
   refreshEbayListing: (listingId: number) =>
     invoke<void>("refresh_ebay_listing", { listingId }),
   refreshAllEbayListings: () =>
@@ -261,6 +273,38 @@ export interface AddListingResult {
   created: boolean;
   title: string;
   filtered_reason: string | null;
+}
+
+export interface EbaySearchFilters {
+  conditions: string[];
+  price_min_cents: number | null;
+  price_max_cents: number | null;
+  buying_options: string[];
+  sort: string | null;
+}
+
+export interface EbaySearchItem {
+  item_id: string;
+  legacy_item_id: string | null;
+  title: string;
+  price_cents: number | null;
+  shipping_cents: number | null;
+  currency: string;
+  condition: string | null;
+  listing_type: string | null;
+  seller_username: string | null;
+  seller_rating: number | null;
+  image_url: string | null;
+  web_url: string;
+  end_time: number | null;
+}
+
+export interface EbaySearchPage {
+  items: EbaySearchItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
 }
 
 export interface RefreshSummary {
