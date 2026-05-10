@@ -3,7 +3,8 @@ use serde::Serialize;
 use sqlx::SqlitePool;
 
 use crate::ebay::{
-    extract_legacy_item_id, fetch_item_by_legacy_id, is_diecast, EbayClient, EbayItem,
+    extract_legacy_item_id, fetch_item_by_legacy_id, is_diecast, legacy_id_from_v1,
+    EbayClient, EbayItem,
 };
 use crate::error::{AppError, AppResult};
 use crate::settings;
@@ -105,7 +106,7 @@ pub async fn refresh_listing(pool: &SqlitePool, listing_id: i64) -> AppResult<()
 
     // listings.external_id is the eBay v1 id ("v1|123|0"). Pull the legacy id
     // back out for the Browse API call.
-    let legacy_id = parse_legacy_from_v1_id(&external_id).unwrap_or(external_id.clone());
+    let legacy_id = legacy_id_from_v1(&external_id).unwrap_or(external_id.clone());
 
     let client = EbayClient::from_settings(pool.clone()).await?;
     let item = fetch_item_by_legacy_id(&client, &legacy_id).await?;
@@ -261,15 +262,3 @@ async fn ebay_seller_id(pool: &SqlitePool) -> AppResult<i64> {
     Ok(row.0)
 }
 
-/// Browse API v1 ids look like "v1|123456789012|0" or
-/// "v1|123456789012|987654321". The middle segment is the legacy id.
-fn parse_legacy_from_v1_id(v1: &str) -> Option<String> {
-    let mut parts = v1.split('|');
-    let _v1 = parts.next()?;
-    let legacy = parts.next()?;
-    if legacy.chars().all(|c| c.is_ascii_digit()) && !legacy.is_empty() {
-        Some(legacy.to_string())
-    } else {
-        None
-    }
-}

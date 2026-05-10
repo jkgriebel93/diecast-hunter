@@ -18,6 +18,6 @@ pub use oauth::{
     authorize_url, disconnect, exchange_code, get_user_access_token, status,
     OauthStatus, DEFAULT_SCOPES,
 };
-pub use parse::extract_legacy_item_id;
+pub use parse::{extract_legacy_item_id, legacy_id_from_v1};
 pub use search::{search_diecasts, SearchFilters, SearchPage};
-pub use trading::fetch_watchlist_page;
+pub use trading::{add_to_watchlist, fetch_watchlist_page, remove_from_watchlist};

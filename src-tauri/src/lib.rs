@@ -82,6 +82,8 @@ pub fn run() {
             commands::disconnect_ebay_oauth,
             commands::add_ebay_listing,
             commands::search_ebay_listings,
+            commands::watch_ebay_listing,
+            commands::unwatch_ebay_listing,
             commands::refresh_ebay_listing,
             commands::refresh_all_ebay_listings,
             commands::sync_ebay_watchlist,
