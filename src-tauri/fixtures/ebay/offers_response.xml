@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <GetMyeBayBuyingResponse xmlns="urn:ebay:apis:eBLBaseComponents">
-  <Timestamp>2026-05-09T12:00:00.000Z</Timestamp>
+  <Timestamp>2026-05-10T12:00:00.000Z</Timestamp>
   <Ack>Success</Ack>
   <Version>1193</Version>
   <Build>E1193_CORE_APIBUYING_19234567_R1</Build>
-  <BestOfferList>
+  <WatchList>
     <ItemArray>
       <Item>
         <ItemID>123456789012</ItemID>
@@ -19,17 +19,17 @@
           <CurrentPrice currencyID="USD">49.95</CurrentPrice>
         </SellingStatus>
         <BestOfferDetails>
+          <BestOfferEnabled>true</BestOfferEnabled>
           <BestOfferCount>1</BestOfferCount>
           <BestOfferStatus>Pending</BestOfferStatus>
           <BestOffer>
             <BestOfferID>5550000001</BestOfferID>
-            <Status>Countered</Status>
-            <BestOfferCodeType>CounterOffer</BestOfferCodeType>
-            <Price currencyID="USD">42.50</Price>
+            <Status>Pending</Status>
+            <BestOfferCodeType>SellerOffer</BestOfferCodeType>
+            <Price currencyID="USD">39.95</Price>
             <Quantity>1</Quantity>
-            <ExpirationTime>2026-05-12T12:00:00.000Z</ExpirationTime>
-            <BuyerMessage>Would you take $35?</BuyerMessage>
-            <SellerMessage>Best I can do is $42.50.</SellerMessage>
+            <ExpirationTime>2026-05-13T12:00:00.000Z</ExpirationTime>
+            <SellerMessage>Special offer just for you — 20% off!</SellerMessage>
           </BestOffer>
         </BestOfferDetails>
       </Item>
@@ -43,22 +43,28 @@
           <CurrentPrice currencyID="USD">19.99</CurrentPrice>
         </SellingStatus>
         <BestOfferDetails>
-          <BestOfferCount>1</BestOfferCount>
-          <BestOfferStatus>Pending</BestOfferStatus>
-          <BestOffer>
-            <BestOfferID>5550000002</BestOfferID>
-            <Status>Pending</Status>
-            <BestOfferCodeType>BestOffer</BestOfferCodeType>
-            <Price currencyID="USD">15.00</Price>
-            <Quantity>1</Quantity>
-            <ExpirationTime>2026-05-11T08:00:00.000Z</ExpirationTime>
-          </BestOffer>
+          <BestOfferEnabled>true</BestOfferEnabled>
+          <BestOfferCount>0</BestOfferCount>
+        </BestOfferDetails>
+      </Item>
+      <Item>
+        <ItemID>345678901234</ItemID>
+        <Title>2008 Tony Stewart #20 Home Depot 1:24 Action NASCAR Diecast</Title>
+        <ListingDetails>
+          <ViewItemURL>https://www.ebay.com/itm/345678901234</ViewItemURL>
+        </ListingDetails>
+        <SellingStatus>
+          <CurrentPrice currencyID="USD">29.99</CurrentPrice>
+        </SellingStatus>
+        <BestOfferDetails>
+          <BestOfferEnabled>false</BestOfferEnabled>
+          <BestOfferCount>0</BestOfferCount>
         </BestOfferDetails>
       </Item>
     </ItemArray>
     <PaginationResult>
       <TotalNumberOfPages>1</TotalNumberOfPages>
-      <TotalNumberOfEntries>2</TotalNumberOfEntries>
+      <TotalNumberOfEntries>3</TotalNumberOfEntries>
     </PaginationResult>
-  </BestOfferList>
+  </WatchList>
 </GetMyeBayBuyingResponse>

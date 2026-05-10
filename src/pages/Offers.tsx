@@ -4,11 +4,12 @@ import { api, formatCents, type ReceivedOffer } from "@/lib/tauri";
 type StatusFilter = "actionable" | "all";
 
 /**
- * Best Offers the user is involved with as a buyer — both their own
- * pending offers and seller counter-offers. Powered by the Trading API
- * GetMyeBayBuying call (BestOfferList). Decline is in-app via
+ * Offers sellers have sent on items the user is watching ("Send Offer to
+ * Buyer" promotions). Powered by the Trading API GetMyeBayBuying call
+ * fetching the user's watchlist with full detail; we surface watched
+ * items that have a <BestOffer> attached. Decline is in-app via
  * RespondToBestOffer; Accept deep-links to the item page on eBay since
- * eBay's accept flow has anti-fraud gates that aren't exposed to the API.
+ * its accept flow has anti-fraud gates that aren't exposed to the API.
  */
 export function Offers() {
   const [offers, setOffers] = useState<ReceivedOffer[] | null>(null);
@@ -66,8 +67,8 @@ export function Offers() {
         <div>
           <h2 className="text-2xl font-semibold">Offers</h2>
           <p className="text-sm text-slate-500">
-            Best Offers and seller counter-offers on items you're buying.
-            Decline in-app; accepting opens eBay so you can complete checkout.
+            Offers sellers have sent on items you're watching. Decline in-app;
+            accepting opens eBay so you can complete checkout.
           </p>
         </div>
         <button
@@ -114,8 +115,8 @@ export function Offers() {
         <div className="card text-sm text-slate-400">Loading…</div>
       ) : offers.length === 0 ? (
         <div className="card text-sm text-slate-400">
-          No offers right now. Make a Best Offer on a listing — they'll show
-          up here once a seller responds.
+          No offers right now. Sellers send these proactively to watchers of
+          their items, so add things to your watchlist and check back.
         </div>
       ) : filteredOffers && filteredOffers.length === 0 ? (
         <div className="card text-sm text-slate-400">
@@ -146,7 +147,9 @@ function OfferCard({
   declining: boolean;
   onDecline: () => void;
 }) {
-  const fromSeller = offer.offer_type === "CounterOffer";
+  const fromSeller =
+    offer.offer_type === "SellerOffer" ||
+    offer.offer_type === "CounterOffer";
   const actionable = isActionable(offer);
   const acceptUrl = offer.item_web_url ?? `https://www.ebay.com/itm/${offer.item_id}`;
   return (
@@ -166,7 +169,7 @@ function OfferCard({
         </div>
         <div className="text-xs text-slate-500 mt-0.5">
           {[
-            fromSeller ? "Seller counter-offer" : "Your offer",
+            fromSeller ? "Seller offer" : "Your offer",
             offer.offer_status,
             offer.expiration_time &&
               `expires ${new Date(offer.expiration_time * 1000).toLocaleString()}`,
