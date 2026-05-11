@@ -51,6 +51,7 @@ export function makeKv(): FakeKv {
 export interface FakeD1Row {
   notification_id: string;
   received_at: number;
+  acked_at: number | null;
   user_id: string | null;
   username: string | null;
   eias_token: string | null;
@@ -62,6 +63,19 @@ export type FakeD1 = D1Database & {
   _failNextRun: boolean;
 };
 
+/**
+ * Minimal D1 mock. Recognises three statement shapes that the worker uses:
+ *
+ *   - `INSERT INTO marketplace_deletions ... ON CONFLICT DO NOTHING` — Phase 1
+ *     dual-write.
+ *   - `SELECT ... FROM marketplace_deletions WHERE acked_at IS NULL ORDER BY
+ *     received_at` — Phase 2 read path.
+ *   - `UPDATE marketplace_deletions SET acked_at = ? WHERE notification_id IN
+ *     (...) AND acked_at IS NULL` — Phase 2 ack.
+ *
+ * `_failNextRun` causes the next `run()` to reject, used by the dual-write
+ * failure tests in Phase 1.
+ */
 export function makeD1(): FakeD1 {
   const rows = new Map<string, FakeD1Row>();
   const db = {
@@ -70,6 +84,14 @@ export function makeD1(): FakeD1 {
     prepare(sql: string): D1PreparedStatement {
       const isInsert = /INSERT\s+INTO\s+marketplace_deletions/i.test(sql);
       const isOnConflictNothing = /ON\s+CONFLICT.*DO\s+NOTHING/is.test(sql);
+      const isSelectPending =
+        /SELECT[\s\S]*FROM\s+marketplace_deletions[\s\S]*WHERE\s+acked_at\s+IS\s+NULL/i.test(
+          sql,
+        );
+      const isUpdateAck =
+        /UPDATE\s+marketplace_deletions[\s\S]*SET\s+acked_at[\s\S]*WHERE\s+notification_id\s+IN/i.test(
+          sql,
+        );
       let bound: unknown[] = [];
       const stmt = {
         bind(...values: unknown[]): D1PreparedStatement {
@@ -83,19 +105,53 @@ export function makeD1(): FakeD1 {
           }
           if (isInsert) {
             const [id, received_at, user_id, username, eias_token, raw] =
-              bound as [string, number, string | null, string | null, string | null, string];
+              bound as [
+                string,
+                number,
+                string | null,
+                string | null,
+                string | null,
+                string,
+              ];
             if (!(isOnConflictNothing && rows.has(id))) {
               rows.set(id, {
                 notification_id: id,
                 received_at,
+                acked_at: null,
                 user_id,
                 username,
                 eias_token,
                 raw,
               });
             }
+            return { success: true, meta: { changes: 1 } };
           }
-          return { success: true, meta: {} };
+          if (isUpdateAck) {
+            const [now, ...ids] = bound as [number, ...string[]];
+            let changes = 0;
+            for (const id of ids) {
+              const row = rows.get(id);
+              if (row && row.acked_at === null) {
+                row.acked_at = now;
+                changes++;
+              }
+            }
+            return { success: true, meta: { changes } };
+          }
+          return { success: true, meta: { changes: 0 } };
+        },
+        async all<T = unknown>(): Promise<{ results: T[] }> {
+          if (db._failNextRun) {
+            db._failNextRun = false;
+            throw new Error("simulated d1 failure");
+          }
+          if (isSelectPending) {
+            const pending = [...rows.values()]
+              .filter((r) => r.acked_at === null)
+              .sort((a, b) => a.received_at - b.received_at);
+            return { results: pending as unknown as T[] };
+          }
+          return { results: [] };
         },
       } as unknown as D1PreparedStatement;
       return stmt;
