@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { handleNotification } from "../src/index";
 import {
   buildSigHeader,
@@ -59,7 +59,6 @@ describe("handleNotification", () => {
     const env = makeEnv();
     const res = await handleNotification(postReq(validNotification()), env);
     expect(res.status).toBe(412);
-    expect(env.DELETIONS._store.size).toBe(0);
     expect(env.DB._rows.size).toBe(0);
   });
 
@@ -70,7 +69,6 @@ describe("handleNotification", () => {
       env,
     );
     expect(res.status).toBe(412);
-    expect(env.DELETIONS._store.size).toBe(0);
     expect(env.DB._rows.size).toBe(0);
   });
 
@@ -81,7 +79,6 @@ describe("handleNotification", () => {
     });
     const res = await handleNotification(req, env);
     expect(res.status).toBe(412);
-    expect(env.DELETIONS._store.size).toBe(0);
     expect(env.DB._rows.size).toBe(0);
   });
 
@@ -92,7 +89,6 @@ describe("handleNotification", () => {
     });
     const res = await handleNotification(req, env);
     expect(res.status).toBe(412);
-    expect(env.DELETIONS._store.size).toBe(0);
     expect(env.DB._rows.size).toBe(0);
   });
 
@@ -111,7 +107,6 @@ describe("handleNotification", () => {
       env,
     );
     expect(res.status).toBe(412);
-    expect(env.DELETIONS._store.size).toBe(0);
     expect(env.DB._rows.size).toBe(0);
   });
 
@@ -131,31 +126,24 @@ describe("handleNotification", () => {
       env,
     );
     expect(res.status).toBe(412);
-    expect(env.DELETIONS._store.size).toBe(0);
     expect(env.DB._rows.size).toBe(0);
   });
 
-  it("returns 400 with no KV write when verified body lacks notificationId", async () => {
+  it("returns 400 with no write when verified body lacks notificationId", async () => {
     const env = makeEnv();
     const body = JSON.stringify({ notification: { data: { x: 1 } } });
     const req = await signedReq(body, keypair.privateKey);
     const res = await handleNotification(req, env);
     expect(res.status).toBe(400);
-    expect(env.DELETIONS._store.size).toBe(0);
     expect(env.DB._rows.size).toBe(0);
   });
 
-  it("returns 200 and writes to both D1 and KV on a valid notification", async () => {
+  it("returns 200 and writes a row to D1 on a valid notification", async () => {
     const env = makeEnv();
     const body = validNotification("notif-abc");
     const req = await signedReq(body, keypair.privateKey);
     const res = await handleNotification(req, env);
     expect(res.status).toBe(200);
-
-    expect([...env.DELETIONS._store.keys()]).toEqual(["deletion:notif-abc"]);
-    const stored = JSON.parse(env.DELETIONS._store.get("deletion:notif-abc")!);
-    expect(stored.raw.notification.notificationId).toBe("notif-abc");
-    expect(typeof stored.received_at).toBe("number");
 
     expect(env.DB._rows.size).toBe(1);
     const row = env.DB._rows.get("notif-abc")!;
@@ -163,7 +151,8 @@ describe("handleNotification", () => {
     expect(row.username).toBe("u");
     expect(row.eias_token).toBe("tok");
     expect(typeof row.received_at).toBe("number");
-    // `raw` column stores only the `notification` sub-object, per spec.
+    expect(row.acked_at).toBeNull();
+    // `raw` column stores only the `notification` sub-object.
     expect(JSON.parse(row.raw)).toEqual({
       notificationId: "notif-abc",
       data: { username: "u", userId: "uid", eiasToken: "tok" },
@@ -178,85 +167,25 @@ describe("handleNotification", () => {
       const res = await handleNotification(req, env);
       expect(res.status).toBe(200);
     }
-    expect(env.DELETIONS._store.size).toBe(1);
     expect(env.DB._rows.size).toBe(1);
   });
 
-  it("still returns 200 and writes to KV when the D1 write fails", async () => {
+  it("propagates D1 failure so the runtime returns 5xx and eBay retries", async () => {
+    // Phase 3 removed the KV safety net. With only one store, the
+    // Promise.allSettled isolation is gone too — a D1 failure now bubbles
+    // out of the handler. The worker runtime turns that into a 5xx, which
+    // is exactly what we want so eBay's retry pipeline gets us back to
+    // consistency rather than silently dropping the record.
     const env = makeEnv();
     env.DB._failNextRun = true;
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    const body = validNotification("notif-d1-fail");
-    const req = await signedReq(body, keypair.privateKey);
-    const res = await handleNotification(req, env);
-
-    expect(res.status).toBe(200);
-    expect(env.DELETIONS._store.size).toBe(1);
+    const req = await signedReq(
+      validNotification("notif-d1-fail"),
+      keypair.privateKey,
+    );
+    await expect(handleNotification(req, env)).rejects.toThrow(
+      /simulated d1 failure/,
+    );
     expect(env.DB._rows.size).toBe(0);
-
-    // Structured failure log for drift attribution.
-    const logged = errSpy.mock.calls.map((c) => String(c[0]));
-    const d1Failure = logged.find((line) => line.includes('"store":"d1"'));
-    expect(d1Failure).toBeDefined();
-    const parsed = JSON.parse(d1Failure!);
-    expect(parsed.event).toBe("deletion_write_failed");
-    expect(parsed.notification_id).toBe("notif-d1-fail");
-    errSpy.mockRestore();
-  });
-
-  it("still returns 200 and writes to D1 when the KV write fails", async () => {
-    const env = makeEnv();
-    // Force the next KV put to throw.
-    env.DELETIONS.put = (async () => {
-      throw new Error("simulated kv failure");
-    }) as KVNamespace["put"];
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    const body = validNotification("notif-kv-fail");
-    const req = await signedReq(body, keypair.privateKey);
-    const res = await handleNotification(req, env);
-
-    expect(res.status).toBe(200);
-    expect(env.DB._rows.size).toBe(1);
-    expect(env.DB._rows.has("notif-kv-fail")).toBe(true);
-
-    const logged = errSpy.mock.calls.map((c) => String(c[0]));
-    const kvFailure = logged.find((line) => line.includes('"store":"kv"'));
-    expect(kvFailure).toBeDefined();
-    const parsed = JSON.parse(kvFailure!);
-    expect(parsed.event).toBe("deletion_write_failed");
-    expect(parsed.notification_id).toBe("notif-kv-fail");
-    errSpy.mockRestore();
-  });
-
-  it("returns 200 and logs both failures when D1 and KV both fail", async () => {
-    const env = makeEnv();
-    env.DB._failNextRun = true;
-    env.DELETIONS.put = (async () => {
-      throw new Error("simulated kv failure");
-    }) as KVNamespace["put"];
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    const body = validNotification("notif-both-fail");
-    const req = await signedReq(body, keypair.privateKey);
-    const res = await handleNotification(req, env);
-
-    expect(res.status).toBe(200);
-    expect(env.DB._rows.size).toBe(0);
-    expect(env.DELETIONS._store.size).toBe(0);
-
-    const stores = errSpy.mock.calls
-      .map((c) => {
-        try {
-          return JSON.parse(String(c[0])).store;
-        } catch {
-          return undefined;
-        }
-      })
-      .filter(Boolean);
-    expect(stores).toEqual(expect.arrayContaining(["d1", "kv"]));
-    errSpy.mockRestore();
   });
 
   it("caches the public key after the first verify", async () => {

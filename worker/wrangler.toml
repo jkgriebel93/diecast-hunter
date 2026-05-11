@@ -5,14 +5,8 @@ compatibility_date = "2024-11-12"
 [vars]
 ENDPOINT_URL = "https://diecast-hunter-ebay.johnkgriebel.workers.dev/marketplace-deletion"
 
-# Set the KV namespace id after running:
-#   wrangler kv namespace create DELETIONS
-[[kv_namespaces]]
-binding = "DELETIONS"
-id = "05f981ddfc9c41dda3789faf7cb7a309"
-
 # Cache for the eBay app access token and per-kid notification public keys.
-# Kept separate from DELETIONS on purpose. Before the first deploy run:
+# Before the first deploy run:
 #   wrangler kv namespace create EBAY_KEY_CACHE
 # and replace the placeholder id below with the value wrangler prints.
 [[kv_namespaces]]
