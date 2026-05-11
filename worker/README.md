@@ -9,9 +9,13 @@ The Worker:
 
 - Responds to eBay's verification challenge with the right SHA-256 hash so the
   endpoint registers successfully.
-- Receives and queues real deletion notifications in Cloudflare KV.
+- Verifies eBay's ECDSA signature, then inserts each notification into the
+  `marketplace_deletions` table in Cloudflare D1 (idempotent on
+  `notification_id`).
 - Exposes an authenticated polling API the desktop app calls on launch to
-  drain the queue and purge matching local data.
+  drain the queue and purge matching local data. Acks soft-delete via
+  `acked_at` to preserve an audit trail.
+- A daily cron purges acked rows older than the retention window (90 days).
 
 ## Prerequisites
 
@@ -119,6 +123,23 @@ pnpm dev
 Each `pnpm deploy` re-publishes the Worker. If you change the Worker URL
 (unusual), update `wrangler.toml`'s `ENDPOINT_URL` and re-register the
 endpoint with eBay.
+
+## Retention policy
+
+Acked marketplace-deletion rows are kept for **90 days** after their
+`acked_at` timestamp, then hard-deleted by a daily cron at 04:00 UTC. The
+retention window lives in one place — `PURGE_RETENTION_MS` in
+`src/index.ts` — so changing it is a one-line edit + redeploy.
+
+90 days is the audit-trail length for a personal-use app: long enough to
+investigate "did we receive a notification for X" questions after the
+fact, short enough to keep the table bounded indefinitely. Adjust if a
+real compliance posture demands different (eBay's own retention guidance
+for deletion notifications is much looser than this).
+
+The cron emits a structured `deletion_purge` log per run with the cutoff
+timestamp and the number of rows deleted — search Worker Logs by
+`event=deletion_purge` to confirm it's running.
 
 ## What the desktop app does with this
 
