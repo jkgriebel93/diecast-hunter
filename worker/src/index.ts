@@ -209,36 +209,86 @@ export async function handleNotification(
   return new Response("ok", { status: 200 });
 }
 
-async function handlePending(env: Env): Promise<Response> {
-  // KV list returns up to 1000 keys per call. For our personal-use volume
-  // this is fine (deletions of accounts we've interacted with should be
-  // rare). Larger volumes should paginate via cursor.
-  const list = await env.DELETIONS.list({ prefix: "deletion:" });
-  const items = await Promise.all(
-    list.keys.map(async (k) => {
-      const raw = await env.DELETIONS.get(k.name);
-      const record: DeletionRecord | null = raw ? JSON.parse(raw) : null;
-      return {
-        id: k.name.slice("deletion:".length),
-        record,
-      };
-    }),
-  );
-  return Response.json({ deletions: items });
+interface PendingRow {
+  notification_id: string;
+  received_at: number;
+  user_id: string | null;
+  username: string | null;
+  eias_token: string | null;
+  raw: string;
 }
 
-async function handleAck(req: Request, env: Env): Promise<Response> {
-  let body: { ids?: string[] };
+export async function handlePending(env: Env): Promise<Response> {
+  // D1 is the source of truth for the read path as of Phase 2. KV is no
+  // longer consulted here, but still drained on ack to keep it as a safety
+  // net until Phase 3 removes the KV write entirely.
+  const { results } = await env.DB.prepare(
+    `SELECT notification_id, received_at, user_id, username, eias_token, raw
+       FROM marketplace_deletions
+      WHERE acked_at IS NULL
+      ORDER BY received_at`,
+  ).all<PendingRow>();
+
+  const deletions = (results ?? []).map((r) => {
+    let notification: unknown;
+    try {
+      notification = JSON.parse(r.raw);
+    } catch {
+      // `raw` is written by us as JSON.stringify; a parse failure is data
+      // corruption, not user input. Pass the string through so the consumer
+      // can decide what to do, and log so it's surfaced.
+      console.error(
+        JSON.stringify({
+          event: "deletion_raw_parse_failed",
+          notification_id: r.notification_id,
+        }),
+      );
+      notification = r.raw;
+    }
+    return {
+      id: r.notification_id,
+      received_at: r.received_at,
+      user_id: r.user_id,
+      username: r.username,
+      eias_token: r.eias_token,
+      notification,
+    };
+  });
+
+  return Response.json({ deletions });
+}
+
+export async function handleAck(req: Request, env: Env): Promise<Response> {
+  let body: { ids?: unknown };
   try {
-    body = (await req.json()) as { ids?: string[] };
+    body = (await req.json()) as { ids?: unknown };
   } catch {
     return new Response("invalid json", { status: 400 });
   }
-  const ids = body.ids ?? [];
-  await Promise.all(
+  const ids: string[] = Array.isArray(body.ids)
+    ? body.ids.filter((v): v is string => typeof v === "string")
+    : [];
+  if (ids.length === 0) return Response.json({ acked: 0 });
+
+  // Soft-delete in D1 (preserves audit trail); hard-delete in KV to keep it
+  // drained as the safety net. `acked_at IS NULL` ensures we only count
+  // first-time acks, so re-ack of an already-acked id is a no-op.
+  const placeholders = ids.map(() => "?").join(",");
+  const now = Date.now();
+  const { meta } = await env.DB.prepare(
+    `UPDATE marketplace_deletions
+        SET acked_at = ?
+      WHERE notification_id IN (${placeholders})
+        AND acked_at IS NULL`,
+  )
+    .bind(now, ...ids)
+    .run();
+
+  await Promise.allSettled(
     ids.map((id) => env.DELETIONS.delete(`deletion:${id}`)),
   );
-  return Response.json({ acked: ids.length });
+
+  return Response.json({ acked: meta?.changes ?? ids.length });
 }
 
 function checkAuth(req: Request, env: Env): Response | null {
