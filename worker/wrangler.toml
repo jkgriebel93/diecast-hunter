@@ -22,3 +22,9 @@ id = "ce3715558b634a548c7dc133a0fc149b"
 binding       = "DB"
 database_name = "diecast-hunter-deletions"
 database_id   = "278833a2-6bb3-431b-b94d-52611682aaa5"
+
+# Daily purge of acked marketplace_deletions older than the retention window
+# (90 days, see worker/README.md). Runs at 04:00 UTC, off-peak vs the rest of
+# the worker's traffic.
+[triggers]
+crons = ["0 4 * * *"]

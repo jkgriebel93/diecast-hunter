@@ -62,7 +62,7 @@ export type FakeD1 = D1Database & {
 };
 
 /**
- * Recognises three statement shapes:
+ * Recognises four statement shapes:
  *
  *   - `INSERT INTO marketplace_deletions ... ON CONFLICT DO NOTHING` — write
  *     path from `handleNotification`.
@@ -70,6 +70,8 @@ export type FakeD1 = D1Database & {
  *     received_at` — read path from `handlePending`.
  *   - `UPDATE marketplace_deletions SET acked_at = ? WHERE notification_id IN
  *     (...) AND acked_at IS NULL` — ack path from `handleAck`.
+ *   - `DELETE FROM marketplace_deletions WHERE acked_at IS NOT NULL AND
+ *     acked_at < ?` — purge cron from `purgeAckedDeletions`.
  */
 export function makeD1(): FakeD1 {
   const rows = new Map<string, FakeD1Row>();
@@ -85,6 +87,10 @@ export function makeD1(): FakeD1 {
         );
       const isUpdateAck =
         /UPDATE\s+marketplace_deletions[\s\S]*SET\s+acked_at[\s\S]*WHERE\s+notification_id\s+IN/i.test(
+          sql,
+        );
+      const isDeletePurge =
+        /DELETE\s+FROM\s+marketplace_deletions[\s\S]*WHERE\s+acked_at\s+IS\s+NOT\s+NULL[\s\S]*acked_at\s*<\s*\?/i.test(
           sql,
         );
       let bound: unknown[] = [];
@@ -128,6 +134,17 @@ export function makeD1(): FakeD1 {
               const row = rows.get(id);
               if (row && row.acked_at === null) {
                 row.acked_at = now;
+                changes++;
+              }
+            }
+            return { success: true, meta: { changes } };
+          }
+          if (isDeletePurge) {
+            const [cutoff] = bound as [number];
+            let changes = 0;
+            for (const [id, row] of rows) {
+              if (row.acked_at !== null && row.acked_at < cutoff) {
+                rows.delete(id);
                 changes++;
               }
             }

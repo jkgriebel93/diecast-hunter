@@ -82,7 +82,47 @@ export default {
     }
     return new Response("not found", { status: 404 });
   },
+
+  async scheduled(
+    _event: ScheduledController,
+    env: Env,
+    _ctx: ExecutionContext,
+  ): Promise<void> {
+    await purgeAckedDeletions(env, Date.now());
+  },
 };
+
+/**
+ * Retention window for acked marketplace-deletion rows. 90 days is a
+ * reasonable audit-trail length for a personal-use app — long enough to
+ * investigate any "did we see X" question that surfaces after the fact,
+ * short enough to keep the table tiny indefinitely. Adjust here if a
+ * compliance posture demands different.
+ */
+export const PURGE_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+
+export async function purgeAckedDeletions(
+  env: Env,
+  now: number,
+): Promise<number> {
+  const cutoff = now - PURGE_RETENTION_MS;
+  const { meta } = await env.DB.prepare(
+    `DELETE FROM marketplace_deletions
+      WHERE acked_at IS NOT NULL
+        AND acked_at < ?`,
+  )
+    .bind(cutoff)
+    .run();
+  const rows_deleted = meta?.changes ?? 0;
+  console.log(
+    JSON.stringify({
+      event: "deletion_purge",
+      cutoff_ms: cutoff,
+      rows_deleted,
+    }),
+  );
+  return rows_deleted;
+}
 
 async function handleVerification(url: URL, env: Env): Promise<Response> {
   const challenge = url.searchParams.get("challenge_code");
