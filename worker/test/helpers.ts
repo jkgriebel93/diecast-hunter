@@ -39,20 +39,87 @@ export function makeKv(): FakeKv {
   return ns as unknown as FakeKv;
 }
 
+/**
+ * Minimal D1 mock that mirrors the `prepare().bind().run()` chain we actually
+ * use. Captures every successful insert in `_rows` keyed by notification_id
+ * so tests can assert on the dual-write. Honors `ON CONFLICT DO NOTHING` by
+ * only inserting when the key is new.
+ *
+ * Setting `_failNextRun = true` causes the next `run()` to reject — used to
+ * exercise the dual-write failure paths.
+ */
+export interface FakeD1Row {
+  notification_id: string;
+  received_at: number;
+  user_id: string | null;
+  username: string | null;
+  eias_token: string | null;
+  raw: string;
+}
+
+export type FakeD1 = D1Database & {
+  _rows: Map<string, FakeD1Row>;
+  _failNextRun: boolean;
+};
+
+export function makeD1(): FakeD1 {
+  const rows = new Map<string, FakeD1Row>();
+  const db = {
+    _rows: rows,
+    _failNextRun: false,
+    prepare(sql: string): D1PreparedStatement {
+      const isInsert = /INSERT\s+INTO\s+marketplace_deletions/i.test(sql);
+      const isOnConflictNothing = /ON\s+CONFLICT.*DO\s+NOTHING/is.test(sql);
+      let bound: unknown[] = [];
+      const stmt = {
+        bind(...values: unknown[]): D1PreparedStatement {
+          bound = values;
+          return stmt;
+        },
+        async run(): Promise<unknown> {
+          if (db._failNextRun) {
+            db._failNextRun = false;
+            throw new Error("simulated d1 failure");
+          }
+          if (isInsert) {
+            const [id, received_at, user_id, username, eias_token, raw] =
+              bound as [string, number, string | null, string | null, string | null, string];
+            if (!(isOnConflictNothing && rows.has(id))) {
+              rows.set(id, {
+                notification_id: id,
+                received_at,
+                user_id,
+                username,
+                eias_token,
+                raw,
+              });
+            }
+          }
+          return { success: true, meta: {} };
+        },
+      } as unknown as D1PreparedStatement;
+      return stmt;
+    },
+  };
+  return db as unknown as FakeD1;
+}
+
 export function makeEnv(overrides: Partial<Env> = {}): Env & {
   DELETIONS: FakeKv;
   EBAY_KEY_CACHE: FakeKv;
+  DB: FakeD1;
 } {
   return {
     DELETIONS: makeKv(),
     EBAY_KEY_CACHE: makeKv(),
+    DB: makeD1(),
     EBAY_VERIFICATION_TOKEN: "verify-token-x".padEnd(40, "x"),
     APP_SHARED_SECRET: "shared-secret",
     ENDPOINT_URL: "https://example.test/marketplace-deletion",
     EBAY_CLIENT_ID: "client-id",
     EBAY_CLIENT_SECRET: "client-secret",
     ...overrides,
-  } as Env & { DELETIONS: FakeKv; EBAY_KEY_CACHE: FakeKv };
+  } as Env & { DELETIONS: FakeKv; EBAY_KEY_CACHE: FakeKv; DB: FakeD1 };
 }
 
 export async function generateP256Keypair(): Promise<CryptoKeyPair> {
