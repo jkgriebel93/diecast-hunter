@@ -11,22 +11,23 @@
  *     and may re-call periodically.
  *
  *   POST /marketplace-deletion
- *     Real notification. Stores the payload in KV under a key derived from
- *     eBay's notificationId (idempotent — duplicate POSTs overwrite).
+ *     Real notification. Inserts a row into the D1 `marketplace_deletions`
+ *     table keyed by eBay's notificationId (idempotent via ON CONFLICT DO
+ *     NOTHING — duplicate POSTs are no-ops).
  *
  *   GET  /api/pending-deletions     (Bearer: APP_SHARED_SECRET)
- *     Desktop app polls this on launch to drain the queue.
+ *     Desktop app polls this on launch to drain the queue. Returns rows
+ *     where `acked_at IS NULL`, oldest first.
  *
  *   POST /api/ack-deletions         (Bearer: APP_SHARED_SECRET)
- *     Desktop app POSTs { ids: [...] } once it's deleted matching local rows.
- *     Removes them from KV.
+ *     Desktop app POSTs { ids: [...] } once it's deleted matching local
+ *     rows. Soft-deletes via UPDATE acked_at — audit trail preserved.
  *
  *   GET  /health
  *     Plain "ok" — useful for confirming the deploy is up.
  */
 
 export interface Env {
-  DELETIONS: KVNamespace;
   EBAY_VERIFICATION_TOKEN: string;
   APP_SHARED_SECRET: string;
   ENDPOINT_URL: string;
@@ -34,18 +35,12 @@ export interface Env {
   // notification public key. Both come from `wrangler secret put`.
   EBAY_CLIENT_ID: string;
   EBAY_CLIENT_SECRET: string;
-  // Separate KV namespace caching the app access token and per-kid public
-  // keys. Kept apart from DELETIONS so cache writes don't pollute the
-  // deletion record set (and vice versa).
+  // KV namespace caching the app access token and per-kid notification
+  // public keys. The only KV binding the worker still uses — caching with
+  // TTL is what KV is good at.
   EBAY_KEY_CACHE: KVNamespace;
-  // D1 deletions store. Dual-written alongside DELETIONS during the Phase 1
-  // soak; KV still serves the read path until Phase 2 promotes D1.
+  // D1 deletions store. Source of truth for both writes and reads.
   DB: D1Database;
-}
-
-interface DeletionRecord {
-  received_at: number;
-  raw: unknown;
 }
 
 import { verifyEbaySignature } from "./ebay-signature";
@@ -153,25 +148,16 @@ export async function handleNotification(
     return new Response("missing notificationId", { status: 400 });
   }
 
-  // Dual-write: D1 is the new source of truth (Phase 2 will promote it on the
-  // read path), KV is the safety net during the soak. Both writes are
-  // idempotent on notificationId, so eBay retries don't grow either store.
-  //
-  // Neither write failure breaks the 200 response — eBay only cares that the
-  // signed notification was received. Failures are logged structured so drift
-  // is attributable.
+  // D1 is the sole store as of Phase 3. The INSERT is idempotent on
+  // notification_id, so eBay retries don't grow the table. eBay nests the
+  // deletion subject under `notification.data` — reading off `notification`
+  // directly lands NULLs in every user-data column.
   const notification =
     (body as { notification?: Record<string, unknown> }).notification ?? {};
-  // eBay nests the deletion subject under `notification.data` (per their
-  // Marketplace Account Deletion docs and our existing fixtures). The ticket
-  // spec reads them off `notification` directly, which would silently land
-  // NULLs in every column.
   const data =
     (notification.data as Record<string, unknown> | undefined) ?? {};
-  const now = Date.now();
-  const record: DeletionRecord = { received_at: now, raw: body };
 
-  const d1Write = env.DB.prepare(
+  await env.DB.prepare(
     `INSERT INTO marketplace_deletions
        (notification_id, received_at, user_id, username, eias_token, raw)
      VALUES (?, ?, ?, ?, ?, ?)
@@ -179,7 +165,7 @@ export async function handleNotification(
   )
     .bind(
       id,
-      now,
+      Date.now(),
       (data.userId as string | undefined) ?? null,
       (data.username as string | undefined) ?? null,
       (data.eiasToken as string | undefined) ?? null,
@@ -187,25 +173,6 @@ export async function handleNotification(
     )
     .run();
 
-  const kvWrite = env.DELETIONS.put(
-    `deletion:${id}`,
-    JSON.stringify(record),
-  );
-
-  const results = await Promise.allSettled([d1Write, kvWrite]);
-  for (let i = 0; i < results.length; i++) {
-    const r = results[i];
-    if (r.status === "rejected") {
-      console.error(
-        JSON.stringify({
-          event: "deletion_write_failed",
-          store: i === 0 ? "d1" : "kv",
-          notification_id: id,
-          error: String(r.reason),
-        }),
-      );
-    }
-  }
   return new Response("ok", { status: 200 });
 }
 
@@ -219,9 +186,6 @@ interface PendingRow {
 }
 
 export async function handlePending(env: Env): Promise<Response> {
-  // D1 is the source of truth for the read path as of Phase 2. KV is no
-  // longer consulted here, but still drained on ack to keep it as a safety
-  // net until Phase 3 removes the KV write entirely.
   const { results } = await env.DB.prepare(
     `SELECT notification_id, received_at, user_id, username, eias_token, raw
        FROM marketplace_deletions
@@ -270,23 +234,18 @@ export async function handleAck(req: Request, env: Env): Promise<Response> {
     : [];
   if (ids.length === 0) return Response.json({ acked: 0 });
 
-  // Soft-delete in D1 (preserves audit trail); hard-delete in KV to keep it
-  // drained as the safety net. `acked_at IS NULL` ensures we only count
-  // first-time acks, so re-ack of an already-acked id is a no-op.
+  // Soft-delete in D1 to preserve the audit trail. `acked_at IS NULL`
+  // ensures we only count first-time acks, so re-acking an already-acked
+  // id is a no-op.
   const placeholders = ids.map(() => "?").join(",");
-  const now = Date.now();
   const { meta } = await env.DB.prepare(
     `UPDATE marketplace_deletions
         SET acked_at = ?
       WHERE notification_id IN (${placeholders})
         AND acked_at IS NULL`,
   )
-    .bind(now, ...ids)
+    .bind(Date.now(), ...ids)
     .run();
-
-  await Promise.allSettled(
-    ids.map((id) => env.DELETIONS.delete(`deletion:${id}`)),
-  );
 
   return Response.json({ acked: meta?.changes ?? ids.length });
 }

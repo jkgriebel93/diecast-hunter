@@ -26,10 +26,6 @@ function seed(
         r.notification ?? { notificationId: r.id, data: {} },
       ),
     });
-    env.DELETIONS._store.set(
-      `deletion:${r.id}`,
-      JSON.stringify({ received_at: r.received_at, raw: {} }),
-    );
   }
 }
 
@@ -142,10 +138,9 @@ describe("handleAck", () => {
     }
     // Nothing should have been mutated.
     expect(env.DB._rows.get("x")!.acked_at).toBeNull();
-    expect(env.DELETIONS._store.has("deletion:x")).toBe(true);
   });
 
-  it("soft-deletes in D1 and hard-deletes from KV for matching ids", async () => {
+  it("soft-deletes only the matching ids in D1", async () => {
     const env = makeEnv();
     seed(env, [
       { id: "a", received_at: 1 },
@@ -159,10 +154,6 @@ describe("handleAck", () => {
     expect(typeof env.DB._rows.get("a")!.acked_at).toBe("number");
     expect(env.DB._rows.get("b")!.acked_at).toBeNull();
     expect(typeof env.DB._rows.get("c")!.acked_at).toBe("number");
-
-    expect(env.DELETIONS._store.has("deletion:a")).toBe(false);
-    expect(env.DELETIONS._store.has("deletion:b")).toBe(true);
-    expect(env.DELETIONS._store.has("deletion:c")).toBe(false);
   });
 
   it("returns changes count, not requested count, for ids that don't exist or are already acked", async () => {
@@ -207,17 +198,14 @@ describe("handleAck", () => {
     expect(await res.json()).toEqual({ acked: 1 });
   });
 
-  it("KV delete failure does not break the ack response", async () => {
+  it("propagates D1 failure so the runtime returns 5xx and eBay retries", async () => {
     const env = makeEnv();
     seed(env, [{ id: "a", received_at: 1 }]);
-    env.DELETIONS.delete = (async () => {
-      throw new Error("simulated kv delete failure");
-    }) as KVNamespace["delete"];
-
-    const res = await handleAck(ackReq({ ids: ["a"] }), env);
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ acked: 1 });
-    // D1 ack still landed.
-    expect(typeof env.DB._rows.get("a")!.acked_at).toBe("number");
+    env.DB._failNextRun = true;
+    await expect(handleAck(ackReq({ ids: ["a"] }), env)).rejects.toThrow(
+      /simulated d1 failure/,
+    );
+    // Failure short-circuits before the row flips.
+    expect(env.DB._rows.get("a")!.acked_at).toBeNull();
   });
 });

@@ -40,13 +40,11 @@ export function makeKv(): FakeKv {
 }
 
 /**
- * Minimal D1 mock that mirrors the `prepare().bind().run()` chain we actually
- * use. Captures every successful insert in `_rows` keyed by notification_id
- * so tests can assert on the dual-write. Honors `ON CONFLICT DO NOTHING` by
- * only inserting when the key is new.
- *
- * Setting `_failNextRun = true` causes the next `run()` to reject — used to
- * exercise the dual-write failure paths.
+ * Minimal D1 mock that mirrors the `prepare().bind().run()` chain we use.
+ * Captures every successful insert in `_rows` keyed by notification_id so
+ * tests can assert on the write. Honors `ON CONFLICT DO NOTHING` by only
+ * inserting when the key is new. `_failNextRun` causes the next `run()` or
+ * `all()` to reject, used to exercise failure paths.
  */
 export interface FakeD1Row {
   notification_id: string;
@@ -64,17 +62,14 @@ export type FakeD1 = D1Database & {
 };
 
 /**
- * Minimal D1 mock. Recognises three statement shapes that the worker uses:
+ * Recognises three statement shapes:
  *
- *   - `INSERT INTO marketplace_deletions ... ON CONFLICT DO NOTHING` — Phase 1
- *     dual-write.
+ *   - `INSERT INTO marketplace_deletions ... ON CONFLICT DO NOTHING` — write
+ *     path from `handleNotification`.
  *   - `SELECT ... FROM marketplace_deletions WHERE acked_at IS NULL ORDER BY
- *     received_at` — Phase 2 read path.
+ *     received_at` — read path from `handlePending`.
  *   - `UPDATE marketplace_deletions SET acked_at = ? WHERE notification_id IN
- *     (...) AND acked_at IS NULL` — Phase 2 ack.
- *
- * `_failNextRun` causes the next `run()` to reject, used by the dual-write
- * failure tests in Phase 1.
+ *     (...) AND acked_at IS NULL` — ack path from `handleAck`.
  */
 export function makeD1(): FakeD1 {
   const rows = new Map<string, FakeD1Row>();
@@ -161,12 +156,10 @@ export function makeD1(): FakeD1 {
 }
 
 export function makeEnv(overrides: Partial<Env> = {}): Env & {
-  DELETIONS: FakeKv;
   EBAY_KEY_CACHE: FakeKv;
   DB: FakeD1;
 } {
   return {
-    DELETIONS: makeKv(),
     EBAY_KEY_CACHE: makeKv(),
     DB: makeD1(),
     EBAY_VERIFICATION_TOKEN: "verify-token-x".padEnd(40, "x"),
@@ -175,7 +168,7 @@ export function makeEnv(overrides: Partial<Env> = {}): Env & {
     EBAY_CLIENT_ID: "client-id",
     EBAY_CLIENT_SECRET: "client-secret",
     ...overrides,
-  } as Env & { DELETIONS: FakeKv; EBAY_KEY_CACHE: FakeKv; DB: FakeD1 };
+  } as Env & { EBAY_KEY_CACHE: FakeKv; DB: FakeD1 };
 }
 
 export async function generateP256Keypair(): Promise<CryptoKeyPair> {
