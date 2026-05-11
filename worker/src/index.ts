@@ -38,6 +38,9 @@ export interface Env {
   // keys. Kept apart from DELETIONS so cache writes don't pollute the
   // deletion record set (and vice versa).
   EBAY_KEY_CACHE: KVNamespace;
+  // D1 deletions store. Dual-written alongside DELETIONS during the Phase 1
+  // soak; KV still serves the read path until Phase 2 promotes D1.
+  DB: D1Database;
 }
 
 interface DeletionRecord {
@@ -150,12 +153,59 @@ export async function handleNotification(
     return new Response("missing notificationId", { status: 400 });
   }
 
-  // Idempotent: same notificationId → same key, no growth on retries.
-  const record: DeletionRecord = {
-    received_at: Date.now(),
-    raw: body,
-  };
-  await env.DELETIONS.put(`deletion:${id}`, JSON.stringify(record));
+  // Dual-write: D1 is the new source of truth (Phase 2 will promote it on the
+  // read path), KV is the safety net during the soak. Both writes are
+  // idempotent on notificationId, so eBay retries don't grow either store.
+  //
+  // Neither write failure breaks the 200 response — eBay only cares that the
+  // signed notification was received. Failures are logged structured so drift
+  // is attributable.
+  const notification =
+    (body as { notification?: Record<string, unknown> }).notification ?? {};
+  // eBay nests the deletion subject under `notification.data` (per their
+  // Marketplace Account Deletion docs and our existing fixtures). The ticket
+  // spec reads them off `notification` directly, which would silently land
+  // NULLs in every column.
+  const data =
+    (notification.data as Record<string, unknown> | undefined) ?? {};
+  const now = Date.now();
+  const record: DeletionRecord = { received_at: now, raw: body };
+
+  const d1Write = env.DB.prepare(
+    `INSERT INTO marketplace_deletions
+       (notification_id, received_at, user_id, username, eias_token, raw)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(notification_id) DO NOTHING`,
+  )
+    .bind(
+      id,
+      now,
+      (data.userId as string | undefined) ?? null,
+      (data.username as string | undefined) ?? null,
+      (data.eiasToken as string | undefined) ?? null,
+      JSON.stringify(notification),
+    )
+    .run();
+
+  const kvWrite = env.DELETIONS.put(
+    `deletion:${id}`,
+    JSON.stringify(record),
+  );
+
+  const results = await Promise.allSettled([d1Write, kvWrite]);
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    if (r.status === "rejected") {
+      console.error(
+        JSON.stringify({
+          event: "deletion_write_failed",
+          store: i === 0 ? "d1" : "kv",
+          notification_id: id,
+          error: String(r.reason),
+        }),
+      );
+    }
+  }
   return new Response("ok", { status: 200 });
 }
 
