@@ -16,6 +16,7 @@ type ViewMode = "flat" | "byDriver";
 type StatusFilter = "all" | "active" | "ended";
 type MatchFilter = "all" | "matched" | "unmatched";
 type SourceFilter = "all" | "ebay" | "fb";
+type OfferFilter = "all" | "with" | "without";
 type SortMode =
   | "newest"
   | "price-asc"
@@ -44,6 +45,7 @@ export function Listings() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
   const [matchFilter, setMatchFilter] = useState<MatchFilter>("all");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+  const [offerFilter, setOfferFilter] = useState<OfferFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("newest");
 
   const [input, setInput] = useState("");
@@ -248,6 +250,13 @@ export function Listings() {
         return false;
       if (sourceFilter !== "all" && row.seller_code !== sourceFilter)
         return false;
+      if (offerFilter !== "all") {
+        const hasOffer = offersByItemId.has(
+          legacyIdFromExternalId(row.external_id),
+        );
+        if (offerFilter === "with" && !hasOffer) return false;
+        if (offerFilter === "without" && hasOffer) return false;
+      }
       return true;
     });
 
@@ -281,7 +290,16 @@ export function Listings() {
       }
     });
     return sorted;
-  }, [rows, searchText, statusFilter, matchFilter, sourceFilter, sortMode]);
+  }, [
+    rows,
+    searchText,
+    statusFilter,
+    matchFilter,
+    sourceFilter,
+    offerFilter,
+    offersByItemId,
+    sortMode,
+  ]);
 
   async function onPickRegistryEntry(
     listingId: number,
@@ -442,6 +460,16 @@ export function Listings() {
                 { value: "unmatched", label: "Unmatched" },
               ]}
               onChange={(v) => setMatchFilter(v as MatchFilter)}
+            />
+            <FilterChips
+              label="Offer"
+              value={offerFilter}
+              options={[
+                { value: "all", label: "All" },
+                { value: "with", label: "With offer" },
+                { value: "without", label: "Without offer" },
+              ]}
+              onChange={(v) => setOfferFilter(v as OfferFilter)}
             />
             <FilterChips
               label="Source"
