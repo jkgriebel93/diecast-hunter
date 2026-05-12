@@ -377,6 +377,8 @@ export interface ListingRow {
   matched_scale: string | null;
   matched_retail_cents: number | null;
   matched_wholesale_cents: number | null;
+  /** Site-relative path on diecastregistry.com to the matched entry's detail page. */
+  matched_detail_url: string | null;
   /** Total (price + shipping) as percentage of registry retail. Lower = better deal. */
   deal_score: number | null;
 }

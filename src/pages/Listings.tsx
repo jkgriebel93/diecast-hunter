@@ -689,6 +689,16 @@ function ListingCard({
                   </span>
                 )}
             </div>
+            {row.matched_detail_url && (
+              <a
+                className="text-accent hover:underline mt-0.5 inline-block"
+                href={"https://www.diecastregistry.com" + row.matched_detail_url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                View on diecastregistry.com →
+              </a>
+            )}
           </div>
         ) : row.match_user_confirmed ? (
           <div className="mt-2 text-xs text-slate-500">

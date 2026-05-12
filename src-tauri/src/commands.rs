@@ -449,6 +449,10 @@ pub struct ListingRow {
     pub matched_scale: Option<String>,
     pub matched_retail_cents: Option<i64>,
     pub matched_wholesale_cents: Option<i64>,
+    /// Site-relative path to the registry detail page, parsed out of
+    /// `registry_entries.raw_json`. None for stub entries that haven't been
+    /// touched by a sync that records the URL.
+    pub matched_detail_url: Option<String>,
     /// Total cost (price + shipping) as a percentage of registry retail. None
     /// if either side is missing. Lower = better deal.
     pub deal_score: Option<f64>,
@@ -484,6 +488,7 @@ struct ListingRowRaw {
     matched_scale: Option<String>,
     matched_retail_cents: Option<i64>,
     matched_wholesale_cents: Option<i64>,
+    matched_raw_json: Option<String>,
 }
 
 #[tauri::command]
@@ -506,7 +511,8 @@ pub async fn list_listings(
                 re.brand AS matched_brand,
                 re.scale AS matched_scale,
                 re.retail_value_cents AS matched_retail_cents,
-                re.wholesale_value_cents AS matched_wholesale_cents
+                re.wholesale_value_cents AS matched_wholesale_cents,
+                re.raw_json AS matched_raw_json
          FROM listings l
          JOIN sellers s ON s.id = l.seller_id
          LEFT JOIN listing_matches lm ON lm.listing_id = l.id
@@ -529,6 +535,15 @@ pub async fn list_listings(
                 }
                 _ => None,
             };
+            let matched_detail_url = r
+                .matched_raw_json
+                .as_deref()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                .and_then(|v| {
+                    v.get("detail_url")
+                        .and_then(|x| x.as_str())
+                        .map(str::to_owned)
+                });
             ListingRow {
                 listing_id: r.id,
                 seller_code: r.seller_code,
@@ -558,6 +573,7 @@ pub async fn list_listings(
                 matched_scale: r.matched_scale,
                 matched_retail_cents: r.matched_retail_cents,
                 matched_wholesale_cents: r.matched_wholesale_cents,
+                matched_detail_url,
                 deal_score,
             }
         })
