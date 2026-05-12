@@ -6,6 +6,7 @@ import {
   type ListingRow,
   type MatchSummary,
   type ProductionSearchResult,
+  type ReceivedOffer,
   type RefreshSummary,
   type RegistryPickerRow,
   type WatchlistSyncSummary,
@@ -15,6 +16,7 @@ type ViewMode = "flat" | "byDriver";
 type StatusFilter = "all" | "active" | "ended";
 type MatchFilter = "all" | "matched" | "unmatched";
 type SourceFilter = "all" | "ebay" | "fb";
+type OfferFilter = "all" | "unresponded" | "with" | "without";
 type SortMode =
   | "newest"
   | "price-asc"
@@ -27,6 +29,12 @@ type SortMode =
 export function Listings() {
   const [rows, setRows] = useState<ListingRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** legacy eBay item id → active seller offer, populated lazily on
+   *  mount via a parallel fetch. Failures (no eBay OAuth, network, etc.)
+   *  are silently ignored — the page works without offer badges. */
+  const [offersByItemId, setOffersByItemId] = useState<
+    Map<string, ReceivedOffer>
+  >(new Map());
 
   const [viewMode, setViewMode] = useState<ViewMode>("flat");
   const [pickerListing, setPickerListing] = useState<ListingRow | null>(null);
@@ -37,6 +45,7 @@ export function Listings() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
   const [matchFilter, setMatchFilter] = useState<MatchFilter>("all");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+  const [offerFilter, setOfferFilter] = useState<OfferFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("newest");
 
   const [input, setInput] = useState("");
@@ -69,7 +78,23 @@ export function Listings() {
 
   useEffect(() => {
     load();
+    void loadOffers();
   }, []);
+
+  async function loadOffers() {
+    try {
+      const list = await api.listEbayOffers();
+      const nowSec = Math.floor(Date.now() / 1000);
+      const map = new Map<string, ReceivedOffer>();
+      for (const o of list) {
+        if (o.expires_at !== null && o.expires_at < nowSec) continue;
+        map.set(o.item_id, o);
+      }
+      setOffersByItemId(map);
+    } catch {
+      // Best-effort decoration; no surface for errors here.
+    }
+  }
 
   async function onAdd(e: FormEvent) {
     e.preventDefault();
@@ -225,6 +250,27 @@ export function Listings() {
         return false;
       if (sourceFilter !== "all" && row.seller_code !== sourceFilter)
         return false;
+      if (offerFilter !== "all") {
+        const offer = offersByItemId.get(
+          legacyIdFromExternalId(row.external_id),
+        );
+        const hasOffer = offer !== undefined;
+        if (offerFilter === "with" && !hasOffer) return false;
+        if (offerFilter === "without" && hasOffer) return false;
+        if (offerFilter === "unresponded") {
+          if (!hasOffer) return false;
+          // Heuristic for "user already responded": either the
+          // notification was opened (eBay flips <Read> on the inbox UI
+          // when you open the message — which the web accept/decline
+          // flow does), or the underlying listing has ended (signal
+          // that the offer was accepted and the item sold). Conservative:
+          // a missing listing is treated as "still active" so users who
+          // haven't run watchlist sync still see their offers.
+          const responded =
+            offer.is_read || row.status === "ended";
+          if (responded) return false;
+        }
+      }
       return true;
     });
 
@@ -258,7 +304,16 @@ export function Listings() {
       }
     });
     return sorted;
-  }, [rows, searchText, statusFilter, matchFilter, sourceFilter, sortMode]);
+  }, [
+    rows,
+    searchText,
+    statusFilter,
+    matchFilter,
+    sourceFilter,
+    offerFilter,
+    offersByItemId,
+    sortMode,
+  ]);
 
   async function onPickRegistryEntry(
     listingId: number,
@@ -421,6 +476,17 @@ export function Listings() {
               onChange={(v) => setMatchFilter(v as MatchFilter)}
             />
             <FilterChips
+              label="Offer"
+              value={offerFilter}
+              options={[
+                { value: "all", label: "All" },
+                { value: "unresponded", label: "Unresponded" },
+                { value: "with", label: "Any offer" },
+                { value: "without", label: "No offer" },
+              ]}
+              onChange={(v) => setOfferFilter(v as OfferFilter)}
+            />
+            <FilterChips
               label="Source"
               value={sourceFilter}
               options={[
@@ -480,6 +546,7 @@ export function Listings() {
             <ListingCard
               key={r.listing_id}
               row={r}
+              offer={offersByItemId.get(legacyIdFromExternalId(r.external_id))}
               refreshing={refreshingId === r.listing_id}
               unwatching={unwatchingId === r.listing_id}
               onRefresh={() => onRefreshOne(r.listing_id)}
@@ -495,6 +562,7 @@ export function Listings() {
       ) : (
         <GroupedByDriver
           rows={filteredRows ?? []}
+          offersByItemId={offersByItemId}
           refreshingId={refreshingId}
           unwatchingId={unwatchingId}
           onRefresh={onRefreshOne}
@@ -533,6 +601,7 @@ export function Listings() {
 
 function ListingCard({
   row,
+  offer,
   refreshing,
   unwatching,
   onRefresh,
@@ -544,6 +613,7 @@ function ListingCard({
   onSearchRegistry,
 }: {
   row: ListingRow;
+  offer: ReceivedOffer | undefined;
   refreshing: boolean;
   unwatching: boolean;
   onRefresh: () => void;
@@ -570,7 +640,12 @@ function ListingCard({
         />
       )}
       <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium truncate">{row.title}</div>
+        <div className="flex items-center gap-2">
+          <div className="text-sm font-medium truncate flex-1 min-w-0">
+            {row.title}
+          </div>
+          {offer && <OfferBadge offer={offer} />}
+        </div>
         <div className="text-xs text-slate-500 mt-0.5">
           {[
             row.seller_code,
@@ -774,6 +849,7 @@ function DealBadge({ score }: { score: number }) {
 
 function GroupedByDriver({
   rows,
+  offersByItemId,
   refreshingId,
   unwatchingId,
   onRefresh,
@@ -785,6 +861,7 @@ function GroupedByDriver({
   onSearchRegistry,
 }: {
   rows: ListingRow[];
+  offersByItemId: Map<string, ReceivedOffer>;
   refreshingId: number | null;
   unwatchingId: number | null;
   onRefresh: (id: number) => void;
@@ -837,6 +914,7 @@ function GroupedByDriver({
                 <li key={r.listing_id} className="px-4 py-2">
                   <ListingCard
                     row={r}
+                    offer={offersByItemId.get(legacyIdFromExternalId(r.external_id))}
                     refreshing={refreshingId === r.listing_id}
                     unwatching={unwatchingId === r.listing_id}
                     onRefresh={() => onRefresh(r.listing_id)}
@@ -1371,4 +1449,36 @@ function FilterChips({
       ))}
     </div>
   );
+}
+
+function OfferBadge({ offer }: { offer: ReceivedOffer }) {
+  const parts: string[] = [];
+  if (offer.offer_price_cents !== null) {
+    parts.push(formatCents(offer.offer_price_cents));
+  }
+  if (offer.discount_percent !== null) {
+    const pct = Number.isInteger(offer.discount_percent)
+      ? `${offer.discount_percent}`
+      : offer.discount_percent.toFixed(1);
+    parts.push(`${pct}% off`);
+  }
+  const label = parts.length > 0 ? `Seller offer: ${parts.join(" · ")}` : "Seller offer";
+  return (
+    <a
+      href={offer.item_web_url}
+      target="_blank"
+      rel="noreferrer"
+      title="A seller sent you a discount offer on this item — open eBay to accept or decline"
+      className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 text-[11px] hover:bg-emerald-500/20"
+    >
+      ✨ {label} →
+    </a>
+  );
+}
+
+/** Listings table stores eBay item ids as v1|<legacy>|0; the messages
+ *  API returns just the legacy segment, so we extract it for lookups. */
+function legacyIdFromExternalId(external_id: string): string {
+  const parts = external_id.split("|");
+  return parts.length >= 2 && /^\d+$/.test(parts[1]) ? parts[1] : external_id;
 }

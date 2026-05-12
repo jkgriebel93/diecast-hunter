@@ -255,6 +255,32 @@ mod tests {
         assert_eq!(page.total_pages, 2);
     }
 
+    /// Real eBay GetMyeBayBuying responses (at DetailLevel=ReturnSummary)
+    /// omit the <PageNumber> element entirely. The parser defaults
+    /// current_page to 1; callers must NOT use it for pagination control
+    /// — see sync_watchlist for the corresponding loop fix.
+    #[test]
+    fn missing_page_number_defaults_to_one() {
+        let xml = r#"<?xml version="1.0"?>
+<GetMyeBayBuyingResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Ack>Success</Ack>
+  <WatchList>
+    <ItemArray>
+      <Item><ItemID>111111111111</ItemID></Item>
+    </ItemArray>
+    <PaginationResult>
+      <TotalNumberOfPages>3</TotalNumberOfPages>
+      <TotalNumberOfEntries>475</TotalNumberOfEntries>
+    </PaginationResult>
+  </WatchList>
+</GetMyeBayBuyingResponse>"#;
+        let page = parse_watchlist_response(xml).unwrap();
+        assert_eq!(page.total_pages, 3);
+        // No <PageNumber> in the response → parser falls back to 1.
+        assert_eq!(page.current_page, 1);
+        assert_eq!(page.item_ids.len(), 1);
+    }
+
     #[test]
     fn detects_failure() {
         let xml = r#"<?xml version="1.0"?>

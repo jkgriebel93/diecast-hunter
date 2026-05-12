@@ -1,115 +1,446 @@
-//! eBay buyer-side offers (Trading API). Fetches Best Offers attached to
-//! items the user has watch-listed — primarily seller-initiated "Send
-//! Offer to Buyer" promotions — by pulling the watchlist with full
-//! detail and surfacing items that have a <BestOffer> attached. Decline
-//! goes through RespondToBestOffer; accepting deep-links to eBay so its
-//! anti-fraud checks can run during checkout.
+//! Seller-initiated Best Offers ("Send Offer to Buyer") that appear in
+//! the user's My-Messages inbox. eBay's Trading API doesn't expose a
+//! BestOfferID for these, so in-app accept/decline isn't possible —
+//! the UI deep-links to the listing page where eBay's web UI handles
+//! both actions.
+//!
+//! Flow:
+//!   1. GetMyMessages with DetailLevel=ReturnHeaders, last 30 days
+//!      → list of message headers (Subject, ItemID, ReceiveDate, Read, …)
+//!   2. Filter to subjects matching a known offer pattern.
+//!   3. GetMyMessages with DetailLevel=ReturnMessages + batches of up to
+//!      10 MessageIDs → HTML bodies with the offer price and expiration.
+//!   4. Parse each body's `id="offer-amount"` / `id="offer-expires"` /
+//!      "Buy It Now: $X" cells out of the HTML.
+//!   5. Join with the local `listings` table (where the user has
+//!      synced their watchlist) to enrich each row with the listing's
+//!      image. Items the user hasn't synced just have no image.
 
+use std::collections::HashMap;
 use std::error::Error as _;
 use std::time::Duration;
 
-use chrono::DateTime;
+use chrono::{DateTime, Datelike, FixedOffset, TimeZone, Utc};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::Client;
 use serde::Serialize;
+use sqlx::SqlitePool;
 
 use crate::ebay::client::EbayEnvironment;
-use crate::ebay::parse::dollars_string_to_cents;
-use crate::ebay::trading::{parse_watchlist_mutation_response, trading_endpoint};
+use crate::ebay::parse::{dollars_string_to_cents, legacy_id_from_v1};
+use crate::ebay::trading::trading_endpoint;
 use crate::error::{AppError, AppResult};
 
 const COMPATIBILITY_LEVEL: &str = "1193";
 const SITE_ID_US: &str = "0";
+/// Trading API's GetMyMessages caps `MessageIDs` at 10 per request when
+/// pulling full bodies (DetailLevel=ReturnMessages).
+const BODY_BATCH_SIZE: usize = 10;
+/// How far back we ask for messages. Send-Offer-to-Buyer notifications
+/// expire after a few days, so a month is generous coverage.
+const LOOKBACK_DAYS: i64 = 30;
 
-/// One offer on one item, flattened from the nested GetMyeBayBuying
-/// response so the UI can render a simple list.
 #[derive(Debug, Clone, Serialize)]
 pub struct ReceivedOffer {
+    pub message_id: String,
     pub item_id: String,
     pub item_title: String,
-    pub item_web_url: Option<String>,
+    /// Direct deep-link to the listing on eBay. Built from the item id
+    /// so we get a clean URL without the message's marketing tracking
+    /// params.
+    pub item_web_url: String,
+    /// Gallery image from the local `listings` table when the user has
+    /// synced their watchlist; None otherwise.
     pub item_image_url: Option<String>,
-    /// Listing's current Buy-It-Now / fixed price, for context next to the
-    /// offer amount.
-    pub item_current_price_cents: Option<i64>,
-    pub offer_id: String,
-    /// "Pending" | "Countered" | "Accepted" | "Declined" | "Expired" |
-    /// "Retracted" — eBay's BestOfferStatusCodeType. Not exhaustive; we
-    /// pass through whatever we got.
-    pub offer_status: String,
+    /// Listing's "Buy It Now" price as quoted in the offer email body.
+    pub original_price_cents: Option<i64>,
+    /// "Your offer: $X" cell from the body.
     pub offer_price_cents: Option<i64>,
-    pub offer_currency: String,
-    /// "BestOffer" (buyer-initiated) or "CounterOffer" (seller counter).
-    /// Only the latter is "an offer the seller sent me."
-    pub offer_type: Option<String>,
-    pub expiration_time: Option<i64>,
-    pub buyer_message: Option<String>,
-    pub seller_message: Option<String>,
+    pub currency: String,
+    /// % off, parsed from the subject ("Seller offered a special
+    /// discount 10% on …").
+    pub discount_percent: Option<f64>,
+    /// Raw "Offer expires: May-14 15:58:53 PDT" text from the body, kept
+    /// for display when the parsed timestamp is None.
+    pub expires_at_text: Option<String>,
+    /// Best-effort parsed expiration; None if the timezone or format is
+    /// one we don't recognize.
+    pub expires_at: Option<i64>,
+    pub received_at: i64,
+    pub is_read: bool,
 }
 
+/// Top-level entry point used by the `list_ebay_offers` Tauri command.
 pub async fn fetch_received_offers(
+    pool: &SqlitePool,
     env: EbayEnvironment,
     iaf_token: &str,
 ) -> AppResult<Vec<ReceivedOffer>> {
-    let body = r#"<?xml version="1.0" encoding="utf-8"?>
-<GetMyeBayBuyingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <WatchList>
-    <Include>true</Include>
-    <Pagination>
-      <EntriesPerPage>200</EntriesPerPage>
-      <PageNumber>1</PageNumber>
-    </Pagination>
-  </WatchList>
-  <DetailLevel>ReturnAll</DetailLevel>
-</GetMyeBayBuyingRequest>"#;
+    let headers = fetch_offer_headers(env, iaf_token).await?;
+    if headers.is_empty() {
+        return Ok(Vec::new());
+    }
 
-    let xml = trading_post(env, iaf_token, "GetMyeBayBuying", body).await?;
-    let (offers, watched_count, items_with_offers) = parse_offers_response_with_stats(&xml)?;
-    // Diagnostic: if the watchlist comes back populated but no offers,
-    // either the seller hasn't sent any (expected) or the API isn't
-    // returning offer details at this DetailLevel (the next thing to try
-    // is a per-item GetItem follow-up).
-    tracing::info!(
-        "ebay offers: watchlist returned {watched_count} item(s), {items_with_offers} with offers"
-    );
-    Ok(offers)
+    // Pull image URLs for items the user has previously synced into
+    // `listings`. Single query keyed by legacy item id.
+    let listing_images = load_listing_images(pool).await?;
+
+    // Batch body fetches. eBay caps at 10 IDs per call; the rate
+    // limiter on the regular EbayClient is separate from these raw
+    // Trading-API posts so we stay well under any rate limits in
+    // practice (rarely more than ~20 batches per refresh).
+    let mut bodies: HashMap<String, MessageBody> = HashMap::new();
+    for chunk in headers.chunks(BODY_BATCH_SIZE) {
+        let ids: Vec<&str> = chunk.iter().map(|h| h.message_id.as_str()).collect();
+        let map = fetch_message_bodies(env, iaf_token, &ids).await?;
+        bodies.extend(map);
+    }
+
+    let mut out = Vec::with_capacity(headers.len());
+    for h in headers {
+        let body = bodies.remove(&h.message_id).unwrap_or_default();
+        out.push(ReceivedOffer {
+            message_id: h.message_id.clone(),
+            item_id: h.item_id.clone(),
+            item_title: h.item_title,
+            item_web_url: format!("https://www.ebay.com/itm/{}", h.item_id),
+            item_image_url: listing_images.get(&h.item_id).cloned(),
+            original_price_cents: body.original_price_cents,
+            offer_price_cents: body.offer_price_cents,
+            currency: body.currency.unwrap_or_else(|| "USD".to_string()),
+            discount_percent: h.discount_percent,
+            expires_at: body
+                .expires_at_text
+                .as_deref()
+                .and_then(|s| parse_offer_expiration(s, h.received_at)),
+            expires_at_text: body.expires_at_text,
+            received_at: h.received_at,
+            is_read: h.is_read,
+        });
+    }
+    // Most recently received first.
+    out.sort_by(|a, b| b.received_at.cmp(&a.received_at));
+    Ok(out)
 }
 
-/// Decline a single Best Offer / counter-offer the user is involved with.
-/// "Already declined / expired" responses from eBay are treated as
-/// success — the caller's intent is satisfied either way.
-pub async fn decline_offer(
+// ---------- step 1: header fetch + filter ----------
+
+#[derive(Debug, Clone)]
+struct OfferHeader {
+    message_id: String,
+    item_id: String,
+    item_title: String,
+    received_at: i64,
+    is_read: bool,
+    discount_percent: Option<f64>,
+}
+
+async fn fetch_offer_headers(
     env: EbayEnvironment,
     iaf_token: &str,
-    item_id: &str,
-    offer_id: &str,
-) -> AppResult<()> {
-    if !is_safe_id(item_id) {
-        return Err(AppError::Parse(format!(
-            "refusing to send malformed item id: {item_id:?}"
-        )));
-    }
-    if !is_safe_id(offer_id) {
-        return Err(AppError::Parse(format!(
-            "refusing to send malformed offer id: {offer_id:?}"
-        )));
-    }
+) -> AppResult<Vec<OfferHeader>> {
+    let now = Utc::now();
+    let start = now - chrono::Duration::days(LOOKBACK_DAYS);
     let body = format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
-<RespondToBestOfferRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <ItemID>{item_id}</ItemID>
-  <BestOfferID>{offer_id}</BestOfferID>
-  <Action>Decline</Action>
-</RespondToBestOfferRequest>"#
+<GetMyMessagesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <DetailLevel>ReturnHeaders</DetailLevel>
+  <Pagination>
+    <EntriesPerPage>200</EntriesPerPage>
+    <PageNumber>1</PageNumber>
+  </Pagination>
+  <StartTime>{}</StartTime>
+  <EndTime>{}</EndTime>
+</GetMyMessagesRequest>"#,
+        start.to_rfc3339(),
+        now.to_rfc3339(),
     );
-    let xml = trading_post(env, iaf_token, "RespondToBestOffer", &body).await?;
-    parse_watchlist_mutation_response(&xml, "RespondToBestOffer")
+    let xml = trading_post(env, iaf_token, "GetMyMessages", &body).await?;
+    parse_offer_headers(&xml)
 }
 
-fn is_safe_id(s: &str) -> bool {
-    !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()) && s.len() <= 20
+pub fn parse_offer_headers(xml: &str) -> AppResult<Vec<OfferHeader>> {
+    if FAILURE_RE.is_match(xml) {
+        let detail = LONG_MESSAGE_RE
+            .captures(xml)
+            .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
+            .unwrap_or_else(|| "GetMyMessages returned Failure".to_string());
+        return Err(AppError::Network(format!("trading api: {detail}")));
+    }
+
+    let mut out = Vec::new();
+    for cap in MESSAGE_BLOCK_RE.captures_iter(xml) {
+        let block = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+        let subject = match extract_text(block, "Subject") {
+            Some(s) => s,
+            None => continue,
+        };
+        let discount = parse_discount_pct(&subject);
+        if !is_offer_subject(&subject) {
+            continue;
+        }
+        let message_id = match extract_text(block, "MessageID") {
+            Some(s) => s,
+            None => continue,
+        };
+        let item_id = match extract_text(block, "ItemID") {
+            Some(s) => s,
+            None => continue,
+        };
+        let item_title = extract_text(block, "ItemTitle")
+            .or_else(|| Some(subject.clone()))
+            .unwrap_or_default();
+        let received_at = extract_text(block, "ReceiveDate")
+            .as_deref()
+            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+            .map(|d| d.timestamp())
+            .unwrap_or(0);
+        let is_read = extract_text(block, "Read").as_deref() == Some("true");
+        out.push(OfferHeader {
+            message_id,
+            item_id,
+            item_title,
+            received_at,
+            is_read,
+            discount_percent: discount,
+        });
+    }
+    Ok(out)
 }
+
+/// True for the canonical eBay subject patterns we've seen in real
+/// "Send Offer to Buyer" messages.
+fn is_offer_subject(subject: &str) -> bool {
+    let s = subject.to_ascii_lowercase();
+    s.starts_with("seller offered a special discount")
+        || s.starts_with("special limited-time")
+        || s.starts_with("special limited time")
+}
+
+fn parse_discount_pct(subject: &str) -> Option<f64> {
+    DISCOUNT_RE
+        .captures(subject)
+        .and_then(|c| c.get(1).and_then(|m| m.as_str().parse::<f64>().ok()))
+}
+
+// ---------- step 2: body fetch + parse ----------
+
+#[derive(Debug, Clone, Default)]
+struct MessageBody {
+    original_price_cents: Option<i64>,
+    offer_price_cents: Option<i64>,
+    currency: Option<String>,
+    expires_at_text: Option<String>,
+}
+
+async fn fetch_message_bodies(
+    env: EbayEnvironment,
+    iaf_token: &str,
+    message_ids: &[&str],
+) -> AppResult<HashMap<String, MessageBody>> {
+    let ids_xml: String = message_ids
+        .iter()
+        .filter(|id| is_safe_id(id))
+        .map(|id| format!("    <MessageID>{id}</MessageID>\n"))
+        .collect();
+    let body = format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<GetMyMessagesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <DetailLevel>ReturnMessages</DetailLevel>
+  <MessageIDs>
+{ids_xml}  </MessageIDs>
+</GetMyMessagesRequest>"#
+    );
+    let xml = trading_post(env, iaf_token, "GetMyMessages", &body).await?;
+    parse_message_bodies(&xml)
+}
+
+pub fn parse_message_bodies(xml: &str) -> AppResult<HashMap<String, MessageBody>> {
+    if FAILURE_RE.is_match(xml) {
+        let detail = LONG_MESSAGE_RE
+            .captures(xml)
+            .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
+            .unwrap_or_else(|| "GetMyMessages (bodies) returned Failure".to_string());
+        return Err(AppError::Network(format!("trading api: {detail}")));
+    }
+
+    let mut out = HashMap::new();
+    for cap in MESSAGE_BLOCK_RE.captures_iter(xml) {
+        let block = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+        let message_id = match extract_text(block, "MessageID") {
+            Some(s) => s,
+            None => continue,
+        };
+        // eBay returns the body in two forms — `<Text>` (unescaped HTML)
+        // and `<Content>` (XML-entity-encoded HTML). We prefer `<Content>`
+        // because it's safe to extract via simple `</Content>` boundary.
+        let raw = extract_text(block, "Content").or_else(|| extract_text(block, "Text"));
+        let decoded = raw.map(|s| decode_html_entities(&s)).unwrap_or_default();
+        out.insert(message_id, parse_offer_body_html(&decoded));
+    }
+    Ok(out)
+}
+
+fn parse_offer_body_html(html: &str) -> MessageBody {
+    let mut body = MessageBody::default();
+
+    // "Your offer: $XX.XX"
+    if let Some(cap) = OFFER_AMOUNT_RE.captures(html) {
+        if let Some(snippet) = cap.get(1) {
+            let (cents, currency) = first_money(snippet.as_str());
+            body.offer_price_cents = cents;
+            if body.currency.is_none() {
+                body.currency = currency;
+            }
+        }
+    }
+    // "Buy It Now: $XX.XX"
+    if let Some(cap) = BIN_RE.captures(html) {
+        if let Some(amt) = cap.get(1) {
+            body.original_price_cents = dollars_string_to_cents(amt.as_str());
+        }
+    }
+    // "Offer expires: May-14 15:58:53 PDT"
+    if let Some(cap) = OFFER_EXPIRES_RE.captures(html) {
+        if let Some(snippet) = cap.get(1) {
+            if let Some(text) = EXPIRES_TEXT_RE
+                .captures(snippet.as_str())
+                .and_then(|c| c.get(1))
+            {
+                body.expires_at_text = Some(text.as_str().trim().to_string());
+            }
+        }
+    }
+    body
+}
+
+/// Pull the first `$XX.XX` (or `12.34`) match out of a snippet, with a
+/// best-effort currency tag (always "USD" for the messages we see).
+fn first_money(snippet: &str) -> (Option<i64>, Option<String>) {
+    let m = MONEY_RE.captures(snippet);
+    let cents = m
+        .as_ref()
+        .and_then(|c| c.get(1))
+        .and_then(|m| dollars_string_to_cents(m.as_str()));
+    let currency = if m.is_some() {
+        Some("USD".to_string())
+    } else {
+        None
+    };
+    (cents, currency)
+}
+
+/// Decode the minimum set of XML entities we care about. Order matters:
+/// `&amp;` last so we don't double-decode (`&amp;lt;` → `&lt;` → `<`
+/// would be wrong if we decoded `&amp;` first).
+fn decode_html_entities(s: &str) -> String {
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&")
+}
+
+// ---------- step 3: parse the expiration timestamp ----------
+
+/// Convert eBay's `MMM-DD HH:MM:SS TZ` format (e.g. "May-14 15:58:53
+/// PDT") to a Unix timestamp using the message's receive year as the
+/// anchor. If the parsed date would be more than ~90 days *before* the
+/// receive date (year-boundary case), bump to the next year.
+pub fn parse_offer_expiration(text: &str, received_at: i64) -> Option<i64> {
+    let cap = EXPIRES_DATE_RE.captures(text)?;
+    let month = month_num(cap.get(1)?.as_str())?;
+    let day: u32 = cap.get(2)?.as_str().parse().ok()?;
+    let hour: u32 = cap.get(3)?.as_str().parse().ok()?;
+    let minute: u32 = cap.get(4)?.as_str().parse().ok()?;
+    let second: u32 = cap.get(5)?.as_str().parse().ok()?;
+    let tz_offset = offset_for_tz(cap.get(6)?.as_str())?;
+
+    let received = DateTime::<Utc>::from_timestamp(received_at, 0)?;
+    let mut year = received.year();
+    let fixed = FixedOffset::east_opt(tz_offset)?;
+    let mut dt = build_dt(year, month, day, hour, minute, second, fixed)?;
+    if received.timestamp() - dt.timestamp() > 90 * 24 * 3600 {
+        year += 1;
+        dt = build_dt(year, month, day, hour, minute, second, fixed)?;
+    }
+    Some(dt.timestamp())
+}
+
+fn build_dt(
+    year: i32,
+    month: u32,
+    day: u32,
+    hour: u32,
+    minute: u32,
+    second: u32,
+    offset: FixedOffset,
+) -> Option<DateTime<FixedOffset>> {
+    let naive = chrono::NaiveDate::from_ymd_opt(year, month, day)?
+        .and_hms_opt(hour, minute, second)?;
+    offset.from_local_datetime(&naive).single()
+}
+
+fn month_num(m: &str) -> Option<u32> {
+    match m {
+        "Jan" => Some(1),
+        "Feb" => Some(2),
+        "Mar" => Some(3),
+        "Apr" => Some(4),
+        "May" => Some(5),
+        "Jun" => Some(6),
+        "Jul" => Some(7),
+        "Aug" => Some(8),
+        "Sep" => Some(9),
+        "Oct" => Some(10),
+        "Nov" => Some(11),
+        "Dec" => Some(12),
+        _ => None,
+    }
+}
+
+fn offset_for_tz(tz: &str) -> Option<i32> {
+    let hours = match tz {
+        "UTC" | "GMT" => 0,
+        "EDT" => -4,
+        "EST" => -5,
+        "CDT" => -5,
+        "CST" => -6,
+        "MDT" => -6,
+        "MST" => -7,
+        "PDT" => -7,
+        "PST" => -8,
+        "AKDT" => -8,
+        "AKST" => -9,
+        "HST" => -10,
+        _ => return None,
+    };
+    Some(hours * 3600)
+}
+
+// ---------- step 4: local listings join ----------
+
+async fn load_listing_images(pool: &SqlitePool) -> AppResult<HashMap<String, String>> {
+    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT l.external_id, l.image_url
+         FROM listings l
+         JOIN sellers s ON s.id = l.seller_id
+         WHERE s.code = 'ebay' AND l.image_url IS NOT NULL",
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut map = HashMap::new();
+    for (ext_id, img) in rows {
+        let Some(img) = img else { continue };
+        let legacy = legacy_id_from_v1(&ext_id).unwrap_or(ext_id);
+        map.insert(legacy, img);
+    }
+    Ok(map)
+}
+
+// ---------- shared helpers ----------
 
 async fn trading_post(
     env: EbayEnvironment,
@@ -118,7 +449,7 @@ async fn trading_post(
     body: &str,
 ) -> AppResult<String> {
     let client = Client::builder()
-        .timeout(Duration::from_secs(30))
+        .timeout(Duration::from_secs(60))
         .gzip(true)
         .http1_only()
         .build()
@@ -146,105 +477,17 @@ async fn trading_post(
     Ok(xml)
 }
 
-// ---------- parsing ----------
-
-static FAILURE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"<Ack>Failure</Ack>").unwrap());
-static LONG_MESSAGE_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"<LongMessage>([^<]+)</LongMessage>").unwrap());
-static ITEM_BLOCK_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?s)<Item>(.*?)</Item>").unwrap());
-static OFFER_BLOCK_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?s)<BestOffer>(.*?)</BestOffer>").unwrap());
-
-pub fn parse_offers_response(xml: &str) -> AppResult<Vec<ReceivedOffer>> {
-    parse_offers_response_with_stats(xml).map(|(o, _, _)| o)
-}
-
-/// Like parse_offers_response, but also returns (watched_item_count,
-/// items_with_offer_count) so the caller can log a diagnostic when the
-/// list comes back empty.
-pub fn parse_offers_response_with_stats(
-    xml: &str,
-) -> AppResult<(Vec<ReceivedOffer>, usize, usize)> {
-    if FAILURE_RE.is_match(xml) {
-        let detail = LONG_MESSAGE_RE
-            .captures(xml)
-            .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
-            .unwrap_or_else(|| "GetMyeBayBuying returned Failure".to_string());
-        return Err(AppError::Network(format!("trading api: {detail}")));
-    }
-
-    let mut out: Vec<ReceivedOffer> = Vec::new();
-    let mut watched_count = 0usize;
-    let mut items_with_offers = 0usize;
-    for cap in ITEM_BLOCK_RE.captures_iter(xml) {
-        let item_xml = cap.get(1).map(|m| m.as_str()).unwrap_or("");
-        let item_id = match extract_text(item_xml, "ItemID") {
-            Some(id) => id,
-            None => continue, // not a real item block
-        };
-        watched_count += 1;
-        let item_title =
-            extract_text(item_xml, "Title").unwrap_or_else(|| "(untitled)".to_string());
-        let item_web_url = extract_text(item_xml, "ViewItemURL");
-        let item_image_url = extract_text(item_xml, "GalleryURL");
-        let item_current_price_cents = extract_text(item_xml, "CurrentPrice")
-            .and_then(|s| dollars_string_to_cents(&s));
-
-        let mut produced_for_this_item = false;
-        for offer_cap in OFFER_BLOCK_RE.captures_iter(item_xml) {
-            let off_xml = offer_cap.get(1).map(|m| m.as_str()).unwrap_or("");
-            let offer_id = match extract_text(off_xml, "BestOfferID") {
-                Some(id) => id,
-                None => continue,
-            };
-            produced_for_this_item = true;
-            let price_str = extract_text(off_xml, "Price");
-            let offer_price_cents = price_str.as_deref().and_then(dollars_string_to_cents);
-            let offer_currency = extract_attr(off_xml, "Price", "currencyID")
-                .unwrap_or_else(|| "USD".to_string());
-            let offer_status =
-                extract_text(off_xml, "Status").unwrap_or_else(|| "Unknown".to_string());
-            let offer_type = extract_text(off_xml, "BestOfferCodeType");
-            let expiration_time = extract_text(off_xml, "ExpirationTime")
-                .as_deref()
-                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-                .map(|d| d.timestamp());
-            let buyer_message = extract_text(off_xml, "BuyerMessage");
-            let seller_message = extract_text(off_xml, "SellerMessage");
-
-            out.push(ReceivedOffer {
-                item_id: item_id.clone(),
-                item_title: item_title.clone(),
-                item_web_url: item_web_url.clone(),
-                item_image_url: item_image_url.clone(),
-                item_current_price_cents,
-                offer_id,
-                offer_status,
-                offer_price_cents,
-                offer_currency,
-                offer_type,
-                expiration_time,
-                buyer_message,
-                seller_message,
-            });
-        }
-        if produced_for_this_item {
-            items_with_offers += 1;
-        }
-    }
-    Ok((out, watched_count, items_with_offers))
+fn is_safe_id(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()) && s.len() <= 20
 }
 
 /// Extract the text between the first `<tag ...>` ... `</tag>`. Handles
-/// open tags with attributes (e.g. `<Price currencyID="USD">10.00</Price>`).
+/// open tags with attributes. Picks the closest opening tag before the
+/// matching close so it tolerates the rare nesting we don't expect.
 fn extract_text(xml: &str, tag: &str) -> Option<String> {
     let close = format!("</{tag}>");
     let close_pos = xml.find(&close)?;
     let before = &xml[..close_pos];
-    // Find the matching open tag — the last `<tag` (with optional attrs)
-    // that opens before the close. Using the *last* one tolerates nesting
-    // we don't expect, but err toward the closest opener.
     let pat_with_space = format!("<{tag} ");
     let pat_no_space = format!("<{tag}>");
     let open_idx = before
@@ -253,20 +496,6 @@ fn extract_text(xml: &str, tag: &str) -> Option<String> {
     let after_open = &before[open_idx..];
     let gt = after_open.find('>')? + 1;
     Some(after_open[gt..].to_string())
-}
-
-/// Pull a single attribute off the first `<tag ...>` opening tag.
-fn extract_attr(xml: &str, tag: &str, attr: &str) -> Option<String> {
-    let pat_with_space = format!("<{tag} ");
-    let open_idx = xml.find(&pat_with_space)?;
-    let after_open = &xml[open_idx + pat_with_space.len()..];
-    let gt = after_open.find('>')?;
-    let attrs = &after_open[..gt];
-    let needle = format!(r#"{attr}=""#);
-    let val_start = attrs.find(&needle)? + needle.len();
-    let rest = &attrs[val_start..];
-    let val_end = rest.find('"')?;
-    Some(rest[..val_end].to_string())
 }
 
 fn map_reqwest(e: reqwest::Error) -> AppError {
@@ -279,124 +508,178 @@ fn map_reqwest(e: reqwest::Error) -> AppError {
     AppError::Network(parts.join(": "))
 }
 
+// ---------- statics ----------
+
+static FAILURE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"<Ack>Failure</Ack>").unwrap());
+static LONG_MESSAGE_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"<LongMessage>([^<]+)</LongMessage>").unwrap());
+static MESSAGE_BLOCK_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?s)<Message>(.*?)</Message>").unwrap());
+static DISCOUNT_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)([\d.]+)\s*%").unwrap());
+static MONEY_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\$([\d,]+\.\d{2})").unwrap());
+static OFFER_AMOUNT_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"(?s)<td[^>]*id="offer-amount"[^>]*>(.*?)</td>"#).unwrap()
+});
+static OFFER_EXPIRES_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"(?s)<td[^>]*id="offer-expires"[^>]*>(.*?)</td>"#).unwrap()
+});
+static BIN_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"Buy It Now:\s*\$([\d,]+\.\d{2})").unwrap());
+static EXPIRES_TEXT_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)offer expires?:\s*([^<\n]+)").unwrap());
+static EXPIRES_DATE_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"([A-Za-z]{3})-(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})\s+([A-Z]{2,4})")
+        .unwrap()
+});
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const FIXTURE: &str = include_str!("../../fixtures/ebay/offers_response.xml");
+    #[test]
+    fn recognizes_offer_subjects() {
+        assert!(is_offer_subject(
+            "Seller offered a special discount 10% on RARE! Carl Edwards…"
+        ));
+        assert!(is_offer_subject(
+            "Special limited-time 12% discount on 2002…"
+        ));
+        assert!(!is_offer_subject("A new device is using your account"));
+        assert!(!is_offer_subject("John, share feedback on your recent purchase"));
+    }
 
     #[test]
-    fn parses_fixture() {
-        let (offers, watched, with_offers) =
-            parse_offers_response_with_stats(FIXTURE).unwrap();
-        assert_eq!(watched, 3, "fixture has 3 watched items");
-        assert_eq!(with_offers, 1, "only one item has a seller offer");
-        assert_eq!(offers.len(), 1);
-
-        let seller_offer = &offers[0];
-        assert_eq!(seller_offer.item_id, "123456789012");
-        assert!(seller_offer.item_title.contains("Jeff Gordon"));
+    fn parses_discount_pct_from_subject() {
         assert_eq!(
-            seller_offer.item_web_url.as_deref(),
-            Some("https://www.ebay.com/itm/123456789012")
+            parse_discount_pct("Seller offered a special discount 10% on …"),
+            Some(10.0)
         );
-        assert!(seller_offer
-            .item_image_url
-            .as_deref()
-            .is_some_and(|u| u.starts_with("https://i.ebayimg")));
-        assert_eq!(seller_offer.item_current_price_cents, Some(4995));
-        assert_eq!(seller_offer.offer_id, "5550000001");
-        assert_eq!(seller_offer.offer_status, "Pending");
-        assert_eq!(seller_offer.offer_type.as_deref(), Some("SellerOffer"));
-        assert_eq!(seller_offer.offer_price_cents, Some(3995));
-        assert_eq!(seller_offer.offer_currency, "USD");
-        assert!(seller_offer.expiration_time.is_some());
         assert_eq!(
-            seller_offer.seller_message.as_deref(),
-            Some("Special offer just for you — 20% off!")
+            parse_discount_pct("Seller offered a special discount 6.3% on …"),
+            Some(6.3)
         );
-        assert_eq!(seller_offer.buyer_message, None);
+        assert_eq!(parse_discount_pct("no percent here"), None);
     }
 
     #[test]
-    fn empty_watchlist() {
+    fn extracts_offer_fields_from_body_html() {
+        let html = r#"
+<table>
+  <tr>
+    <td id="bin-amount" valign="top"><font>Buy It Now: $54.99</font></td>
+  </tr>
+  <tr>
+    <td id="offer-amount" valign="top"><font>Your offer: $49.49</font></td>
+  </tr>
+  <tr>
+    <td id="offer-expires" valign="top"><font>Offer expires: May-14 15:58:53 PDT</font></td>
+  </tr>
+</table>"#;
+        let body = parse_offer_body_html(html);
+        assert_eq!(body.offer_price_cents, Some(4949));
+        assert_eq!(body.original_price_cents, Some(5499));
+        assert_eq!(body.currency.as_deref(), Some("USD"));
+        assert_eq!(
+            body.expires_at_text.as_deref(),
+            Some("May-14 15:58:53 PDT")
+        );
+    }
+
+    #[test]
+    fn parses_expiration_with_pdt_offset() {
+        // Received 2026-05-10T22:58:55Z; expires "May-14 15:58:53 PDT"
+        // → 2026-05-14T22:58:53Z.
+        let received = DateTime::parse_from_rfc3339("2026-05-10T22:58:55Z")
+            .unwrap()
+            .timestamp();
+        let ts = parse_offer_expiration("May-14 15:58:53 PDT", received).unwrap();
+        let dt = DateTime::<Utc>::from_timestamp(ts, 0).unwrap();
+        assert_eq!(dt.to_rfc3339(), "2026-05-14T22:58:53+00:00");
+    }
+
+    #[test]
+    fn parses_expiration_wraps_year() {
+        // Received 2026-12-30; expires "Jan-03 12:00:00 EST"
+        // → 2027-01-03 17:00:00 UTC (EST = -05:00).
+        let received = DateTime::parse_from_rfc3339("2026-12-30T22:00:00Z")
+            .unwrap()
+            .timestamp();
+        let ts = parse_offer_expiration("Jan-03 12:00:00 EST", received).unwrap();
+        let dt = DateTime::<Utc>::from_timestamp(ts, 0).unwrap();
+        assert_eq!(dt.to_rfc3339(), "2027-01-03T17:00:00+00:00");
+    }
+
+    #[test]
+    fn parses_headers_fixture_filters_to_offers() {
         let xml = r#"<?xml version="1.0"?>
-<GetMyeBayBuyingResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+<GetMyMessagesResponse xmlns="urn:ebay:apis:eBLBaseComponents">
   <Ack>Success</Ack>
-  <WatchList>
-    <PaginationResult>
-      <TotalNumberOfPages>0</TotalNumberOfPages>
-      <TotalNumberOfEntries>0</TotalNumberOfEntries>
-    </PaginationResult>
-  </WatchList>
-</GetMyeBayBuyingResponse>"#;
-        let (offers, watched, with_offers) =
-            parse_offers_response_with_stats(xml).unwrap();
-        assert_eq!(offers.len(), 0);
-        assert_eq!(watched, 0);
-        assert_eq!(with_offers, 0);
+  <Messages>
+    <Message>
+      <Sender>eBay</Sender>
+      <Subject>Seller offered a special discount 10% on RARE Carl Edwards Diecast</Subject>
+      <MessageID>208284128583</MessageID>
+      <Read>false</Read>
+      <ReceiveDate>2026-05-10T22:58:55.000Z</ReceiveDate>
+      <ItemID>277960002467</ItemID>
+      <ItemTitle>RARE Carl Edwards 1/24 Diecast</ItemTitle>
+    </Message>
+    <Message>
+      <Sender>eBay</Sender>
+      <Subject>A new device is using your account</Subject>
+      <MessageID>999999999999</MessageID>
+      <Read>true</Read>
+      <ReceiveDate>2026-05-09T12:00:00.000Z</ReceiveDate>
+    </Message>
+    <Message>
+      <Sender>eBay</Sender>
+      <Subject>Special limited-time 15% discount on 2002 Jeff Gordon</Subject>
+      <MessageID>208284128584</MessageID>
+      <Read>true</Read>
+      <ReceiveDate>2026-05-08T15:00:00.000Z</ReceiveDate>
+      <ItemID>123456789012</ItemID>
+      <ItemTitle>2002 Jeff Gordon</ItemTitle>
+    </Message>
+  </Messages>
+</GetMyMessagesResponse>"#;
+        let headers = parse_offer_headers(xml).unwrap();
+        assert_eq!(headers.len(), 2);
+        assert_eq!(headers[0].message_id, "208284128583");
+        assert_eq!(headers[0].discount_percent, Some(10.0));
+        assert!(!headers[0].is_read);
+        assert_eq!(headers[1].discount_percent, Some(15.0));
+        assert!(headers[1].is_read);
     }
 
     #[test]
-    fn watchlist_with_no_offers_yields_empty_offers_but_nonzero_watched() {
-        // Common real-world case: buyer watches items, no seller has sent
-        // them an offer yet. We should report 0 offers but a non-zero
-        // watched_count so the diagnostic log can distinguish "auth/scope
-        // problem" from "just no offers right now".
+    fn parses_bodies_with_encoded_content() {
         let xml = r#"<?xml version="1.0"?>
-<GetMyeBayBuyingResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+<GetMyMessagesResponse xmlns="urn:ebay:apis:eBLBaseComponents">
   <Ack>Success</Ack>
-  <WatchList>
-    <ItemArray>
-      <Item>
-        <ItemID>111111111111</ItemID>
-        <Title>Watched item, no offer</Title>
-        <BestOfferDetails><BestOfferCount>0</BestOfferCount></BestOfferDetails>
-      </Item>
-      <Item>
-        <ItemID>222222222222</ItemID>
-        <Title>Another watched item, no offer</Title>
-      </Item>
-    </ItemArray>
-  </WatchList>
-</GetMyeBayBuyingResponse>"#;
-        let (offers, watched, with_offers) =
-            parse_offers_response_with_stats(xml).unwrap();
-        assert_eq!(offers.len(), 0);
-        assert_eq!(watched, 2);
-        assert_eq!(with_offers, 0);
+  <Messages>
+    <Message>
+      <MessageID>208284128583</MessageID>
+      <Content>&lt;table&gt;&lt;tr&gt;&lt;td id=&quot;offer-amount&quot;&gt;&lt;font&gt;Your offer: $49.49&lt;/font&gt;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td id=&quot;offer-expires&quot;&gt;&lt;font&gt;Offer expires: May-14 15:58:53 PDT&lt;/font&gt;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;&lt;font&gt;Buy It Now: $54.99&lt;/font&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;</Content>
+    </Message>
+  </Messages>
+</GetMyMessagesResponse>"#;
+        let bodies = parse_message_bodies(xml).unwrap();
+        let body = bodies.get("208284128583").unwrap();
+        assert_eq!(body.offer_price_cents, Some(4949));
+        assert_eq!(body.original_price_cents, Some(5499));
+        assert_eq!(body.expires_at_text.as_deref(), Some("May-14 15:58:53 PDT"));
     }
 
     #[test]
-    fn failure_response_propagates() {
+    fn failure_ack_propagates() {
         let xml = r#"<?xml version="1.0"?>
-<GetMyeBayBuyingResponse>
+<GetMyMessagesResponse>
   <Ack>Failure</Ack>
-  <Errors>
-    <LongMessage>Auth token is invalid.</LongMessage>
-  </Errors>
-</GetMyeBayBuyingResponse>"#;
-        let err = parse_offers_response(xml).unwrap_err();
+  <Errors><LongMessage>Auth token is invalid.</LongMessage></Errors>
+</GetMyMessagesResponse>"#;
+        let err = parse_offer_headers(xml).unwrap_err();
         assert!(err.to_string().contains("Auth token is invalid"));
-    }
-
-    #[test]
-    fn safe_id_rejects_non_digits() {
-        assert!(is_safe_id("123"));
-        assert!(!is_safe_id(""));
-        assert!(!is_safe_id("abc"));
-        assert!(!is_safe_id("12345</ItemID><FOO>"));
-    }
-
-    #[test]
-    fn extract_text_handles_attrs() {
-        let xml = r#"<Price currencyID="USD">42.50</Price>"#;
-        assert_eq!(extract_text(xml, "Price").as_deref(), Some("42.50"));
-    }
-
-    #[test]
-    fn extract_attr_pulls_currency() {
-        let xml = r#"<Price currencyID="USD">42.50</Price>"#;
-        assert_eq!(extract_attr(xml, "Price", "currencyID").as_deref(), Some("USD"));
     }
 }
