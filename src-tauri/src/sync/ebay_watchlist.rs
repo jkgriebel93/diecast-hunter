@@ -83,10 +83,15 @@ pub async fn sync_watchlist(
             }
         }
 
-        if result.current_page >= result.total_pages || result.item_ids.is_empty() {
+        // Drive pagination off the page we requested, NOT result.current_page.
+        // eBay omits <PageNumber> from GetMyeBayBuying responses at
+        // DetailLevel=ReturnSummary, so the parser falls back to 1 every
+        // time — which earlier set `page = 1 + 1 = 2` on every iteration
+        // and infinite-looped on page 2.
+        if page >= result.total_pages || result.item_ids.is_empty() {
             break;
         }
-        page = result.current_page + 1;
+        page += 1;
         if page > 100 {
             tracing::warn!("watchlist sync: page guard hit, aborting");
             break;
