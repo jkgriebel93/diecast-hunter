@@ -125,14 +125,6 @@ export const api = {
   unwatchEbayListing: (listingId: number) =>
     invoke<void>("unwatch_ebay_listing", { listingId }),
   listEbayOffers: () => invoke<ReceivedOffer[]>("list_ebay_offers"),
-  declineEbayOffer: (itemId: string, offerId: string) =>
-    invoke<void>("decline_ebay_offer", { itemId, offerId }),
-  probeEbayItemForOffers: (itemId: string) =>
-    invoke<ItemProbeResult>("probe_ebay_item_for_offers", { itemId }),
-  probeEbayMessagesForOffers: () =>
-    invoke<MessagesProbeResult>("probe_ebay_messages_for_offers"),
-  probeEbayMessageBody: (messageId: string) =>
-    invoke<string>("probe_ebay_message_body", { messageId }),
   refreshEbayListing: (listingId: number) =>
     invoke<void>("refresh_ebay_listing", { listingId }),
   refreshAllEbayListings: () =>
@@ -320,46 +312,26 @@ export interface EbaySearchPage {
   has_more: boolean;
 }
 
-export interface ItemProbeResult {
-  item_id: string;
-  dump_path: string;
-  best_offer_details_count: number;
-  best_offer_inline_count: number;
-  best_offer_with_attrs_count: number;
-  best_offer_enabled_count: number;
-  best_offer_count_tag_count: number;
-  best_offer_id_count: number;
-  seller_offer_count: number;
-  response_size_bytes: number;
-}
-
-export interface MessagesProbeResult {
-  dump_path: string;
-  response_size_bytes: number;
-  message_count: number;
-  item_id_count: number;
-  offer_keyword_count: number;
-  sent_you_keyword_count: number;
-  /** [MessageType, count] tuples, sorted descending by count. */
-  message_types: [string, number][];
-}
-
 export interface ReceivedOffer {
+  message_id: string;
   item_id: string;
   item_title: string;
-  item_web_url: string | null;
+  /** Deep-link to the listing on eBay. */
+  item_web_url: string;
+  /** Image from the local listings table when watchlist has been synced. */
   item_image_url: string | null;
-  item_current_price_cents: number | null;
-  offer_id: string;
-  /** "Pending" | "Countered" | "Accepted" | "Declined" | "Expired" | "Retracted" — pass-through. */
-  offer_status: string;
+  /** Buy-It-Now price quoted in the offer email. */
+  original_price_cents: number | null;
   offer_price_cents: number | null;
-  offer_currency: string;
-  /** "BestOffer" (buyer-initiated) | "CounterOffer" (seller counter). */
-  offer_type: string | null;
-  expiration_time: number | null;
-  buyer_message: string | null;
-  seller_message: string | null;
+  currency: string;
+  /** % off, parsed from the message subject. */
+  discount_percent: number | null;
+  /** Raw "Offer expires: May-14 15:58:53 PDT" text — fallback display. */
+  expires_at_text: string | null;
+  /** Best-effort Unix timestamp; null when the format/timezone isn't recognized. */
+  expires_at: number | null;
+  received_at: number;
+  is_read: boolean;
 }
 
 export interface RefreshSummary {
