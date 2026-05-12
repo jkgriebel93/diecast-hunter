@@ -16,7 +16,7 @@ type ViewMode = "flat" | "byDriver";
 type StatusFilter = "all" | "active" | "ended";
 type MatchFilter = "all" | "matched" | "unmatched";
 type SourceFilter = "all" | "ebay" | "fb";
-type OfferFilter = "all" | "with" | "without";
+type OfferFilter = "all" | "unresponded" | "with" | "without";
 type SortMode =
   | "newest"
   | "price-asc"
@@ -251,11 +251,25 @@ export function Listings() {
       if (sourceFilter !== "all" && row.seller_code !== sourceFilter)
         return false;
       if (offerFilter !== "all") {
-        const hasOffer = offersByItemId.has(
+        const offer = offersByItemId.get(
           legacyIdFromExternalId(row.external_id),
         );
+        const hasOffer = offer !== undefined;
         if (offerFilter === "with" && !hasOffer) return false;
         if (offerFilter === "without" && hasOffer) return false;
+        if (offerFilter === "unresponded") {
+          if (!hasOffer) return false;
+          // Heuristic for "user already responded": either the
+          // notification was opened (eBay flips <Read> on the inbox UI
+          // when you open the message — which the web accept/decline
+          // flow does), or the underlying listing has ended (signal
+          // that the offer was accepted and the item sold). Conservative:
+          // a missing listing is treated as "still active" so users who
+          // haven't run watchlist sync still see their offers.
+          const responded =
+            offer.is_read || row.status === "ended";
+          if (responded) return false;
+        }
       }
       return true;
     });
@@ -466,8 +480,9 @@ export function Listings() {
               value={offerFilter}
               options={[
                 { value: "all", label: "All" },
-                { value: "with", label: "With offer" },
-                { value: "without", label: "Without offer" },
+                { value: "unresponded", label: "Unresponded" },
+                { value: "with", label: "Any offer" },
+                { value: "without", label: "No offer" },
               ]}
               onChange={(v) => setOfferFilter(v as OfferFilter)}
             />
