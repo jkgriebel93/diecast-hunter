@@ -125,7 +125,7 @@ export function Registry() {
       <header className="flex items-end justify-between">
         <div>
           <h2 className="text-2xl font-semibold">Registry search</h2>
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-fg-subtle">
             Search diecastregistry.com's production catalog. Results link out
             to the registry's detail pages.
           </p>
@@ -133,7 +133,7 @@ export function Registry() {
       </header>
 
       {!optionsLoaded ? (
-        <div className="card text-sm text-slate-400">Loading filter options…</div>
+        <div className="card text-sm text-fg-muted">Loading filter options…</div>
       ) : optionsEmpty ? (
         <div className="card text-sm text-amber-400/90 space-y-2">
           <div>
@@ -223,7 +223,7 @@ export function Registry() {
           </div>
 
           <div className="flex items-center gap-4 text-xs flex-wrap">
-            <label className="inline-flex items-center gap-2 text-slate-300">
+            <label className="inline-flex items-center gap-2 text-fg-muted">
               <input
                 type="checkbox"
                 checked={autographed}
@@ -231,7 +231,7 @@ export function Registry() {
               />
               Autographed only
             </label>
-            <label className="inline-flex items-center gap-2 text-slate-300">
+            <label className="inline-flex items-center gap-2 text-fg-muted">
               <input
                 type="checkbox"
                 checked={raced}
@@ -244,7 +244,7 @@ export function Registry() {
           <div className="flex items-center justify-between">
             <button
               type="button"
-              className="text-xs text-slate-500 hover:text-slate-300"
+              className="text-xs text-fg-subtle hover:text-fg-muted"
               onClick={onRefreshOptions}
               disabled={refreshing}
               title="Re-fetch the filter choices from diecastregistry.com"
@@ -286,12 +286,12 @@ export function Registry() {
       )}
 
       {searching ? (
-        <div className="card text-sm text-slate-400">Searching…</div>
+        <div className="card text-sm text-fg-muted">Searching…</div>
       ) : results === null ? null : results.length === 0 ? (
-        <div className="card text-sm text-slate-400">No results.</div>
+        <div className="card text-sm text-fg-muted">No results.</div>
       ) : (
         <>
-          <div className="text-xs text-slate-500">
+          <div className="text-xs text-fg-subtle">
             {results.length} result{results.length === 1 ? "" : "s"}.
           </div>
           <ul className="space-y-2">
@@ -318,19 +318,19 @@ export function Registry() {
                   <div className="text-sm font-medium truncate">
                     {r.driver_name}
                     {r.year && (
-                      <span className="text-slate-500 ml-2">{r.year}</span>
+                      <span className="text-fg-subtle ml-2">{r.year}</span>
                     )}
                   </div>
-                  <div className="text-xs text-slate-400 truncate mt-0.5">
+                  <div className="text-xs text-fg-muted truncate mt-0.5">
                     {r.scheme_text ?? "(no scheme)"}
                   </div>
-                  <div className="text-xs text-slate-500 mt-0.5">
+                  <div className="text-xs text-fg-subtle mt-0.5">
                     {[r.oem, r.brand, r.scale, r.make]
                       .filter(Boolean)
                       .join(" · ")}
                   </div>
                   {r.seq_produced_total !== null && (
-                    <div className="text-xs text-slate-600 mt-0.5">
+                    <div className="text-xs text-fg-faint mt-0.5">
                       production qty {r.seq_produced_total.toLocaleString()}
                     </div>
                   )}
@@ -346,10 +346,10 @@ export function Registry() {
                   )}
                 </div>
                 <div className="text-right text-xs tabular-nums shrink-0 space-y-0.5">
-                  <div className="text-base text-slate-100">
+                  <div className="text-base text-fg">
                     {formatCents(r.retail_value_cents)}
                   </div>
-                  <div className="text-slate-500">
+                  <div className="text-fg-subtle">
                     wholesale {formatCents(r.wholesale_value_cents)}
                   </div>
                 </div>

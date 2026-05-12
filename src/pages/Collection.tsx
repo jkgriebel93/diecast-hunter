@@ -159,12 +159,12 @@ export function Collection() {
       <header className="flex items-end justify-between">
         <div>
           <h2 className="text-2xl font-semibold">My Collection</h2>
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-fg-subtle">
             Imported from diecastregistry.com, grouped by driver.
           </p>
         </div>
         {items && (
-          <div className="text-xs text-slate-500">
+          <div className="text-xs text-fg-subtle">
             {filteredItems === totalItems
               ? `${totalItems} items across ${groups?.length ?? 0} drivers`
               : `${filteredItems} of ${totalItems} items shown`}
@@ -203,9 +203,9 @@ export function Collection() {
           </div>
           <div className="flex items-center gap-3 text-xs flex-wrap">
             <label className="flex items-center gap-1">
-              <span className="text-slate-500">Scale:</span>
+              <span className="text-fg-subtle">Scale:</span>
               <select
-                className="bg-bg-elevated border border-border rounded px-2 py-0.5 text-slate-200"
+                className="bg-bg-elevated border border-border rounded px-2 py-0.5 text-fg"
                 value={scaleFilter}
                 onChange={(e) => setScaleFilter(e.target.value)}
               >
@@ -218,9 +218,9 @@ export function Collection() {
               </select>
             </label>
             <label className="flex items-center gap-1">
-              <span className="text-slate-500">OEM:</span>
+              <span className="text-fg-subtle">OEM:</span>
               <select
-                className="bg-bg-elevated border border-border rounded px-2 py-0.5 text-slate-200"
+                className="bg-bg-elevated border border-border rounded px-2 py-0.5 text-fg"
                 value={oemFilter}
                 onChange={(e) => setOemFilter(e.target.value)}
               >
@@ -235,7 +235,7 @@ export function Collection() {
             {(searchText || scaleFilter || oemFilter) && (
               <button
                 type="button"
-                className="text-slate-500 hover:text-slate-200"
+                className="text-fg-subtle hover:text-fg"
                 onClick={() => {
                   setSearchText("");
                   setScaleFilter("");
@@ -250,14 +250,14 @@ export function Collection() {
       )}
 
       {items === null ? (
-        <div className="card text-sm text-slate-400">Loading…</div>
+        <div className="card text-sm text-fg-muted">Loading…</div>
       ) : items.length === 0 ? (
-        <div className="card text-sm text-slate-400">
+        <div className="card text-sm text-fg-muted">
           Empty. Configure your diecastregistry.com credentials in Settings,
           then run a sync.
         </div>
       ) : groups && groups.length === 0 ? (
-        <div className="card text-sm text-slate-400">
+        <div className="card text-sm text-fg-muted">
           No items match the current filters.
         </div>
       ) : (
@@ -303,11 +303,11 @@ function DriverCard({
             ▶
           </span>
           <span className="font-medium">{group.driver_name}</span>
-          <span className="text-xs text-slate-500">
+          <span className="text-xs text-fg-subtle">
             {group.items.length} item{group.items.length === 1 ? "" : "s"}
           </span>
         </div>
-        <div className="text-xs text-slate-400 tabular-nums">
+        <div className="text-xs text-fg-muted tabular-nums">
           retail {formatCents(group.retail_total_cents)} · wholesale{" "}
           {formatCents(group.wholesale_total_cents)}
         </div>
@@ -329,7 +329,7 @@ function DriverCard({
                   <div className="text-sm font-medium truncate">
                     {item.scheme_text ?? "(no scheme)"}
                   </div>
-                  <div className="text-xs text-slate-500 mt-0.5">
+                  <div className="text-xs text-fg-subtle mt-0.5">
                     {[
                       item.year,
                       item.oem,
@@ -341,7 +341,7 @@ function DriverCard({
                       .join(" · ")}
                   </div>
                   {item.enriched && (
-                    <div className="text-xs text-slate-500 mt-0.5">
+                    <div className="text-xs text-fg-subtle mt-0.5">
                       {[
                         item.diecast_type,
                         item.finish && `finish: ${item.finish}`,
@@ -374,11 +374,11 @@ function DriverCard({
                 </div>
                 <div className="text-right text-xs tabular-nums shrink-0">
                   <div>
-                    <span className="text-slate-500">retail</span>{" "}
+                    <span className="text-fg-subtle">retail</span>{" "}
                     {formatCents(item.retail_value_cents)}
                   </div>
                   <div>
-                    <span className="text-slate-500">wholesale</span>{" "}
+                    <span className="text-fg-subtle">wholesale</span>{" "}
                     {formatCents(item.wholesale_value_cents)}
                   </div>
                 </div>

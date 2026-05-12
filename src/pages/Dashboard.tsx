@@ -16,7 +16,7 @@ export function Dashboard() {
     <div className="p-6 space-y-6">
       <header>
         <h2 className="text-2xl font-semibold">Dashboard</h2>
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-fg-subtle">
           Overview of your collection and tracked listings.
         </p>
       </header>
@@ -34,7 +34,7 @@ export function Dashboard() {
       </div>
 
       {status && (
-        <div className="card text-xs text-slate-500 font-mono break-all">
+        <div className="card text-xs text-fg-subtle font-mono break-all">
           <div>db: {status.db_path}</div>
           <div>schema: v{status.schema_version}</div>
         </div>

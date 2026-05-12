@@ -334,7 +334,7 @@ export function Listings() {
       <header className="flex items-end justify-between">
         <div>
           <h2 className="text-2xl font-semibold">Saved Listings</h2>
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-fg-subtle">
             Track eBay listings you're watching. Paste a URL or pull your eBay
             watchlist directly. Facebook Marketplace integration ships later
             via a browser extension.
@@ -498,13 +498,13 @@ export function Listings() {
               onChange={(v) => setSourceFilter(v as SourceFilter)}
             />
             <div className="ml-auto flex items-center gap-2">
-              <span className="text-slate-500">View:</span>
+              <span className="text-fg-subtle">View:</span>
               <button
                 type="button"
                 className={`px-2 py-1 rounded border ${
                   viewMode === "flat"
                     ? "border-accent text-accent bg-accent/10"
-                    : "border-border text-slate-400 hover:text-slate-100"
+                    : "border-border text-fg-muted hover:text-fg"
                 }`}
                 onClick={() => setViewMode("flat")}
               >
@@ -515,7 +515,7 @@ export function Listings() {
                 className={`px-2 py-1 rounded border ${
                   viewMode === "byDriver"
                     ? "border-accent text-accent bg-accent/10"
-                    : "border-border text-slate-400 hover:text-slate-100"
+                    : "border-border text-fg-muted hover:text-fg"
                 }`}
                 onClick={() => setViewMode("byDriver")}
               >
@@ -524,7 +524,7 @@ export function Listings() {
             </div>
           </div>
           {filteredRows && filteredRows.length !== rows.length && (
-            <div className="text-xs text-slate-500">
+            <div className="text-xs text-fg-subtle">
               Showing {filteredRows.length} of {rows.length} listings.
             </div>
           )}
@@ -532,13 +532,13 @@ export function Listings() {
       )}
 
       {rows === null ? (
-        <div className="card text-sm text-slate-400">Loading…</div>
+        <div className="card text-sm text-fg-muted">Loading…</div>
       ) : rows.length === 0 ? (
-        <div className="card text-sm text-slate-400">
+        <div className="card text-sm text-fg-muted">
           No listings tracked yet. Add an eBay URL above.
         </div>
       ) : filteredRows && filteredRows.length === 0 ? (
-        <div className="card text-sm text-slate-400">
+        <div className="card text-sm text-fg-muted">
           No listings match the current filters.
         </div>
       ) : viewMode === "flat" ? (
@@ -647,7 +647,7 @@ function ListingCard({
           </div>
           {offer && <OfferBadge offer={offer} />}
         </div>
-        <div className="text-xs text-slate-500 mt-0.5">
+        <div className="text-xs text-fg-subtle mt-0.5">
           {[
             row.seller_code,
             row.condition,
@@ -667,14 +667,14 @@ function ListingCard({
               <span className="text-emerald-400">
                 {row.match_user_confirmed ? "✓ confirmed" : "✓ matched"}
               </span>
-              <span className="text-slate-300 truncate">
+              <span className="text-fg-muted truncate">
                 {row.matched_driver_name}
                 {row.matched_scheme_text
                   ? ` — ${row.matched_scheme_text}`
                   : ""}
               </span>
             </div>
-            <div className="text-slate-500 mt-0.5">
+            <div className="text-fg-subtle mt-0.5">
               {[
                 row.matched_year,
                 row.matched_oem,
@@ -685,7 +685,7 @@ function ListingCard({
                 .join(" · ")}
               {row.match_confidence !== null &&
                 !row.match_user_confirmed && (
-                  <span className="ml-2 text-slate-600">
+                  <span className="ml-2 text-fg-faint">
                     ({row.match_confidence.toFixed(0)}% confidence)
                   </span>
                 )}
@@ -702,7 +702,7 @@ function ListingCard({
             )}
           </div>
         ) : row.match_user_confirmed ? (
-          <div className="mt-2 text-xs text-slate-500">
+          <div className="mt-2 text-xs text-fg-subtle">
             Marked as no-match.
           </div>
         ) : (
@@ -711,7 +711,7 @@ function ListingCard({
           </div>
         )}
 
-        <div className="text-xs text-slate-500 mt-1">
+        <div className="text-xs text-fg-subtle mt-1">
           {ended
             ? "ended"
             : row.end_time
@@ -728,7 +728,7 @@ function ListingCard({
             View on eBay →
           </a>
           <button
-            className="text-xs text-slate-400 hover:text-slate-100"
+            className="text-xs text-fg-muted hover:text-fg"
             type="button"
             onClick={onRefresh}
             disabled={refreshing}
@@ -737,7 +737,7 @@ function ListingCard({
           </button>
           {row.seller_code === "ebay" && (
             <button
-              className="text-xs text-slate-500 hover:text-red-300"
+              className="text-xs text-fg-subtle hover:text-red-300"
               type="button"
               onClick={onUnwatch}
               disabled={unwatching}
@@ -757,14 +757,14 @@ function ListingCard({
             </button>
           )}
           <button
-            className="text-xs text-slate-400 hover:text-slate-100"
+            className="text-xs text-fg-muted hover:text-fg"
             type="button"
             onClick={onChangeMatch}
           >
             {matched ? "Change match…" : "Match…"}
           </button>
           <button
-            className="text-xs text-slate-400 hover:text-slate-100"
+            className="text-xs text-fg-muted hover:text-fg"
             type="button"
             onClick={onSearchRegistry}
             title="Search the full diecastregistry.com registry"
@@ -773,7 +773,7 @@ function ListingCard({
           </button>
           {matched && (
             <button
-              className="text-xs text-slate-500 hover:text-slate-300"
+              className="text-xs text-fg-subtle hover:text-fg-muted"
               type="button"
               onClick={onClearMatch}
               title="Remove the match and let auto-match try again"
@@ -783,7 +783,7 @@ function ListingCard({
           )}
           {!matched && !row.match_user_confirmed && (
             <button
-              className="text-xs text-slate-500 hover:text-slate-300"
+              className="text-xs text-fg-subtle hover:text-fg-muted"
               type="button"
               onClick={onRejectMatch}
               title="Mark as having no match in your registry"
@@ -793,7 +793,7 @@ function ListingCard({
           )}
           {row.match_user_confirmed && !matched && (
             <button
-              className="text-xs text-slate-500 hover:text-slate-300"
+              className="text-xs text-fg-subtle hover:text-fg-muted"
               type="button"
               onClick={onClearMatch}
             >
@@ -803,19 +803,19 @@ function ListingCard({
         </div>
       </div>
       <div className="text-right text-xs tabular-nums shrink-0 space-y-0.5">
-        <div className="text-base text-slate-100">
+        <div className="text-base text-fg">
           {formatCents(row.price_cents)}
         </div>
         {row.shipping_cents !== null && row.shipping_cents > 0 && (
-          <div className="text-slate-500">
+          <div className="text-fg-subtle">
             + {formatCents(row.shipping_cents)} ship
           </div>
         )}
         {total !== null && row.shipping_cents !== null && row.shipping_cents > 0 && (
-          <div className="text-slate-400">total {formatCents(total)}</div>
+          <div className="text-fg-muted">total {formatCents(total)}</div>
         )}
         {matched && (
-          <div className="text-slate-500 mt-1">
+          <div className="text-fg-subtle mt-1">
             retail {formatCents(row.matched_retail_cents)}
           </div>
         )}
@@ -833,7 +833,7 @@ function DealBadge({ score }: { score: number }) {
   // 70-90% → fair (yellow)
   // 90-110% → at retail (slate)
   // > 110% → over retail (red)
-  let cls = "text-slate-400 border-border";
+  let cls = "text-fg-muted border-border";
   let label = "at retail";
   if (score < 70) {
     cls = "text-emerald-400 border-emerald-500/30 bg-emerald-500/10";
@@ -912,11 +912,11 @@ function GroupedByDriver({
             <summary className="cursor-pointer list-none px-4 py-3 flex items-center justify-between hover:bg-bg-elevated">
               <div className="flex items-center gap-3">
                 <span className="font-medium">{driver}</span>
-                <span className="text-xs text-slate-500">
+                <span className="text-xs text-fg-subtle">
                   {items.length} listing{items.length === 1 ? "" : "s"}
                 </span>
               </div>
-              <div className="text-xs text-slate-500 tabular-nums">
+              <div className="text-xs text-fg-subtle tabular-nums">
                 total {formatCents(totalCents)}
               </div>
             </summary>
@@ -992,7 +992,7 @@ function MatchPicker({
           <div className="min-w-0">
             <h3 className="text-base font-medium">Match listing</h3>
             <p
-              className="text-xs text-slate-500 mt-0.5 truncate"
+              className="text-xs text-fg-subtle mt-0.5 truncate"
               title={listing.title}
             >
               {listing.title}
@@ -1000,7 +1000,7 @@ function MatchPicker({
           </div>
           <button
             type="button"
-            className="text-slate-400 hover:text-slate-100 text-xl leading-none px-2"
+            className="text-fg-muted hover:text-fg text-xl leading-none px-2"
             onClick={onClose}
           >
             ×
@@ -1021,9 +1021,9 @@ function MatchPicker({
             <div className="text-xs text-red-400">{pickerError}</div>
           )}
           {loading && results === null ? (
-            <div className="text-sm text-slate-500">Loading…</div>
+            <div className="text-sm text-fg-subtle">Loading…</div>
           ) : results && results.length === 0 ? (
-            <div className="text-sm text-slate-500">No matches.</div>
+            <div className="text-sm text-fg-subtle">No matches.</div>
           ) : (
             results?.map((r) => (
               <button
@@ -1035,13 +1035,13 @@ function MatchPicker({
                 <div className="text-sm font-medium">
                   {r.driver_name ?? "(no driver)"}
                   {r.year && (
-                    <span className="text-slate-500 ml-2">{r.year}</span>
+                    <span className="text-fg-subtle ml-2">{r.year}</span>
                   )}
                 </div>
-                <div className="text-xs text-slate-500 truncate">
+                <div className="text-xs text-fg-subtle truncate">
                   {r.scheme_text ?? "(no scheme)"}
                 </div>
-                <div className="text-xs text-slate-600">
+                <div className="text-xs text-fg-faint">
                   {[r.oem, r.brand, r.scale].filter(Boolean).join(" · ")}
                   {r.retail_value_cents !== null && (
                     <span className="ml-2">
@@ -1224,7 +1224,7 @@ function RegistrySearchDialog({
           <div className="min-w-0">
             <h3 className="text-base font-medium">Search registry</h3>
             <p
-              className="text-xs text-slate-500 mt-0.5 truncate"
+              className="text-xs text-fg-subtle mt-0.5 truncate"
               title={listing.title}
             >
               {listing.title}
@@ -1232,7 +1232,7 @@ function RegistrySearchDialog({
           </div>
           <button
             type="button"
-            className="text-slate-400 hover:text-slate-100 text-xl leading-none px-2"
+            className="text-fg-muted hover:text-fg text-xl leading-none px-2"
             onClick={onClose}
           >
             ×
@@ -1240,7 +1240,7 @@ function RegistrySearchDialog({
         </div>
 
         {!optionsLoaded ? (
-          <div className="text-sm text-slate-500">Loading options…</div>
+          <div className="text-sm text-fg-subtle">Loading options…</div>
         ) : optionsEmpty ? (
           <div className="card text-sm text-amber-400/90 space-y-2">
             <div>
@@ -1332,7 +1332,7 @@ function RegistrySearchDialog({
             <div className="flex items-center justify-between mt-3">
               <button
                 type="button"
-                className="text-xs text-slate-500 hover:text-slate-300"
+                className="text-xs text-fg-subtle hover:text-fg-muted"
                 onClick={onRefreshOptions}
                 disabled={refreshing}
                 title="Re-fetch the dropdown choices from diecastregistry.com"
@@ -1358,9 +1358,9 @@ function RegistrySearchDialog({
 
         <div className="flex-1 overflow-y-auto -mx-1 px-1 mt-3 space-y-1 min-h-[8rem]">
           {searching ? (
-            <div className="text-sm text-slate-500">Searching…</div>
+            <div className="text-sm text-fg-subtle">Searching…</div>
           ) : results === null ? null : results.length === 0 ? (
-            <div className="text-sm text-slate-500">No results.</div>
+            <div className="text-sm text-fg-subtle">No results.</div>
           ) : (
             results.map((r) => (
               <button
@@ -1389,13 +1389,13 @@ function RegistrySearchDialog({
                     <div className="text-sm font-medium truncate">
                       {r.driver_name}
                       {r.year && (
-                        <span className="text-slate-500 ml-2">{r.year}</span>
+                        <span className="text-fg-subtle ml-2">{r.year}</span>
                       )}
                     </div>
-                    <div className="text-xs text-slate-500 truncate">
+                    <div className="text-xs text-fg-subtle truncate">
                       {r.scheme_text ?? "(no scheme)"}
                     </div>
-                    <div className="text-xs text-slate-600">
+                    <div className="text-xs text-fg-faint">
                       {[r.oem, r.brand, r.scale, r.make]
                         .filter(Boolean)
                         .join(" · ")}
@@ -1403,7 +1403,7 @@ function RegistrySearchDialog({
                   </div>
                   <div className="text-right text-xs tabular-nums shrink-0">
                     <div>retail {formatCents(r.retail_value_cents)}</div>
-                    <div className="text-slate-500">
+                    <div className="text-fg-subtle">
                       wholesale {formatCents(r.wholesale_value_cents)}
                     </div>
                     {linkingGuid === r.registry_guid && (
@@ -1443,7 +1443,7 @@ function FilterChips({
 }) {
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-slate-500">{label}:</span>
+      <span className="text-fg-subtle">{label}:</span>
       {options.map((opt) => (
         <button
           key={opt.value}
@@ -1451,7 +1451,7 @@ function FilterChips({
           className={`px-2 py-0.5 rounded border text-[11px] ${
             value === opt.value
               ? "border-accent text-accent bg-accent/10"
-              : "border-border text-slate-400 hover:text-slate-100"
+              : "border-border text-fg-muted hover:text-fg"
           }`}
           onClick={() => onChange(opt.value)}
         >
