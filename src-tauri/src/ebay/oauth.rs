@@ -14,7 +14,11 @@ use crate::ebay::client::EbayEnvironment;
 use crate::error::{AppError, AppResult};
 use crate::settings;
 
-const TOKEN_REFRESH_BUFFER: i64 = 60;
+/// How close to expiry we consider a cached access token "stale" and
+/// refresh proactively. 10 minutes gives long-running operations like
+/// the watchlist sync (~95s for 475 items) plenty of headroom — we
+/// don't want a token to expire mid-loop.
+const TOKEN_REFRESH_BUFFER: i64 = 600;
 
 /// Default scope set we request. The basic api_scope is enough for IAF token
 /// use with the Trading API (GetMyeBayBuying for watchlist sync). Other
@@ -173,6 +177,32 @@ pub async fn user_iaf_token(pool: &SqlitePool) -> AppResult<(EbayEnvironment, St
     Ok((env, token))
 }
 
+/// Drop the cached access token + expiry so the next `user_iaf_token`
+/// call is forced to refresh. Used as the recovery action when eBay
+/// returns "IAF token supplied is expired" — our local expiry guess
+/// must have drifted from theirs (clock skew or a token revoked
+/// upstream).
+pub async fn invalidate_user_token_cache(
+    pool: &SqlitePool,
+    env: EbayEnvironment,
+) -> AppResult<()> {
+    settings::delete(pool, &settings::ebay_user_access_token_key(env.as_str())).await?;
+    settings::delete(
+        pool,
+        &settings::ebay_user_access_token_expires_key(env.as_str()),
+    )
+    .await?;
+    Ok(())
+}
+
+/// True for the family of Trading-API error messages that mean "your
+/// IAF token is no longer valid" — the recovery is to invalidate the
+/// cache and re-fetch.
+pub fn is_iaf_token_expired_error(msg: &str) -> bool {
+    let lower = msg.to_lowercase();
+    lower.contains("iaf token") && (lower.contains("expired") || lower.contains("invalid"))
+}
+
 pub async fn disconnect(pool: &SqlitePool, env: EbayEnvironment) -> AppResult<()> {
     settings::secret_delete(&settings::ebay_user_refresh_token_entry(env.as_str()))?;
     settings::delete(pool, &settings::ebay_user_access_token_key(env.as_str())).await?;
@@ -315,4 +345,33 @@ fn map_reqwest(e: reqwest::Error) -> AppError {
         src = s.source();
     }
     AppError::Network(parts.join(": "))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_expired_iaf_token_errors() {
+        assert!(is_iaf_token_expired_error(
+            "trading api: IAF token supplied is expired."
+        ));
+        assert!(is_iaf_token_expired_error(
+            "trading api GetMyeBayBuying returned 401: IAF Token is invalid"
+        ));
+        assert!(is_iaf_token_expired_error(
+            "trading api: The IAF token has expired"
+        ));
+    }
+
+    #[test]
+    fn other_errors_not_token_expired() {
+        assert!(!is_iaf_token_expired_error("network timed out"));
+        assert!(!is_iaf_token_expired_error("trading api: rate limit exceeded"));
+        assert!(!is_iaf_token_expired_error(
+            "your watchlist is empty"
+        ));
+        // "expired" without "iaf token" — could be the listing, not the token.
+        assert!(!is_iaf_token_expired_error("offer has expired"));
+    }
 }

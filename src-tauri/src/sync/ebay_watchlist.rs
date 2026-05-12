@@ -3,9 +3,11 @@ use serde::Serialize;
 use sqlx::SqlitePool;
 
 use crate::ebay::{
-    add_to_watchlist, extract_legacy_item_id, fetch_watchlist_page, legacy_id_from_v1,
+    add_to_watchlist, extract_legacy_item_id, fetch_watchlist_page,
+    invalidate_user_token_cache, is_iaf_token_expired_error, legacy_id_from_v1,
     remove_from_watchlist, user_iaf_token,
 };
+use crate::ebay::trading::WatchlistPage;
 use crate::error::{AppError, AppResult};
 use crate::progress::ProgressEmitter;
 use crate::settings;
@@ -34,11 +36,6 @@ pub async fn sync_watchlist(
     pool: &SqlitePool,
     progress: &ProgressEmitter,
 ) -> AppResult<WatchlistSyncSummary> {
-    let (env, token) = {
-        progress.step("Refreshing eBay user token…", None, None);
-        user_iaf_token(pool).await?
-    };
-
     let mut summary = WatchlistSyncSummary::default();
     let mut page = 1u32;
     loop {
@@ -48,7 +45,12 @@ pub async fn sync_watchlist(
             Some(page),
             None,
         );
-        let result = fetch_watchlist_page(env, &token, page, 200).await?;
+        // Re-resolve the user IAF token per page. The token-fetch is cheap
+        // when our cache is still warm; if it's stale (within 10 min of
+        // expiry), this proactively refreshes. fetch_with_token_retry
+        // adds belt-and-suspenders for the case where eBay says the token
+        // is expired anyway (clock skew or upstream revocation).
+        let result = fetch_with_token_retry(pool, page).await?;
         summary.pages_fetched += 1;
         summary.items_seen += result.item_ids.len() as u32;
 
@@ -163,5 +165,28 @@ pub async fn unwatch_and_delete(pool: &SqlitePool, listing_id: i64) -> AppResult
         .execute(pool)
         .await?;
     Ok(())
+}
+
+/// Fetch one watchlist page, retrying once if eBay rejects the IAF
+/// token as expired. The proactive 10-minute refresh buffer in
+/// `user_iaf_token` should make this rare, but we keep the retry for
+/// the case where our local expiry guess drifts (clock skew) or the
+/// token gets revoked upstream.
+async fn fetch_with_token_retry(
+    pool: &SqlitePool,
+    page: u32,
+) -> AppResult<WatchlistPage> {
+    let (env, token) = user_iaf_token(pool).await?;
+    match fetch_watchlist_page(env, &token, page, 200).await {
+        Err(AppError::Network(msg)) if is_iaf_token_expired_error(&msg) => {
+            tracing::info!(
+                "watchlist sync: IAF token rejected ({msg}); refreshing and retrying"
+            );
+            invalidate_user_token_cache(pool, env).await?;
+            let (env2, token2) = user_iaf_token(pool).await?;
+            fetch_watchlist_page(env2, &token2, page, 200).await
+        }
+        other => other,
+    }
 }
 
