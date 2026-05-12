@@ -264,6 +264,8 @@ export interface WatchlistSyncSummary {
   failed: number;
   filtered: number;
   pages_fetched: number;
+  /** Local listings deleted because they're no longer on the eBay watchlist. */
+  pruned: number;
 }
 
 export interface EbayCredentialsState {

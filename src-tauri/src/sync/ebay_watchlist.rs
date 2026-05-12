@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use chrono::Utc;
 use serde::Serialize;
 use sqlx::SqlitePool;
@@ -23,6 +25,11 @@ pub struct WatchlistSyncSummary {
     /// non-diecasts before persisting.
     pub filtered: u32,
     pub pages_fetched: u32,
+    /// Local eBay listings deleted because they were no longer on the
+    /// watchlist. Only populated after a complete successful walk; left at 0
+    /// if the sync aborted mid-pagination or eBay returned zero items (to
+    /// avoid mass-deletion on a transient empty response).
+    pub pruned: u32,
 }
 
 /// Walk the user's eBay watchlist via Trading API GetMyeBayBuying, then for
@@ -37,6 +44,8 @@ pub async fn sync_watchlist(
     progress: &ProgressEmitter,
 ) -> AppResult<WatchlistSyncSummary> {
     let mut summary = WatchlistSyncSummary::default();
+    let mut seen_legacy_ids: HashSet<String> = HashSet::new();
+    let mut walk_complete = true;
     let mut page = 1u32;
     loop {
         progress.check_cancelled()?;
@@ -56,6 +65,7 @@ pub async fn sync_watchlist(
 
         for (i, item_id) in result.item_ids.iter().enumerate() {
             progress.check_cancelled()?;
+            seen_legacy_ids.insert(item_id.clone());
             progress.step(
                 format!(
                     "Importing item {} of {} (id {item_id})…",
@@ -95,9 +105,21 @@ pub async fn sync_watchlist(
         }
         page += 1;
         if page > 100 {
+            // Incomplete picture of the watchlist — skip prune so we don't
+            // mass-delete legitimately-watched items past page 100.
             tracing::warn!("watchlist sync: page guard hit, aborting");
+            walk_complete = false;
             break;
         }
+    }
+
+    // Prune only when (a) the walk finished cleanly AND (b) eBay actually
+    // returned at least one item. The second condition guards against a
+    // transient empty response from wiping the entire local watchlist —
+    // users can manually unwatch the last remaining item if they truly
+    // have an empty watchlist.
+    if walk_complete && !seen_legacy_ids.is_empty() {
+        summary.pruned = prune_missing_listings(pool, &seen_legacy_ids).await?;
     }
 
     settings::set(
@@ -108,11 +130,53 @@ pub async fn sync_watchlist(
     .await?;
 
     progress.done(format!(
-        "Watchlist sync done: {} new, {} updated, {} filtered, {} failed.",
-        summary.created, summary.updated, summary.filtered, summary.failed
+        "Watchlist sync done: {} new, {} updated, {} filtered, {} failed, {} pruned.",
+        summary.created,
+        summary.updated,
+        summary.filtered,
+        summary.failed,
+        summary.pruned,
     ));
 
     Ok(summary)
+}
+
+/// Delete every local eBay listing whose legacy id isn't in the seen set.
+/// Cascades to listing_history and listing_matches (FK ON DELETE CASCADE).
+async fn prune_missing_listings(
+    pool: &SqlitePool,
+    seen_legacy_ids: &HashSet<String>,
+) -> AppResult<u32> {
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT l.id, l.external_id
+         FROM listings l
+         JOIN sellers s ON s.id = l.seller_id
+         WHERE s.code = 'ebay'",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut to_delete = Vec::new();
+    for (id, external_id) in rows {
+        let legacy = legacy_id_from_v1(&external_id).unwrap_or(external_id);
+        if !seen_legacy_ids.contains(&legacy) {
+            to_delete.push(id);
+        }
+    }
+
+    if to_delete.is_empty() {
+        return Ok(0);
+    }
+
+    let mut tx = pool.begin().await?;
+    for id in &to_delete {
+        sqlx::query("DELETE FROM listings WHERE id = ?")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(to_delete.len() as u32)
 }
 
 /// User-initiated "Watch this listing": add it to the user's eBay watchlist

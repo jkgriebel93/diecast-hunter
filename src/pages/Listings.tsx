@@ -410,7 +410,8 @@ export function Listings() {
           Watchlist: {watchlistSummary.created} new,{" "}
           {watchlistSummary.updated} updated,{" "}
           {watchlistSummary.filtered} filtered (non-diecasts),{" "}
-          {watchlistSummary.failed} failed across{" "}
+          {watchlistSummary.failed} failed,{" "}
+          {watchlistSummary.pruned} pruned (no longer watched) across{" "}
           {watchlistSummary.pages_fetched} page
           {watchlistSummary.pages_fetched === 1 ? "" : "s"} (
           {watchlistSummary.items_seen} items total).

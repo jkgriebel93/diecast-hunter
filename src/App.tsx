@@ -5,7 +5,6 @@ import { Dashboard } from "@/pages/Dashboard";
 import { Collection } from "@/pages/Collection";
 import { Listings } from "@/pages/Listings";
 import { Browse } from "@/pages/Browse";
-import { Offers } from "@/pages/Offers";
 import { Settings } from "@/pages/Settings";
 
 export default function App() {
@@ -20,7 +19,6 @@ export default function App() {
           <Route path="/collection" element={<Collection />} />
           <Route path="/listings" element={<Listings />} />
           <Route path="/browse" element={<Browse />} />
-          <Route path="/offers" element={<Offers />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>

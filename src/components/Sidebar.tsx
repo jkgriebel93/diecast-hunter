@@ -5,7 +5,6 @@ const links = [
   { to: "/collection", label: "My Collection" },
   { to: "/listings", label: "Saved Listings" },
   { to: "/browse", label: "Browse eBay" },
-  { to: "/offers", label: "Offers" },
   { to: "/settings", label: "Settings" },
 ];
 
