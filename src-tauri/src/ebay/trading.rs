@@ -27,6 +27,31 @@ pub struct WatchlistPage {
     pub total_pages: u32,
 }
 
+/// One saved search as eBay returned it. The `query_url` is the raw value
+/// of `<SearchQuery>`, which is an https URL with the search's query string
+/// — `crate::ebay::search_url` parses that into our `EbaySearchFilters`.
+#[derive(Debug, Clone)]
+pub struct FavoriteSearch {
+    pub search_id: String,
+    pub name: String,
+    pub query_url: Option<String>,
+    /// Inline keyword field (set on simple keyword-based searches).
+    /// We use it as a fallback when query_url can't be parsed.
+    pub keywords: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FavoriteSeller {
+    pub user_id: String,
+    pub store_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct MyEbayFavorites {
+    pub searches: Vec<FavoriteSearch>,
+    pub sellers: Vec<FavoriteSeller>,
+}
+
 pub fn trading_endpoint(env: EbayEnvironment) -> &'static str {
     match env {
         EbayEnvironment::Sandbox => "https://api.sandbox.ebay.com/ws/api.dll",
@@ -164,6 +189,28 @@ static PAGE_NUMBER_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"<PageNumber>(\d+)</PageNumber>").unwrap());
 static TOTAL_PAGES_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"<TotalNumberOfPages>(\d+)</TotalNumberOfPages>").unwrap());
+static FAVORITE_SEARCH_RE: Lazy<Regex> = Lazy::new(|| {
+    // `(?s)` so `.` matches newlines — the body of each FavoriteSearch is
+    // multi-line in real responses.
+    Regex::new(r"(?s)<FavoriteSearch>(.*?)</FavoriteSearch>").unwrap()
+});
+static FAVORITE_SELLER_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?s)<FavoriteSeller>(.*?)</FavoriteSeller>").unwrap()
+});
+static SEARCH_ID_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"<SearchID>([^<]+)</SearchID>").unwrap());
+static SEARCH_NAME_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"<SearchName>([^<]+)</SearchName>").unwrap());
+static SEARCH_QUERY_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"<SearchQuery>([^<]+)</SearchQuery>").unwrap());
+static QUERY_KEYWORDS_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"<QueryKeywords>([^<]+)</QueryKeywords>").unwrap());
+static USER_ID_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"<UserID>([^<]+)</UserID>").unwrap());
+static SELLER_USER_ID_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"<SellerID>([^<]+)</SellerID>").unwrap());
+static STORE_NAME_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"<StoreName>([^<]+)</StoreName>").unwrap());
 
 /// Inspect the response body of an AddToWatchList / RemoveFromWatchList
 /// call and either return Ok(()) for success (or benign "already on / not
@@ -226,6 +273,123 @@ pub fn parse_watchlist_response(xml: &str) -> AppResult<WatchlistPage> {
         current_page,
         total_pages,
     })
+}
+
+/// One-shot `GetMyeBayBuying` fetch that asks for the favorite-searches and
+/// favorite-sellers lists. eBay caps both at modest sizes (typically a few
+/// hundred each), so we don't paginate — we ask for one big page.
+pub async fn fetch_my_ebay_favorites(
+    env: EbayEnvironment,
+    iaf_token: &str,
+) -> AppResult<MyEbayFavorites> {
+    let body = r#"<?xml version="1.0" encoding="utf-8"?>
+<GetMyeBayBuyingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <FavoriteSearches>
+    <Include>true</Include>
+    <Pagination>
+      <EntriesPerPage>200</EntriesPerPage>
+      <PageNumber>1</PageNumber>
+    </Pagination>
+  </FavoriteSearches>
+  <FavoriteSellers>
+    <Include>true</Include>
+    <Pagination>
+      <EntriesPerPage>200</EntriesPerPage>
+      <PageNumber>1</PageNumber>
+    </Pagination>
+  </FavoriteSellers>
+  <DetailLevel>ReturnAll</DetailLevel>
+</GetMyeBayBuyingRequest>"#
+        .to_string();
+
+    let client = Client::builder()
+        .timeout(Duration::from_secs(30))
+        .gzip(true)
+        .http1_only()
+        .build()
+        .map_err(map_reqwest)?;
+
+    let resp = client
+        .post(trading_endpoint(env))
+        .header("X-EBAY-API-CALL-NAME", "GetMyeBayBuying")
+        .header("X-EBAY-API-IAF-TOKEN", iaf_token)
+        .header("X-EBAY-API-COMPATIBILITY-LEVEL", COMPATIBILITY_LEVEL)
+        .header("X-EBAY-API-SITEID", SITE_ID_US)
+        .header("Content-Type", "text/xml")
+        .body(body)
+        .send()
+        .await
+        .map_err(map_reqwest)?;
+
+    let status = resp.status();
+    let xml = resp.text().await.map_err(map_reqwest)?;
+    if !status.is_success() {
+        return Err(AppError::Network(format!(
+            "trading api returned {status}: {xml}"
+        )));
+    }
+    parse_my_ebay_favorites(&xml)
+}
+
+pub fn parse_my_ebay_favorites(xml: &str) -> AppResult<MyEbayFavorites> {
+    if FAILURE_RE.is_match(xml) {
+        let detail = LONG_MESSAGE_RE
+            .captures(xml)
+            .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
+            .unwrap_or_else(|| "trading api returned Failure".to_string());
+        return Err(AppError::Network(format!("trading api: {detail}")));
+    }
+
+    let mut searches = Vec::new();
+    for cap in FAVORITE_SEARCH_RE.captures_iter(xml) {
+        let inner = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+        let search_id = capture(&SEARCH_ID_RE, inner);
+        let name = capture(&SEARCH_NAME_RE, inner);
+        // SearchID is required for stable upserts; if it's missing we fall
+        // back to a hash of the URL/name so we at least don't drop the row.
+        let stable_id = match search_id.clone() {
+            Some(s) => s,
+            None => {
+                let basis = format!(
+                    "{}|{}",
+                    name.clone().unwrap_or_default(),
+                    capture(&SEARCH_QUERY_RE, inner).unwrap_or_default()
+                );
+                if basis.trim() == "|" {
+                    continue;
+                }
+                format!("fallback:{}", basis)
+            }
+        };
+        searches.push(FavoriteSearch {
+            search_id: stable_id,
+            name: name.unwrap_or_else(|| "(unnamed search)".to_string()),
+            query_url: capture(&SEARCH_QUERY_RE, inner),
+            keywords: capture(&QUERY_KEYWORDS_RE, inner),
+        });
+    }
+
+    let mut sellers = Vec::new();
+    for cap in FAVORITE_SELLER_RE.captures_iter(xml) {
+        let inner = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+        // eBay sometimes emits <UserID> and sometimes <SellerID>; accept either.
+        let username = capture(&USER_ID_RE, inner)
+            .or_else(|| capture(&SELLER_USER_ID_RE, inner));
+        let Some(username) = username else { continue };
+        sellers.push(FavoriteSeller {
+            user_id: username,
+            store_name: capture(&STORE_NAME_RE, inner),
+        });
+    }
+
+    Ok(MyEbayFavorites { searches, sellers })
+}
+
+fn capture(re: &Regex, hay: &str) -> Option<String> {
+    re.captures(hay).and_then(|c| c.get(1).map(|m| {
+        let s = m.as_str().trim();
+        s.to_string()
+    })).filter(|s| !s.is_empty())
 }
 
 fn map_reqwest(e: reqwest::Error) -> AppError {
@@ -349,6 +513,56 @@ mod tests {
         assert!(!is_safe_item_id(""));
         assert!(!is_safe_item_id("abc"));
         assert!(!is_safe_item_id("12345</ItemID><FOO>"));
+    }
+
+    #[test]
+    fn parses_favorites_fixture() {
+        const XML: &str = include_str!("../../fixtures/ebay/favorites_response.xml");
+        let favs = parse_my_ebay_favorites(XML).unwrap();
+        assert_eq!(favs.searches.len(), 2);
+        assert_eq!(favs.searches[0].search_id, "1001");
+        assert_eq!(favs.searches[0].name, "Jeff Gordon DuPont 1:24");
+        assert!(favs.searches[0]
+            .query_url
+            .as_deref()
+            .unwrap_or("")
+            .contains("_nkw=jeff+gordon"));
+        assert_eq!(
+            favs.searches[0].keywords.as_deref(),
+            Some("jeff gordon dupont 1:24")
+        );
+        assert_eq!(favs.sellers.len(), 2);
+        assert_eq!(favs.sellers[0].user_id, "diecast_seller_42");
+        assert_eq!(
+            favs.sellers[0].store_name.as_deref(),
+            Some("The Diecast Store")
+        );
+        assert_eq!(favs.sellers[1].user_id, "nascar_collectibles");
+        assert!(favs.sellers[1].store_name.is_none());
+    }
+
+    #[test]
+    fn empty_favorites_lists() {
+        let xml = r#"<?xml version="1.0"?>
+<GetMyeBayBuyingResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Ack>Success</Ack>
+  <FavoriteSearches/>
+  <FavoriteSellers/>
+</GetMyeBayBuyingResponse>"#;
+        let favs = parse_my_ebay_favorites(xml).unwrap();
+        assert!(favs.searches.is_empty());
+        assert!(favs.sellers.is_empty());
+    }
+
+    #[test]
+    fn favorites_failure_propagates() {
+        let xml = r#"<?xml version="1.0"?>
+<GetMyeBayBuyingResponse>
+  <Ack>Failure</Ack>
+  <Errors><LongMessage>Auth token is invalid.</LongMessage></Errors>
+</GetMyeBayBuyingResponse>"#;
+        let err = parse_my_ebay_favorites(xml).unwrap_err();
+        assert!(err.to_string().contains("Auth token is invalid"));
     }
 
     #[test]

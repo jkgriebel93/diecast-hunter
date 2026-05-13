@@ -27,6 +27,10 @@ pub struct SearchFilters {
     /// "AUCTION", "FIXED_PRICE".
     #[serde(default)]
     pub buying_options: Vec<String>,
+    /// Restrict results to one or more eBay seller usernames. Empty → no
+    /// restriction.
+    #[serde(default)]
+    pub sellers: Vec<String>,
     /// "price", "-price", "newlyListed", "endingSoonest". Empty/None →
     /// eBay's default best-match ranking.
     pub sort: Option<String>,
@@ -107,6 +111,12 @@ fn build_search_path(
     if !filters.buying_options.is_empty() {
         let csv = filters.buying_options.join("|");
         filter_parts.push(format!("buyingOptions:{{{csv}}}"));
+    }
+    if !filters.sellers.is_empty() {
+        // eBay's `sellers` filter is pipe-delimited and case-insensitive on
+        // their side. We pass the usernames through as the user typed them.
+        let csv = filters.sellers.join("|");
+        filter_parts.push(format!("sellers:{{{csv}}}"));
     }
     if filters.price_min_cents.is_some() || filters.price_max_cents.is_some() {
         let lo = filters
@@ -325,10 +335,26 @@ mod tests {
     }
 
     #[test]
+    fn build_path_with_sellers() {
+        let filters = SearchFilters {
+            sellers: vec!["seller_a".into(), "seller_b".into()],
+            sort: Some("newlyListed".into()),
+            ..Default::default()
+        };
+        let path = build_search_path("", &filters, 50, 0);
+        let decoded = url::form_urlencoded::parse(path.split('?').nth(1).unwrap().as_bytes())
+            .into_owned()
+            .collect::<std::collections::HashMap<_, _>>();
+        let filter = decoded.get("filter").expect("filter param missing");
+        assert!(filter.contains("sellers:{seller_a|seller_b}"), "got: {filter}");
+    }
+
+    #[test]
     fn build_path_with_conditions_and_price() {
         let filters = SearchFilters {
             conditions: vec!["NEW".into(), "USED".into()],
             buying_options: vec!["FIXED_PRICE".into()],
+            sellers: vec![],
             price_min_cents: Some(1000),
             price_max_cents: Some(5000),
             sort: None,

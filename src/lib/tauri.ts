@@ -177,7 +177,101 @@ export const api = {
     invoke<void>("set_ebay_filter_non_diecasts", { enabled }),
   removeNonDiecastListings: () =>
     invoke<CleanupSummary>("remove_non_diecast_listings"),
+  listSavedSearches: () => invoke<SavedSearch[]>("list_saved_searches"),
+  createSavedSearch: (input: SavedSearchInput) =>
+    invoke<SavedSearch>("create_saved_search", { input }),
+  updateSavedSearch: (id: number, input: SavedSearchInput) =>
+    invoke<SavedSearch>("update_saved_search", { id, input }),
+  deleteSavedSearch: (id: number) =>
+    invoke<void>("delete_saved_search", { id }),
+  runSavedSearch: (id: number, limit: number, offset: number) =>
+    invoke<EbaySearchPage>("run_saved_search", { id, limit, offset }),
+  listSavedSellers: () => invoke<SavedSeller[]>("list_saved_sellers"),
+  addSavedSeller: (input: SavedSellerInput) =>
+    invoke<SavedSeller>("add_saved_seller", { input }),
+  updateSavedSeller: (id: number, input: SavedSellerInput) =>
+    invoke<SavedSeller>("update_saved_seller", { id, input }),
+  removeSavedSeller: (id: number) =>
+    invoke<void>("remove_saved_seller", { id }),
+  savedSellersFeed: (
+    query: string,
+    filters: EbaySearchFilters,
+    limit: number,
+    offset: number,
+  ) =>
+    invoke<EbaySearchPage>("saved_sellers_feed", {
+      query,
+      filters,
+      limit,
+      offset,
+    }),
+  syncEbaySaved: () => invoke<SavedSyncSummary>("sync_ebay_saved"),
+  syncEbayAll: () => invoke<EbaySyncAllSummary>("sync_ebay_all"),
 };
+
+export interface SavedSyncSummary {
+  searches_seen: number;
+  searches_created: number;
+  searches_updated: number;
+  searches_pruned: number;
+  sellers_seen: number;
+  sellers_created: number;
+  sellers_updated: number;
+  sellers_pruned: number;
+}
+
+export interface EbaySyncAllSummary {
+  watchlist: WatchlistSyncSummary;
+  saved: SavedSyncSummary;
+}
+
+export interface SavedSearch {
+  id: number;
+  name: string;
+  query: string;
+  conditions: string[];
+  buying_options: string[];
+  sellers: string[];
+  price_min_cents: number | null;
+  price_max_cents: number | null;
+  sort: string | null;
+  created_at: number;
+  last_run_at: number | null;
+  /** True when this row was pulled from eBay (and is therefore subject to
+   *  prune on the next sync). False for locally-added rows. */
+  ebay_origin: boolean;
+  ebay_external_id: string | null;
+  last_synced_at: number | null;
+}
+
+export interface SavedSearchInput {
+  name: string;
+  query: string;
+  conditions: string[];
+  buying_options: string[];
+  sellers: string[];
+  price_min_cents: number | null;
+  price_max_cents: number | null;
+  sort: string | null;
+}
+
+export interface SavedSeller {
+  id: number;
+  seller_code: string;
+  username: string;
+  display_name: string | null;
+  notes: string | null;
+  created_at: number;
+  ebay_origin: boolean;
+  last_synced_at: number | null;
+}
+
+export interface SavedSellerInput {
+  seller_code: string;
+  username: string;
+  display_name: string | null;
+  notes: string | null;
+}
 
 export interface CleanupSummary {
   examined: number;
@@ -287,6 +381,8 @@ export interface EbaySearchFilters {
   price_min_cents: number | null;
   price_max_cents: number | null;
   buying_options: string[];
+  /** Restrict to specific eBay seller usernames. Empty array → no restriction. */
+  sellers: string[];
   sort: string | null;
 }
 

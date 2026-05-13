@@ -2,7 +2,9 @@
 
 pub mod dcr_collection;
 pub mod dcr_registry;
+pub mod ebay_all;
 pub mod ebay_listing;
+pub mod ebay_saved;
 pub mod ebay_watchlist;
 pub mod fb_listing;
 pub mod listing_match;
@@ -15,6 +17,8 @@ pub use ebay_listing::{
     add_listing_from_input, refresh_all_active, refresh_listing, AddListingResult,
     RefreshSummary,
 };
+pub use ebay_all::{sync_all as sync_all_ebay, EbaySyncAllSummary};
+pub use ebay_saved::{sync_saved_from_ebay, SavedSyncSummary};
 pub use ebay_watchlist::{
     sync_watchlist, unwatch_and_delete, watch_and_save, WatchlistSyncSummary,
 };

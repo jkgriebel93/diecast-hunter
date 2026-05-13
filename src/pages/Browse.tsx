@@ -6,6 +6,7 @@ import {
   type EbaySearchItem,
   type EbaySearchPage,
 } from "@/lib/tauri";
+import { Link } from "react-router-dom";
 
 const PAGE_SIZE = 50;
 
@@ -54,10 +55,82 @@ export function Browse() {
     new Map(),
   );
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [savedSellersSet, setSavedSellersSet] = useState<Set<string>>(
+    new Set(),
+  );
+  const [savingSeller, setSavingSeller] = useState<string | null>(null);
+  const [savingSearch, setSavingSearch] = useState(false);
+  const [savedSearchMsg, setSavedSearchMsg] = useState<string | null>(null);
 
   useEffect(() => {
     void loadWatched();
+    void loadSavedSellers();
   }, []);
+
+  async function loadSavedSellers() {
+    try {
+      const sellers = await api.listSavedSellers();
+      setSavedSellersSet(
+        new Set(sellers.map((s) => s.username.toLowerCase())),
+      );
+    } catch {
+      // non-fatal — the "Save seller" button just won't reflect existing
+      // bookmarks until the user reloads.
+    }
+  }
+
+  async function onSaveSeller(username: string) {
+    setSavingSeller(username);
+    setError(null);
+    try {
+      await api.addSavedSeller({
+        seller_code: "ebay",
+        username,
+        display_name: null,
+        notes: null,
+      });
+      setSavedSellersSet((prev) => {
+        const next = new Set(prev);
+        next.add(username.toLowerCase());
+        return next;
+      });
+      setActionMessage(`Saved seller: ${username}`);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSavingSeller(null);
+    }
+  }
+
+  async function onSaveCurrentSearch() {
+    const defaultName = query.trim() || "Untitled search";
+    const name = window.prompt(
+      "Name this saved search",
+      defaultName,
+    );
+    if (name === null) return;
+    setSavingSearch(true);
+    setSavedSearchMsg(null);
+    setError(null);
+    try {
+      const filters = buildFilters();
+      await api.createSavedSearch({
+        name: name.trim() || defaultName,
+        query: query.trim(),
+        conditions: filters.conditions,
+        buying_options: filters.buying_options,
+        sellers: filters.sellers,
+        price_min_cents: filters.price_min_cents,
+        price_max_cents: filters.price_max_cents,
+        sort: filters.sort,
+      });
+      setSavedSearchMsg(`Saved as "${name.trim() || defaultName}".`);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSavingSearch(false);
+    }
+  }
 
   async function loadWatched() {
     try {
@@ -80,6 +153,7 @@ export function Browse() {
     return {
       conditions,
       buying_options: buyingOptions,
+      sellers: [],
       price_min_cents: minCents,
       price_max_cents: maxCents,
       sort: sort || null,
@@ -204,7 +278,24 @@ export function Browse() {
           >
             {searching ? "Searching…" : "Search"}
           </button>
+          <button
+            type="button"
+            className="btn-secondary shrink-0"
+            onClick={onSaveCurrentSearch}
+            disabled={savingSearch}
+            title="Save the current query + filters to Saved Searches"
+          >
+            {savingSearch ? "Saving…" : "Save search"}
+          </button>
         </div>
+        {savedSearchMsg && (
+          <div className="text-xs text-emerald-400">
+            {savedSearchMsg}{" "}
+            <Link to="/ebay/searches" className="underline">
+              Manage saved searches
+            </Link>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <FilterChips
@@ -311,16 +402,31 @@ export function Browse() {
         </div>
       ) : (
         <ul className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          {page.items.map((item) => (
-            <SearchCard
-              key={item.item_id}
-              item={item}
-              busy={busyItemId === item.item_id}
-              watched={watchedByItemId.has(item.item_id)}
-              onWatch={() => onWatch(item)}
-              onUnwatch={() => onUnwatch(item)}
-            />
-          ))}
+          {page.items.map((item) => {
+            const username = item.seller_username ?? "";
+            const sellerSaved =
+              username !== "" &&
+              savedSellersSet.has(username.toLowerCase());
+            return (
+              <SearchCard
+                key={item.item_id}
+                item={item}
+                busy={busyItemId === item.item_id}
+                watched={watchedByItemId.has(item.item_id)}
+                sellerSaved={sellerSaved}
+                sellerSaving={
+                  username !== "" && savingSeller === username
+                }
+                onWatch={() => onWatch(item)}
+                onUnwatch={() => onUnwatch(item)}
+                onSaveSeller={
+                  username !== "" && !sellerSaved
+                    ? () => onSaveSeller(username)
+                    : undefined
+                }
+              />
+            );
+          })}
         </ul>
       )}
     </div>
@@ -331,14 +437,20 @@ function SearchCard({
   item,
   busy,
   watched,
+  sellerSaved,
+  sellerSaving,
   onWatch,
   onUnwatch,
+  onSaveSeller,
 }: {
   item: EbaySearchItem;
   busy: boolean;
   watched: boolean;
+  sellerSaved: boolean;
+  sellerSaving: boolean;
   onWatch: () => void;
   onUnwatch: () => void;
+  onSaveSeller?: () => void;
 }) {
   const total =
     item.price_cents !== null
@@ -399,6 +511,22 @@ function SearchCard({
         </div>
       </div>
       <div className="flex items-center justify-end gap-3 text-xs">
+        {onSaveSeller && (
+          <button
+            type="button"
+            className="text-fg-subtle hover:text-fg disabled:opacity-50"
+            onClick={onSaveSeller}
+            disabled={sellerSaving}
+            title={`Save ${item.seller_username} to Saved Sellers`}
+          >
+            {sellerSaving ? "Saving…" : "Save seller"}
+          </button>
+        )}
+        {sellerSaved && !onSaveSeller && (
+          <span className="text-fg-faint" title="Seller already saved">
+            ✓ Seller saved
+          </span>
+        )}
         <a
           className="text-accent hover:underline"
           href={item.web_url}

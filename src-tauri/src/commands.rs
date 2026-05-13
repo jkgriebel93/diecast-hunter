@@ -5,6 +5,7 @@ use tauri::State;
 
 use crate::error::{AppError, AppResult};
 use crate::progress::ProgressEmitter;
+use crate::saved;
 use crate::settings;
 use crate::sync;
 use crate::AppState;
@@ -416,6 +417,32 @@ pub async fn sync_ebay_watchlist(
     let result = sync::sync_watchlist(&state.db.pool, &progress).await;
     clear_active_cancel(&state).await;
     finish_progress(&progress, &result, "Watchlist sync");
+    result
+}
+
+#[tauri::command]
+pub async fn sync_ebay_saved(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> AppResult<sync::SavedSyncSummary> {
+    let progress = ProgressEmitter::new(app, "saved");
+    set_active_cancel(&state, &progress).await;
+    let result = sync::sync_saved_from_ebay(&state.db.pool, &progress).await;
+    clear_active_cancel(&state).await;
+    finish_progress(&progress, &result, "Saved sync");
+    result
+}
+
+#[tauri::command]
+pub async fn sync_ebay_all(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> AppResult<sync::EbaySyncAllSummary> {
+    let progress = ProgressEmitter::new(app, "ebay_all");
+    set_active_cancel(&state, &progress).await;
+    let result = sync::sync_all_ebay(&state.db.pool, &progress).await;
+    clear_active_cancel(&state).await;
+    finish_progress(&progress, &result, "eBay sync");
     result
 }
 
@@ -1202,4 +1229,154 @@ async fn fetch_collection_rows(
     }
 
     Ok(out)
+}
+
+// --- Saved searches + saved sellers ---------------------------------------
+
+#[tauri::command]
+pub async fn list_saved_searches(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<saved::SavedSearch>> {
+    saved::list_searches(&state.db.pool).await
+}
+
+#[tauri::command]
+pub async fn create_saved_search(
+    state: State<'_, AppState>,
+    input: saved::SavedSearchInput,
+) -> AppResult<saved::SavedSearch> {
+    saved::create_search(&state.db.pool, input).await
+}
+
+#[tauri::command]
+pub async fn update_saved_search(
+    state: State<'_, AppState>,
+    id: i64,
+    input: saved::SavedSearchInput,
+) -> AppResult<saved::SavedSearch> {
+    saved::update_search(&state.db.pool, id, input).await
+}
+
+#[tauri::command]
+pub async fn delete_saved_search(state: State<'_, AppState>, id: i64) -> AppResult<()> {
+    saved::delete_search(&state.db.pool, id).await
+}
+
+/// Run a saved search against eBay Browse and bump its `last_run_at`. The
+/// `limit`/`offset` paginate the same way the Browse page's search does.
+#[tauri::command]
+pub async fn run_saved_search(
+    state: State<'_, AppState>,
+    id: i64,
+    limit: u32,
+    offset: u32,
+) -> AppResult<crate::ebay::SearchPage> {
+    let search = saved::get_search(&state.db.pool, id).await?;
+    let filters = crate::ebay::SearchFilters {
+        conditions: search.conditions.clone(),
+        buying_options: search.buying_options.clone(),
+        sellers: search.sellers.clone(),
+        price_min_cents: search.price_min_cents,
+        price_max_cents: search.price_max_cents,
+        sort: search.sort.clone(),
+    };
+    let client = crate::ebay::EbayClient::from_settings(state.db.pool.clone()).await?;
+    let page = crate::ebay::search_diecasts(&client, &search.query, &filters, limit, offset).await?;
+    // Only record successful runs — failures don't change "when did I last
+    // actually pull results."
+    saved::mark_search_ran(&state.db.pool, id).await?;
+    Ok(page)
+}
+
+#[tauri::command]
+pub async fn list_saved_sellers(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<saved::SavedSeller>> {
+    saved::list_sellers(&state.db.pool).await
+}
+
+#[tauri::command]
+pub async fn add_saved_seller(
+    state: State<'_, AppState>,
+    input: saved::SavedSellerInput,
+) -> AppResult<saved::SavedSeller> {
+    saved::add_seller(&state.db.pool, input).await
+}
+
+#[tauri::command]
+pub async fn update_saved_seller(
+    state: State<'_, AppState>,
+    id: i64,
+    input: saved::SavedSellerInput,
+) -> AppResult<saved::SavedSeller> {
+    saved::update_seller(&state.db.pool, id, input).await
+}
+
+#[tauri::command]
+pub async fn remove_saved_seller(state: State<'_, AppState>, id: i64) -> AppResult<()> {
+    saved::remove_seller(&state.db.pool, id).await
+}
+
+/// Aggregated feed of recent listings across every saved eBay seller. The
+/// frontend can layer a keyword `query` and condition/price/buying-option
+/// filters and a sort on top, and may narrow to a subset of the saved
+/// sellers by populating `filters.sellers` — that subset is intersected
+/// (case-insensitively) with the saved-sellers list so we never bypass the
+/// saved-sellers gate. Returns an empty page with `total = 0` if no saved
+/// sellers match — the UI uses that as its empty-state signal.
+#[tauri::command]
+pub async fn saved_sellers_feed(
+    state: State<'_, AppState>,
+    query: Option<String>,
+    filters: crate::ebay::SearchFilters,
+    limit: u32,
+    offset: u32,
+) -> AppResult<crate::ebay::SearchPage> {
+    let saved_sellers = saved::list_seller_usernames(&state.db.pool).await?;
+    if saved_sellers.is_empty() {
+        return Ok(crate::ebay::SearchPage {
+            items: Vec::new(),
+            total: 0,
+            limit,
+            offset,
+            has_more: false,
+        });
+    }
+
+    let sellers = if filters.sellers.is_empty() {
+        saved_sellers
+    } else {
+        let saved_lower: std::collections::HashSet<String> = saved_sellers
+            .iter()
+            .map(|s| s.to_lowercase())
+            .collect();
+        let filtered: Vec<String> = filters
+            .sellers
+            .iter()
+            .filter(|s| saved_lower.contains(&s.to_lowercase()))
+            .cloned()
+            .collect();
+        if filtered.is_empty() {
+            return Ok(crate::ebay::SearchPage {
+                items: Vec::new(),
+                total: 0,
+                limit,
+                offset,
+                has_more: false,
+            });
+        }
+        filtered
+    };
+
+    let merged = crate::ebay::SearchFilters {
+        conditions: filters.conditions,
+        price_min_cents: filters.price_min_cents,
+        price_max_cents: filters.price_max_cents,
+        buying_options: filters.buying_options,
+        sellers,
+        sort: filters.sort.or_else(|| Some("newlyListed".to_string())),
+    };
+    let q = query.as_deref().unwrap_or("").trim();
+    let client = crate::ebay::EbayClient::from_settings(state.db.pool.clone()).await?;
+    crate::ebay::search_diecasts(&client, q, &merged, limit, offset).await
 }

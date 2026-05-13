@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<GetMyeBayBuyingResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Ack>Success</Ack>
+  <Version>1193</Version>
+  <FavoriteSearches>
+    <FavoriteSearch>
+      <SearchID>1001</SearchID>
+      <SearchName>Jeff Gordon DuPont 1:24</SearchName>
+      <SearchQuery>https://www.ebay.com/sch/i.html?_nkw=jeff+gordon+dupont+1%3A24&amp;_sacat=222&amp;LH_BIN=1&amp;LH_PrefLoc=1&amp;_udlo=10&amp;_udhi=75</SearchQuery>
+      <QueryKeywords>jeff gordon dupont 1:24</QueryKeywords>
+    </FavoriteSearch>
+    <FavoriteSearch>
+      <SearchID>1002</SearchID>
+      <SearchName>Action Racing Collectibles 1:64</SearchName>
+      <SearchQuery>https://www.ebay.com/sch/i.html?_nkw=action+racing+collectibles+1%3A64&amp;_sacat=222</SearchQuery>
+      <QueryKeywords>action racing collectibles 1:64</QueryKeywords>
+    </FavoriteSearch>
+  </FavoriteSearches>
+  <FavoriteSellers>
+    <FavoriteSeller>
+      <UserID>diecast_seller_42</UserID>
+      <StoreName>The Diecast Store</StoreName>
+    </FavoriteSeller>
+    <FavoriteSeller>
+      <UserID>nascar_collectibles</UserID>
+    </FavoriteSeller>
+  </FavoriteSellers>
+</GetMyeBayBuyingResponse>

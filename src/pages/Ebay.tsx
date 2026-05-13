@@ -1,17 +1,59 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, formatCents, type ListingRow } from "@/lib/tauri";
+import {
+  api,
+  formatCents,
+  type EbaySyncAllSummary,
+  type ListingRow,
+  type SavedSearch,
+  type SavedSeller,
+} from "@/lib/tauri";
 
 export function Ebay() {
   const [rows, setRows] = useState<ListingRow[] | null>(null);
+  const [savedSearches, setSavedSearches] = useState<SavedSearch[] | null>(
+    null,
+  );
+  const [savedSellers, setSavedSellers] = useState<SavedSeller[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [syncingAll, setSyncingAll] = useState(false);
+  const [syncSummary, setSyncSummary] =
+    useState<EbaySyncAllSummary | null>(null);
+
+  async function loadAll() {
+    setError(null);
+    try {
+      const [listings, searches, sellers] = await Promise.all([
+        api.listListings(),
+        api.listSavedSearches().catch(() => [] as SavedSearch[]),
+        api.listSavedSellers().catch(() => [] as SavedSeller[]),
+      ]);
+      setRows(listings);
+      setSavedSearches(searches);
+      setSavedSellers(sellers);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
 
   useEffect(() => {
-    api
-      .listListings()
-      .then(setRows)
-      .catch((e) => setError(String(e)));
+    void loadAll();
   }, []);
+
+  async function onSyncAll() {
+    setSyncingAll(true);
+    setSyncSummary(null);
+    setError(null);
+    try {
+      const summary = await api.syncEbayAll();
+      setSyncSummary(summary);
+      await loadAll();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSyncingAll(false);
+    }
+  }
 
   const summary = useMemo(() => {
     if (!rows) return null;
@@ -55,12 +97,51 @@ export function Ebay() {
 
   return (
     <div className="p-6 space-y-6">
-      <header>
-        <h2 className="text-2xl font-semibold">eBay</h2>
-        <p className="text-sm text-fg-subtle">
-          Overview of your saved eBay listings. More tools land here over time.
-        </p>
+      <header className="flex items-end justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-semibold">eBay</h2>
+          <p className="text-sm text-fg-subtle">
+            Overview of your saved eBay listings. More tools land here over
+            time.
+          </p>
+        </div>
+        <button
+          className="btn-primary"
+          type="button"
+          onClick={onSyncAll}
+          disabled={syncingAll}
+          title="Sync watchlist, saved searches, and saved sellers from eBay (prunes ones removed there)"
+        >
+          {syncingAll ? "Syncing eBay…" : "Sync everything"}
+        </button>
       </header>
+
+      {syncSummary && (
+        <div className="card text-xs text-emerald-400 space-y-1">
+          <div>
+            Listings: +{syncSummary.watchlist.created} new, ~
+            {syncSummary.watchlist.updated} updated,{" "}
+            {syncSummary.watchlist.filtered} filtered,{" "}
+            {syncSummary.watchlist.failed} failed,{" "}
+            -{syncSummary.watchlist.pruned} pruned (
+            {syncSummary.watchlist.items_seen} seen across{" "}
+            {syncSummary.watchlist.pages_fetched} page
+            {syncSummary.watchlist.pages_fetched === 1 ? "" : "s"}).
+          </div>
+          <div>
+            Saved searches: +{syncSummary.saved.searches_created} new, ~
+            {syncSummary.saved.searches_updated} updated, -
+            {syncSummary.saved.searches_pruned} pruned (
+            {syncSummary.saved.searches_seen} on eBay).
+          </div>
+          <div>
+            Saved sellers: +{syncSummary.saved.sellers_created} new, ~
+            {syncSummary.saved.sellers_updated} updated, -
+            {syncSummary.saved.sellers_pruned} pruned (
+            {syncSummary.saved.sellers_seen} on eBay).
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="card border-red-500/40 text-red-300 text-sm">
@@ -130,6 +211,35 @@ export function Ebay() {
               </ul>
             </section>
           )}
+
+          <section className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Link
+              to="/ebay/feed"
+              className="card hover:border-accent transition-colors"
+            >
+              <h3 className="text-sm font-medium">Seller feed →</h3>
+              <p className="text-xs text-fg-subtle mt-0.5">
+                {savedSellers && savedSellers.length > 0
+                  ? `Recent listings from ${savedSellers.length} saved seller${
+                      savedSellers.length === 1 ? "" : "s"
+                    }`
+                  : "Add saved sellers to populate this feed"}
+              </p>
+            </Link>
+            <Link
+              to="/ebay/searches"
+              className="card hover:border-accent transition-colors"
+            >
+              <h3 className="text-sm font-medium">Saved Searches →</h3>
+              <p className="text-xs text-fg-subtle mt-0.5">
+                {savedSearches !== null
+                  ? `${savedSearches.length} saved search${
+                      savedSearches.length === 1 ? "" : "es"
+                    }`
+                  : "—"}
+              </p>
+            </Link>
+          </section>
 
           <section className="card flex items-center justify-between">
             <div>

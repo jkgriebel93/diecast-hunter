@@ -6,6 +6,7 @@ mod error;
 mod listing_receiver;
 mod matcher;
 mod progress;
+mod saved;
 mod settings;
 mod sync;
 
@@ -107,6 +108,18 @@ pub fn run() {
             commands::get_listing_receiver_status,
             commands::get_listing_receiver_secret,
             commands::regenerate_listing_receiver_secret,
+            commands::list_saved_searches,
+            commands::create_saved_search,
+            commands::update_saved_search,
+            commands::delete_saved_search,
+            commands::run_saved_search,
+            commands::list_saved_sellers,
+            commands::add_saved_seller,
+            commands::update_saved_seller,
+            commands::remove_saved_seller,
+            commands::saved_sellers_feed,
+            commands::sync_ebay_saved,
+            commands::sync_ebay_all,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

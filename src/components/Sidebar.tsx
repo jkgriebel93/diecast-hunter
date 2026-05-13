@@ -20,7 +20,9 @@ const links: NavItem[] = [
     label: "eBay",
     icon: EbayIcon,
     children: [
+      { to: "/ebay/feed", label: "Seller feed", icon: FeedIcon },
       { to: "/listings", label: "Saved Listings", icon: ListingsIcon },
+      { to: "/ebay/searches", label: "Saved Searches", icon: SavedSearchIcon },
       { to: "/browse", label: "Browse eBay", icon: BrowseIcon },
     ],
   },
@@ -376,6 +378,30 @@ function RegistryIcon({ className }: IconProps) {
     <>
       <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
       <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+    </>,
+    className,
+  );
+}
+
+function FeedIcon({ className }: IconProps) {
+  // Concentric arcs + dot — universal "feed / broadcast" glyph.
+  return iconSvg(
+    <>
+      <path d="M4 11a9 9 0 0 1 9 9" />
+      <path d="M4 4a16 16 0 0 1 16 16" />
+      <circle cx="5" cy="19" r="1.5" />
+    </>,
+    className,
+  );
+}
+
+function SavedSearchIcon({ className }: IconProps) {
+  // Magnifier with a star — "saved search".
+  return iconSvg(
+    <>
+      <circle cx="11" cy="11" r="7" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+      <polygon points="11 7.5 12.1 9.7 14.5 10 12.8 11.7 13.2 14 11 12.9 8.8 14 9.2 11.7 7.5 10 9.9 9.7 11 7.5" />
     </>,
     className,
   );
