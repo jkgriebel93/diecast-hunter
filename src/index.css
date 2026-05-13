@@ -3,6 +3,35 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    /* Light theme (default) */
+    --color-bg: 248 250 252;
+    --color-bg-panel: 255 255 255;
+    --color-bg-elevated: 241 245 249;
+    --color-border: 226 232 240;
+    --color-accent: 37 99 235;
+    --color-accent-hover: 29 78 216;
+    --color-fg: 15 23 42;
+    --color-fg-muted: 71 85 105;
+    --color-fg-subtle: 100 116 139;
+    --color-fg-faint: 148 163 184;
+    color-scheme: light;
+  }
+
+  html.dark {
+    --color-bg: 11 13 16;
+    --color-bg-panel: 19 23 28;
+    --color-bg-elevated: 26 31 37;
+    --color-border: 38 44 52;
+    --color-accent: 59 130 246;
+    --color-accent-hover: 37 99 235;
+    --color-fg: 241 245 249;
+    --color-fg-muted: 148 163 184;
+    --color-fg-subtle: 100 116 139;
+    --color-fg-faint: 71 85 105;
+    color-scheme: dark;
+  }
+
   html,
   body,
   #root {
@@ -10,7 +39,7 @@
   }
 
   body {
-    @apply bg-bg text-slate-100 antialiased;
+    @apply bg-bg text-fg antialiased;
     font-family:
       ui-sans-serif,
       system-ui,
@@ -23,6 +52,24 @@
   }
 }
 
+/* Light-mode tuning for status text shades.
+   The codebase uses *-300/400 hues that were chosen for legibility against
+   the dark page background. On a white-ish background they wash out — so
+   when the .dark class isn't present, swap to a darker shade of the same
+   hue. Backgrounds and borders use /10–/40 opacity tints and still work
+   fine in light mode, so they're left alone. */
+@layer utilities {
+  html:not(.dark) .text-emerald-400 { color: rgb(5 150 105); }
+  html:not(.dark) .text-emerald-300 { color: rgb(4 120 87); }
+  html:not(.dark) .text-red-400 { color: rgb(220 38 38); }
+  html:not(.dark) .text-red-300 { color: rgb(185 28 28); }
+  html:not(.dark) .text-amber-400\/80 { color: rgb(180 83 9 / 0.95); }
+  html:not(.dark) .text-amber-400\/90 { color: rgb(180 83 9); }
+  html:not(.dark) .text-yellow-400 { color: rgb(202 138 4); }
+  html:not(.dark) .hover\:text-red-300:hover { color: rgb(185 28 28); }
+  html:not(.dark) .hover\:text-emerald-300:hover { color: rgb(4 120 87); }
+}
+
 @layer components {
   .btn {
     @apply inline-flex items-center justify-center rounded-md px-3 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
@@ -31,15 +78,15 @@
     @apply btn bg-accent hover:bg-accent-hover text-white;
   }
   .btn-secondary {
-    @apply btn bg-bg-elevated hover:bg-border text-slate-100 border border-border;
+    @apply btn bg-bg-elevated hover:bg-border text-fg border border-border;
   }
   .input {
-    @apply w-full rounded-md bg-bg-elevated border border-border px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-accent;
+    @apply w-full rounded-md bg-bg-elevated border border-border px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:outline-none focus:ring-2 focus:ring-accent;
   }
   .card {
     @apply rounded-lg border border-border bg-bg-panel p-4;
   }
   .label {
-    @apply block text-xs font-medium text-slate-400 uppercase tracking-wide mb-1;
+    @apply block text-xs font-medium text-fg-muted uppercase tracking-wide mb-1;
   }
 }

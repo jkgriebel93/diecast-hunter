@@ -4,6 +4,29 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Diecast Hunter</title>
+    <script>
+      // Set the dark class before paint to avoid a light-mode flash on
+      // startup when the user prefers dark. Mirrors the resolution logic
+      // in src/lib/theme.tsx — keep in sync.
+      (function () {
+        try {
+          var stored = localStorage.getItem("diecast-hunter.theme");
+          var resolved =
+            stored === "light"
+              ? "light"
+              : stored === "dark"
+                ? "dark"
+                : window.matchMedia("(prefers-color-scheme: dark)").matches
+                  ? "dark"
+                  : "light";
+          if (resolved === "dark") {
+            document.documentElement.classList.add("dark");
+          }
+        } catch (e) {
+          // localStorage / matchMedia unavailable — fall through to light.
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

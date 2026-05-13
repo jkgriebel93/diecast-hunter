@@ -181,7 +181,7 @@ export function Browse() {
     <div className="p-6 space-y-4">
       <header>
         <h2 className="text-2xl font-semibold">Browse eBay</h2>
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-fg-subtle">
           Search the diecast catalog on eBay. Watch a listing to add it to
           your eBay watchlist and track it locally.
         </p>
@@ -274,7 +274,7 @@ export function Browse() {
       )}
 
       {page && (
-        <div className="flex items-center justify-between text-xs text-slate-500">
+        <div className="flex items-center justify-between text-xs text-fg-subtle">
           <div>
             {page.total > 0
               ? `Showing ${showingFrom}–${showingTo} of ${page.total.toLocaleString()} results`
@@ -302,11 +302,11 @@ export function Browse() {
       )}
 
       {page === null ? (
-        <div className="card text-sm text-slate-400">
+        <div className="card text-sm text-fg-muted">
           Type a query and hit Search to see eBay diecast listings.
         </div>
       ) : page.items.length === 0 ? (
-        <div className="card text-sm text-slate-400">
+        <div className="card text-sm text-fg-muted">
           No results for the current search.
         </div>
       ) : (
@@ -364,7 +364,7 @@ function SearchCard({
           >
             {item.title}
           </div>
-          <div className="text-xs text-slate-500 mt-1 truncate">
+          <div className="text-xs text-fg-subtle mt-1 truncate">
             {[
               item.condition,
               item.listing_type,
@@ -377,24 +377,24 @@ function SearchCard({
               .join(" · ")}
           </div>
           {item.end_time && item.listing_type === "auction" && (
-            <div className="text-xs text-slate-500 mt-0.5">
+            <div className="text-xs text-fg-subtle mt-0.5">
               ends {new Date(item.end_time * 1000).toLocaleString()}
             </div>
           )}
         </div>
         <div className="text-right text-xs tabular-nums shrink-0 space-y-0.5">
-          <div className="text-base text-slate-100">
+          <div className="text-base text-fg">
             {formatCents(item.price_cents)}
           </div>
           {item.shipping_cents !== null && item.shipping_cents > 0 && (
-            <div className="text-slate-500">
+            <div className="text-fg-subtle">
               + {formatCents(item.shipping_cents)} ship
             </div>
           )}
           {total !== null &&
             item.shipping_cents !== null &&
             item.shipping_cents > 0 && (
-              <div className="text-slate-400">total {formatCents(total)}</div>
+              <div className="text-fg-muted">total {formatCents(total)}</div>
             )}
         </div>
       </div>
@@ -410,7 +410,7 @@ function SearchCard({
         {watched ? (
           <button
             type="button"
-            className="text-slate-300 hover:text-red-300 disabled:opacity-50"
+            className="text-fg-muted hover:text-red-300 disabled:opacity-50"
             onClick={onUnwatch}
             disabled={busy}
             title="Remove from your eBay watchlist and stop tracking locally"
@@ -420,7 +420,7 @@ function SearchCard({
         ) : (
           <button
             type="button"
-            className="text-slate-300 hover:text-slate-100 disabled:opacity-50"
+            className="text-fg-muted hover:text-fg disabled:opacity-50"
             onClick={onWatch}
             disabled={busy}
             title="Add to your eBay watchlist and track locally"
@@ -457,7 +457,7 @@ function FilterChips({
               className={`px-2 py-1 rounded border text-xs ${
                 active
                   ? "border-accent text-accent bg-accent/10"
-                  : "border-border text-slate-400 hover:text-slate-100"
+                  : "border-border text-fg-muted hover:text-fg"
               }`}
               onClick={() => onToggle(opt.value)}
             >

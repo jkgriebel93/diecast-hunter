@@ -402,7 +402,7 @@ export function Settings() {
     <div className="p-6 space-y-6 max-w-2xl">
       <header>
         <h2 className="text-2xl font-semibold">Settings</h2>
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-fg-subtle">
           Account credentials and sync sources.
         </p>
       </header>
@@ -410,7 +410,7 @@ export function Settings() {
       <section className="card space-y-4">
         <div>
           <h3 className="text-base font-medium">diecastregistry.com</h3>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-fg-subtle mt-1">
             Used to import your collection and the master registry. Credentials
             are stored in the Windows Credential Manager.
           </p>
@@ -431,7 +431,7 @@ export function Settings() {
             <label className="label">
               Password{" "}
               {creds?.diecastregistry_has_password && (
-                <span className="text-slate-500 normal-case">
+                <span className="text-fg-subtle normal-case">
                   (saved — leave blank to keep)
                 </span>
               )}
@@ -471,7 +471,7 @@ export function Settings() {
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-medium">Sync My Garage</div>
-              <div className="text-xs text-slate-500">
+              <div className="text-xs text-fg-subtle">
                 {lastSync
                   ? `Last synced ${new Date(
                       Number(lastSync) * 1000,
@@ -516,7 +516,7 @@ export function Settings() {
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-medium">Registry details</div>
-              <div className="text-xs text-slate-500">
+              <div className="text-xs text-fg-subtle">
                 Re-fetch detail pages for cars in your collection. Stale
                 entries (older than 30 days) refresh automatically.
               </div>
@@ -561,7 +561,7 @@ export function Settings() {
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-medium">Registry search options</div>
-              <div className="text-xs text-slate-500">
+              <div className="text-xs text-fg-subtle">
                 Cache driver / OEM / brand / scale / finish dropdown choices
                 from diecastregistry.com. Used by the "Search registry…" dialog
                 on saved listings. Refresh occasionally to pick up new
@@ -590,7 +590,7 @@ export function Settings() {
         <div className="border-t border-border pt-4 space-y-3">
           <div>
             <div className="text-sm font-medium">Pre-warm registry by driver</div>
-            <div className="text-xs text-slate-500 mt-1">
+            <div className="text-xs text-fg-subtle mt-1">
               Pull every registry entry for one driver and store them locally
               so the listing matcher has candidates to score against. Takes a
               minute or two for a prolific driver — pages are paced to be
@@ -650,7 +650,7 @@ export function Settings() {
       <section className="card space-y-4">
         <div>
           <h3 className="text-base font-medium">eBay Developers</h3>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-fg-subtle mt-1">
             App ID and Cert ID from your eBay developer keyset. Used for
             looking up item details via the Browse API. Stored in the Windows
             Credential Manager. User OAuth (for watchlist sync) comes later.
@@ -687,7 +687,7 @@ export function Settings() {
             <label className="label">
               App ID (Client ID){" "}
               {ebayCreds?.has_app_id && (
-                <span className="text-slate-500 normal-case">
+                <span className="text-fg-subtle normal-case">
                   (saved — leave blank to keep)
                 </span>
               )}
@@ -705,7 +705,7 @@ export function Settings() {
             <label className="label">
               Cert ID (Client Secret){" "}
               {ebayCreds?.has_cert_id && (
-                <span className="text-slate-500 normal-case">
+                <span className="text-fg-subtle normal-case">
                   (saved — leave blank to keep)
                 </span>
               )}
@@ -760,10 +760,10 @@ export function Settings() {
         <div className="border-t border-border pt-4 space-y-3">
           <div>
             <h4 className="text-sm font-medium">Watchlist sync (user OAuth)</h4>
-            <p className="text-xs text-slate-500 mt-1">
+            <p className="text-xs text-fg-subtle mt-1">
               Connect your eBay account so the app can read your watchlist.
               Configure a RuName on developer.ebay.com pointing to{" "}
-              <code className="text-slate-400">
+              <code className="text-fg-muted">
                 https://&lt;your-worker&gt;/ebay-oauth-callback
               </code>{" "}
               and paste the resulting RuName below.
@@ -800,11 +800,11 @@ export function Settings() {
             <div className="flex items-center justify-between rounded-md bg-bg-elevated border border-border px-3 py-2">
               <div className="text-xs">
                 <span className="text-emerald-400">✓ Connected</span>
-                <span className="text-slate-500 ml-2">
+                <span className="text-fg-subtle ml-2">
                   ({oauthStatus.environment})
                 </span>
                 {oauthStatus.access_token_expires_at && (
-                  <span className="text-slate-500 ml-2">
+                  <span className="text-fg-subtle ml-2">
                     token expires{" "}
                     {new Date(
                       oauthStatus.access_token_expires_at * 1000,
@@ -875,7 +875,7 @@ export function Settings() {
         <div className="border-t border-border pt-4 space-y-3">
           <div>
             <h4 className="text-sm font-medium">Diecast filter</h4>
-            <p className="text-xs text-slate-500 mt-1">
+            <p className="text-xs text-fg-subtle mt-1">
               Reject non-diecast eBay listings on save. Watchlist sync still
               sees them but doesn't store them; manual URL adds error out
               with a helpful message. Heuristic is a substring check on
@@ -922,7 +922,7 @@ export function Settings() {
           <h3 className="text-base font-medium">
             Browser-extension receiver
           </h3>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-fg-subtle mt-1">
             Local HTTP server (running on {receiverStatus?.url ?? "…"}) that
             the Diecast Hunter browser extension POSTs Facebook Marketplace
             listings to. Paste the URL and shared secret into the extension's

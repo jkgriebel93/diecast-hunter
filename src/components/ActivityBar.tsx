@@ -78,7 +78,7 @@ export function ActivityBar() {
   const tone = event.error
     ? "border-red-500/50 bg-red-500/10"
     : event.cancelled
-      ? "border-slate-400/40 bg-slate-500/10"
+      ? "border-fg-muted/40 bg-fg-subtle/10"
       : event.done
         ? "border-emerald-500/40 bg-emerald-500/10"
         : "border-accent/40 bg-accent/10";
@@ -94,10 +94,10 @@ export function ActivityBar() {
         {event.done && !event.error && !event.cancelled && (
           <span className="text-emerald-400 text-sm">✓</span>
         )}
-        {event.cancelled && <span className="text-slate-300 text-sm">⏹</span>}
+        {event.cancelled && <span className="text-fg-muted text-sm">⏹</span>}
         {event.error && <span className="text-red-400 text-sm">✗</span>}
         <div className="flex-1 min-w-0">
-          <div className="text-xs text-slate-200 truncate">{event.label}</div>
+          <div className="text-xs text-fg truncate">{event.label}</div>
           {pct !== null && (
             <div className="mt-1 h-1 w-full bg-bg-elevated rounded overflow-hidden">
               <div
@@ -105,7 +105,7 @@ export function ActivityBar() {
                   event.error
                     ? "bg-red-500"
                     : event.cancelled
-                      ? "bg-slate-500"
+                      ? "bg-fg-subtle"
                       : event.done
                         ? "bg-emerald-500"
                         : "bg-accent"
@@ -116,7 +116,7 @@ export function ActivityBar() {
           )}
         </div>
         {event.current !== null && event.total !== null && (
-          <div className="text-xs text-slate-400 tabular-nums shrink-0">
+          <div className="text-xs text-fg-muted tabular-nums shrink-0">
             {event.current}/{event.total}
           </div>
         )}
@@ -125,7 +125,7 @@ export function ActivityBar() {
             type="button"
             onClick={onCancel}
             disabled={cancelling}
-            className="text-xs px-2 py-1 rounded border border-border text-slate-300 hover:text-slate-100 hover:border-accent disabled:opacity-50 shrink-0"
+            className="text-xs px-2 py-1 rounded border border-border text-fg-muted hover:text-fg hover:border-accent disabled:opacity-50 shrink-0"
             title="Stop the current operation. Already-saved progress is kept."
           >
             {cancelling ? "Cancelling…" : "Cancel"}
