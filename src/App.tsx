@@ -5,6 +5,7 @@ import { Dashboard } from "@/pages/Dashboard";
 import { Collection } from "@/pages/Collection";
 import { Listings } from "@/pages/Listings";
 import { Browse } from "@/pages/Browse";
+import { Ebay } from "@/pages/Ebay";
 import { Registry } from "@/pages/Registry";
 import { Settings } from "@/pages/Settings";
 
@@ -18,6 +19,7 @@ export default function App() {
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/collection" element={<Collection />} />
+          <Route path="/ebay" element={<Ebay />} />
           <Route path="/listings" element={<Listings />} />
           <Route path="/browse" element={<Browse />} />
           <Route path="/registry" element={<Registry />} />
