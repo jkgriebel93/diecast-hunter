@@ -6,11 +6,15 @@ pub mod detail;
 pub mod form_options;
 pub mod parse;
 pub mod production_search;
+pub mod register;
 
 pub use client::DcrClient;
 pub use collection::{CollectionItem, CollectionPage};
 pub use detail::{parse_detail_page, RegistryDetail};
 pub use form_options::{refresh_form_options, RefreshOptionsSummary};
 pub use production_search::{
-    search, search_all_pages, ProductionSearchFilter, ProductionSearchResult,
+    search_all_pages_with_progress, ProductionSearchFilter, ProductionSearchResult,
+};
+pub use register::{
+    register_diecast, Condition, RegisterDiecastInput, RegisterDiecastResult,
 };

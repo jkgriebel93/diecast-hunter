@@ -75,6 +75,8 @@ export const api = {
   setSetting: (key: string, value: string) =>
     invoke<void>("set_setting", { key, value }),
   syncDcrCollection: () => invoke<SyncSummary>("sync_dcr_collection"),
+  registerDiecastInGarage: (input: RegisterDiecastInput) =>
+    invoke<RegisterDiecastSummary>("register_diecast_in_garage", { input }),
   refreshRegistryDetails: (force: boolean) =>
     invoke<EnrichSummary>("refresh_registry_details", { force }),
   listDriversWithCounts: () =>
@@ -336,6 +338,30 @@ export interface ProductionSearchResult {
 export interface LinkResult {
   registry_entry_id: number;
   enriched: boolean;
+}
+
+export type Condition =
+  | "mint"
+  | "excellent"
+  | "very_good"
+  | "good"
+  | "average"
+  | "below_average"
+  | "new";
+
+export interface RegisterDiecastInput {
+  registry_guid: string;
+  condition: Condition;
+  autographed: boolean;
+  prototype: boolean;
+  chassis_number: number | null;
+  comments: string | null;
+}
+
+export interface RegisterDiecastSummary {
+  registration_number: string;
+  registry_int_id: number;
+  refreshed_items_seen: number;
 }
 
 export interface RegistryPickerRow {

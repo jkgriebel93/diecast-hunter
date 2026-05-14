@@ -150,6 +150,20 @@ pub async fn sync_dcr_collection(
 }
 
 #[tauri::command]
+pub async fn register_diecast_in_garage(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    input: crate::dcr::RegisterDiecastInput,
+) -> AppResult<sync::RegisterDiecastSummary> {
+    let progress = ProgressEmitter::new(app, "dcr_register");
+    set_active_cancel(&state, &progress).await;
+    let result = sync::register_in_garage(&state.db.pool, &progress, input).await;
+    clear_active_cancel(&state).await;
+    finish_progress(&progress, &result, "Register diecast");
+    result
+}
+
+#[tauri::command]
 pub async fn refresh_registry_details(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
@@ -897,9 +911,24 @@ pub async fn list_registry_form_options(
 #[tauri::command]
 pub async fn search_dcr_production(
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
     filter: crate::dcr::ProductionSearchFilter,
 ) -> AppResult<Vec<crate::dcr::ProductionSearchResult>> {
-    let username = settings::get(&state.db.pool, settings::KEY_DCR_USERNAME)
+    let progress = ProgressEmitter::new(app, "registry_search");
+    set_active_cancel(&state, &progress).await;
+    let result = run_dcr_production_search(&state.db.pool, &progress, &filter).await;
+    clear_active_cancel(&state).await;
+    finish_progress(&progress, &result, "Registry search");
+    result
+}
+
+async fn run_dcr_production_search(
+    pool: &SqlitePool,
+    progress: &ProgressEmitter,
+    filter: &crate::dcr::ProductionSearchFilter,
+) -> AppResult<Vec<crate::dcr::ProductionSearchResult>> {
+    progress.step("Logging in to diecastregistry.com…", None, None);
+    let username = settings::get(pool, settings::KEY_DCR_USERNAME)
         .await?
         .ok_or_else(|| {
             AppError::NotConfigured(
@@ -914,7 +943,39 @@ pub async fn search_dcr_production(
         })?;
     let client = crate::dcr::DcrClient::new()?;
     client.login(&username, &password).await?;
-    crate::dcr::search(&client, &filter).await
+
+    let subject = resolve_search_subject(pool, filter).await;
+    let (results, _pages) = crate::dcr::search_all_pages_with_progress(
+        &client,
+        filter,
+        progress,
+        subject.as_deref(),
+    )
+    .await?;
+    progress.done(format!("Found {} results.", results.len()));
+    Ok(results)
+}
+
+/// If the filter pins exactly one driver, look up its display name so the
+/// per-page progress label reads "Fetching page X of Y for Jeff Gordon…"
+/// instead of the more generic "for the registry".
+async fn resolve_search_subject(
+    pool: &SqlitePool,
+    filter: &crate::dcr::ProductionSearchFilter,
+) -> Option<String> {
+    if filter.driver_guids.len() != 1 {
+        return None;
+    }
+    let guid = &filter.driver_guids[0];
+    sqlx::query_as::<_, (String,)>(
+        "SELECT display FROM registry_form_options WHERE field = 'driver' AND value = ?",
+    )
+    .bind(guid)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .map(|(d,)| d)
 }
 
 #[tauri::command]

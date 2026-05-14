@@ -103,6 +103,19 @@ impl DcrClient {
     /// Fetches a path and returns the response body, with rate limiting and
     /// retry-with-backoff for transient errors.
     pub async fn get_html(&self, path: &str) -> AppResult<String> {
+        self.get_html_inner(path, false).await
+    }
+
+    /// Like `get_html`, but marks the request as an XHR call by setting the
+    /// `X-Requested-With` header and an Accept header that matches what
+    /// jQuery sends. DCR's MVC controllers gate certain partial-view actions
+    /// (e.g. `/MyGarage/RegisterDiecast/{id}`) on `Request.IsAjaxRequest()` —
+    /// they return the modal HTML for AJAX callers and 404 everyone else.
+    pub async fn get_html_xhr(&self, path: &str) -> AppResult<String> {
+        self.get_html_inner(path, true).await
+    }
+
+    async fn get_html_inner(&self, path: &str, xhr: bool) -> AppResult<String> {
         let url = if path.starts_with("http") {
             path.to_string()
         } else {
@@ -114,29 +127,52 @@ impl DcrClient {
 
         for attempt in 0..=MAX_RETRIES {
             self.wait_for_slot().await;
-            match self.http.get(&url).send().await {
-                Ok(resp) => match resp.error_for_status() {
-                    Ok(ok) => return Ok(ok.text().await?),
-                    Err(e) => {
-                        let status = e.status();
-                        if attempt < MAX_RETRIES && is_retryable_status(status) {
-                            tracing::warn!(
-                                "retryable {}: {} for {} (attempt {}/{}) — sleeping {:?}",
-                                status.map(|s| s.as_u16()).unwrap_or(0),
-                                e,
-                                url,
-                                attempt + 1,
-                                MAX_RETRIES,
-                                backoff,
-                            );
-                            tokio::time::sleep(backoff).await;
-                            backoff *= 2;
-                            last_err = Some(e.into());
-                            continue;
-                        }
-                        return Err(e.into());
+            tracing::debug!("GET {url} (attempt {}, xhr={xhr})", attempt + 1);
+            let mut req = self.http.get(&url);
+            if xhr {
+                req = req
+                    .header("X-Requested-With", "XMLHttpRequest")
+                    .header(
+                        reqwest::header::ACCEPT,
+                        "text/html, */*; q=0.01",
+                    );
+            }
+            match req.send().await {
+                Ok(resp) => {
+                    let status = resp.status();
+                    let final_url = resp.url().clone();
+                    let set_cookies: Vec<String> = resp
+                        .headers()
+                        .get_all(reqwest::header::SET_COOKIE)
+                        .iter()
+                        .filter_map(|v| v.to_str().ok().map(|s| s.to_string()))
+                        .collect();
+                    if status.is_success() {
+                        let body = resp.text().await?;
+                        tracing::debug!(
+                            "GET {url} → {status} (final: {final_url}); {} bytes; set_cookies={:?}",
+                            body.len(),
+                            cookie_names(&set_cookies)
+                        );
+                        return Ok(body);
                     }
-                },
+                    let body = resp.text().await.unwrap_or_default();
+                    let body_excerpt = excerpt(&body, 300);
+                    tracing::warn!(
+                        "GET {url} → {status} (final: {final_url}); body[0..300]: {body_excerpt}"
+                    );
+                    if attempt < MAX_RETRIES && is_retryable_status(Some(status)) {
+                        tokio::time::sleep(backoff).await;
+                        backoff *= 2;
+                        last_err = Some(AppError::Network(format!(
+                            "HTTP {status} for {final_url}"
+                        )));
+                        continue;
+                    }
+                    return Err(AppError::Network(format!(
+                        "HTTP {status} for {final_url}; body: {body_excerpt}"
+                    )));
+                }
                 Err(e) => {
                     if attempt < MAX_RETRIES && is_retryable_network_err(&e) {
                         tracing::warn!(
@@ -189,32 +225,75 @@ impl DcrClient {
         let mut last_err: Option<AppError> = None;
         for attempt in 0..=MAX_RETRIES {
             self.wait_for_slot().await;
+            let field_summary: Vec<String> = form
+                .iter()
+                .map(|(k, v)| {
+                    if k == "__RequestVerificationToken" {
+                        format!("{k}=<{} chars>", v.len())
+                    } else {
+                        format!("{k}={}", excerpt(v, 60))
+                    }
+                })
+                .collect();
+            tracing::debug!(
+                "POST {url} (attempt {}); referer={referer}; fields=[{}]",
+                attempt + 1,
+                field_summary.join(", ")
+            );
             let resp = self
                 .http
                 .post(&url)
                 .header(reqwest::header::REFERER, &referer)
+                .header(reqwest::header::ORIGIN, BASE)
                 .header("X-Requested-With", "XMLHttpRequest")
                 .header(
                     reqwest::header::ACCEPT,
                     "application/json, text/javascript, */*; q=0.01",
                 )
+                .header("Sec-Fetch-Site", "same-origin")
+                .header("Sec-Fetch-Mode", "cors")
+                .header("Sec-Fetch-Dest", "empty")
                 .form(form)
                 .send()
                 .await;
             match resp {
-                Ok(resp) => match resp.error_for_status() {
-                    Ok(ok) => return Ok(ok.text().await?),
-                    Err(e) => {
-                        let status = e.status();
-                        if attempt < MAX_RETRIES && is_retryable_status(status) {
-                            tokio::time::sleep(backoff).await;
-                            backoff *= 2;
-                            last_err = Some(e.into());
-                            continue;
-                        }
-                        return Err(e.into());
+                Ok(resp) => {
+                    let status = resp.status();
+                    let final_url = resp.url().clone();
+                    let set_cookies: Vec<String> = resp
+                        .headers()
+                        .get_all(reqwest::header::SET_COOKIE)
+                        .iter()
+                        .filter_map(|v| v.to_str().ok().map(|s| s.to_string()))
+                        .collect();
+                    if status.is_success() {
+                        let body = resp.text().await?;
+                        tracing::debug!(
+                            "POST {url} → {status} (final: {final_url}); {} bytes; set_cookies={:?}; body[0..300]: {}",
+                            body.len(),
+                            cookie_names(&set_cookies),
+                            excerpt(&body, 300)
+                        );
+                        return Ok(body);
                     }
-                },
+                    let body = resp.text().await.unwrap_or_default();
+                    let body_excerpt = excerpt(&body, 300);
+                    tracing::warn!(
+                        "POST {url} → {status} (final: {final_url}); set_cookies={:?}; body[0..300]: {body_excerpt}",
+                        cookie_names(&set_cookies)
+                    );
+                    if attempt < MAX_RETRIES && is_retryable_status(Some(status)) {
+                        tokio::time::sleep(backoff).await;
+                        backoff *= 2;
+                        last_err = Some(AppError::Network(format!(
+                            "HTTP {status} for {final_url}"
+                        )));
+                        continue;
+                    }
+                    return Err(AppError::Network(format!(
+                        "HTTP {status} for {final_url}; body: {body_excerpt}"
+                    )));
+                }
                 Err(e) => {
                     if attempt < MAX_RETRIES && is_retryable_network_err(&e) {
                         tokio::time::sleep(backoff).await;
@@ -289,4 +368,26 @@ fn looks_like_login_page(html: &str) -> bool {
     let doc = Html::parse_document(html);
     let sel = Selector::parse(r#"form[action="/Account/Login"]"#).unwrap();
     doc.select(&sel).next().is_some()
+}
+
+/// Compact first-N-chars excerpt with internal whitespace collapsed. Used in
+/// log lines so a single response doesn't blow up the log with HTML indents.
+fn excerpt(s: &str, n: usize) -> String {
+    s.chars()
+        .take(n)
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Pulls just the cookie names from raw Set-Cookie header values. We don't
+/// want to log values — those include session secrets — but the names tell
+/// us whether the server refreshed the anti-forgery / auth cookies on this
+/// request.
+fn cookie_names(set_cookies: &[String]) -> Vec<String> {
+    set_cookies
+        .iter()
+        .filter_map(|c| c.split('=').next().map(|n| n.trim().to_string()))
+        .collect()
 }

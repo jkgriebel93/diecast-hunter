@@ -26,12 +26,7 @@ pub struct AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    init_tracing();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -67,6 +62,7 @@ pub fn run() {
             commands::get_setting,
             commands::set_setting,
             commands::sync_dcr_collection,
+            commands::register_diecast_in_garage,
             commands::refresh_registry_details,
             commands::list_drivers_with_counts,
             commands::list_collection_for_driver,
@@ -123,4 +119,57 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Initialize tracing with two sinks:
+///   - stderr (existing behavior, useful when running `pnpm tauri dev`)
+///   - a rolling log file in the app data dir
+///
+/// The file sink is gated on `RUST_LOG` like the stderr sink, but defaults
+/// to `debug,sqlx=warn,hyper=info,reqwest=info` so DCR/eBay HTTP calls are
+/// captured without firehose-level dependency noise.
+fn init_tracing() {
+    use tracing_subscriber::{
+        fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer,
+    };
+
+    let stderr_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+    // html5ever/selectors emit a DEBUG event for every HTML character token
+    // during scraping — leaving them at default fills the log file with
+    // multi-MB of parser noise per registry search. Pin them at WARN.
+    let file_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        EnvFilter::new(
+            "debug,sqlx=warn,hyper=info,reqwest=info,html5ever=warn,selectors=warn",
+        )
+    });
+
+    // Resolve the log directory; fall back to stderr-only if we can't.
+    let log_dir = db::default_data_dir().ok().map(|d| d.join("logs"));
+
+    let file_layer = log_dir.as_ref().and_then(|dir| {
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            eprintln!("could not create log dir {dir:?}: {e}");
+            return None;
+        }
+        let appender = tracing_appender::rolling::daily(dir, "diecast-hunter.log");
+        Some(
+            fmt::layer()
+                .with_ansi(false)
+                .with_writer(appender)
+                .with_filter(file_filter),
+        )
+    });
+
+    let stderr_layer = fmt::layer().with_writer(std::io::stderr).with_filter(stderr_filter);
+
+    let registry = tracing_subscriber::registry().with(stderr_layer);
+    if let Some(file_layer) = file_layer {
+        registry.with(file_layer).init();
+        if let Some(dir) = log_dir {
+            eprintln!("diecast-hunter: log file → {}", dir.display());
+        }
+    } else {
+        registry.init();
+    }
 }
