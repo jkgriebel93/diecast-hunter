@@ -2,11 +2,22 @@ import { useEffect, useState } from "react";
 import {
   api,
   formatCents,
+  type Condition,
   type FormOptionRow,
   type ProductionSearchResult,
 } from "@/lib/tauri";
 
 const DCR_BASE = "https://www.diecastregistry.com";
+
+const CONDITION_OPTIONS: { value: Condition; label: string }[] = [
+  { value: "mint", label: "Mint" },
+  { value: "excellent", label: "Excellent" },
+  { value: "very_good", label: "Very Good" },
+  { value: "good", label: "Good" },
+  { value: "average", label: "Average" },
+  { value: "below_average", label: "Below Average" },
+  { value: "new", label: "New" },
+];
 
 /**
  * Standalone search against diecastregistry.com's /Production listing.
@@ -34,6 +45,8 @@ export function Registry() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+
+  const [addTarget, setAddTarget] = useState<ProductionSearchResult | null>(null);
 
   useEffect(() => {
     void loadOptions();
@@ -334,16 +347,26 @@ export function Registry() {
                       production qty {r.seq_produced_total.toLocaleString()}
                     </div>
                   )}
-                  {r.detail_url && (
-                    <a
-                      className="text-xs text-accent hover:underline mt-1 inline-block"
-                      href={DCR_BASE + r.detail_url}
-                      target="_blank"
-                      rel="noreferrer"
+                  <div className="flex items-center gap-3 mt-1">
+                    {r.detail_url && (
+                      <a
+                        className="text-xs text-accent hover:underline"
+                        href={DCR_BASE + r.detail_url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        View on diecastregistry.com →
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      className="text-xs text-accent hover:underline"
+                      onClick={() => setAddTarget(r)}
+                      title="Register this diecast to your diecastregistry.com garage"
                     >
-                      View on diecastregistry.com →
-                    </a>
-                  )}
+                      + Add to garage
+                    </button>
+                  </div>
                 </div>
                 <div className="text-right text-xs tabular-nums shrink-0 space-y-0.5">
                   <div className="text-base text-fg">
@@ -358,6 +381,215 @@ export function Registry() {
           </ul>
         </>
       )}
+
+      {addTarget && (
+        <AddToGarageModal
+          target={addTarget}
+          onClose={() => setAddTarget(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function AddToGarageModal({
+  target,
+  onClose,
+}: {
+  target: ProductionSearchResult;
+  onClose: () => void;
+}) {
+  const [condition, setCondition] = useState<Condition>("mint");
+  const [autographed, setAutographed] = useState(false);
+  const [prototype, setPrototype] = useState(false);
+  const [chassisNumber, setChassisNumber] = useState("");
+  const [comments, setComments] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<{
+    registration_number: string;
+    registry_int_id: number;
+  } | null>(null);
+
+  // The search results don't tell us whether a diecast is sequentially
+  // numbered — the backend detects that from the registration form HTML.
+  // We always show the chassis field; the backend ignores it for NSN items
+  // and requires it for sequentially-numbered ones (unless prototype=true).
+  const isProduced = target.seq_produced_total !== null && target.seq_produced_total > 1;
+
+  async function onSubmit() {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const trimmedChassis = chassisNumber.trim();
+      const parsedChassis =
+        trimmedChassis === "" ? null : Number(trimmedChassis);
+      if (
+        parsedChassis !== null &&
+        (!Number.isInteger(parsedChassis) || parsedChassis <= 0)
+      ) {
+        setError("Chassis number must be a positive integer.");
+        setSubmitting(false);
+        return;
+      }
+      const summary = await api.registerDiecastInGarage({
+        registry_guid: target.registry_guid,
+        condition,
+        autographed,
+        prototype,
+        chassis_number: parsedChassis,
+        comments: comments.trim() === "" ? null : comments.trim(),
+      });
+      setSuccess({
+        registration_number: summary.registration_number,
+        registry_int_id: summary.registry_int_id,
+      });
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !submitting) onClose();
+      }}
+    >
+      <div className="card w-full max-w-md space-y-3" role="dialog" aria-modal="true">
+        <header>
+          <h3 className="text-lg font-semibold">Add to My Garage</h3>
+          <div className="text-xs text-fg-muted mt-0.5">
+            {target.driver_name}
+            {target.year !== null && (
+              <span className="ml-2 text-fg-subtle">{target.year}</span>
+            )}
+          </div>
+          {target.scheme_text && (
+            <div className="text-xs text-fg-subtle truncate">
+              {target.scheme_text}
+            </div>
+          )}
+        </header>
+
+        {success ? (
+          <div className="space-y-3">
+            <div className="text-sm text-emerald-400">
+              ✓ Added to your garage.
+            </div>
+            <div className="text-sm">
+              DCR registration number:{" "}
+              <span className="font-mono tabular-nums">
+                {success.registration_number}
+              </span>
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={onClose}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div>
+              <label className="label">Condition</label>
+              <select
+                className="input"
+                value={condition}
+                onChange={(e) => setCondition(e.target.value as Condition)}
+                disabled={submitting}
+              >
+                {CONDITION_OPTIONS.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <label className="inline-flex items-center gap-2 text-xs text-fg-muted">
+                <input
+                  type="checkbox"
+                  checked={autographed}
+                  onChange={(e) => setAutographed(e.target.checked)}
+                  disabled={submitting}
+                />
+                Autographed
+              </label>
+              <label className="inline-flex items-center gap-2 text-xs text-fg-muted">
+                <input
+                  type="checkbox"
+                  checked={prototype}
+                  onChange={(e) => setPrototype(e.target.checked)}
+                  disabled={submitting}
+                />
+                Prototype
+              </label>
+            </div>
+
+            {isProduced && !prototype && (
+              <div>
+                <label className="label">DIN / Chassis number</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  className="input"
+                  value={chassisNumber}
+                  onChange={(e) => setChassisNumber(e.target.value)}
+                  placeholder={`1 of ${target.seq_produced_total ?? "—"}`}
+                  disabled={submitting}
+                />
+                <div className="text-xs text-fg-subtle mt-0.5">
+                  Required for sequentially-numbered diecasts. Leave blank if
+                  this isn't sequentially numbered — the registry will tell us.
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label className="label">Comments (optional)</label>
+              <textarea
+                className="input"
+                rows={2}
+                maxLength={4000}
+                value={comments}
+                onChange={(e) => setComments(e.target.value)}
+                disabled={submitting}
+              />
+            </div>
+
+            {error && (
+              <div className="text-xs text-red-400">{error}</div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={onClose}
+                disabled={submitting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={onSubmit}
+                disabled={submitting}
+              >
+                {submitting ? "Adding…" : "Add to garage"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

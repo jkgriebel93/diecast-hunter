@@ -50,7 +50,7 @@ pub async fn sync_dcr_collection_and_enrich(
     Ok(summary)
 }
 
-async fn load_credentials(pool: &SqlitePool) -> AppResult<(String, String)> {
+pub(crate) async fn load_credentials(pool: &SqlitePool) -> AppResult<(String, String)> {
     let username = settings::get(pool, settings::KEY_DCR_USERNAME)
         .await?
         .ok_or_else(|| {
@@ -112,6 +112,28 @@ async fn run_collection_sync(
     )
     .await?;
 
+    Ok(summary)
+}
+
+/// Pull just page 1 of /MyGarage and upsert into the local DB. Used by the
+/// register-diecast flow to refresh the local collection after adding an
+/// item — the newly registered diecast sorts to the top of /MyGarage, so
+/// one page is enough to pick it up.
+pub(crate) async fn sync_first_page(
+    pool: &SqlitePool,
+    client: &DcrClient,
+    progress: &ProgressEmitter,
+) -> AppResult<SyncSummary> {
+    progress.check_cancelled()?;
+    progress.step("Refreshing My Garage page 1…", Some(1), Some(1));
+    let mut summary = SyncSummary::default();
+    let html = client.get_html("/MyGarage").await?;
+    let page: CollectionPage = crate::dcr::collection::parse_collection_page(&html)?;
+    summary.pages_fetched = 1;
+    summary.items_seen = page.items.len() as u32;
+    for item in &page.items {
+        persist_item(pool, item, &mut summary).await?;
+    }
     Ok(summary)
 }
 

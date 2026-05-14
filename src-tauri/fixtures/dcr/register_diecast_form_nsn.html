@@ -1,0 +1,131 @@
+<div id="register-diecast-dlg-content" class="modal-content">
+    <div class="modal-header modal-header-primary">
+        <button type="button" class="close" data-dismiss="modal" aria-hidden="true">×</button>
+        <h4 class="modal-title"><i class="fa fa-plus-square"></i> Add Diecast to My Garage</h4>
+    </div>
+    <div class="modal-body">
+        <div id="xhr-dialog" class="alert alert-danger hidden"></div>
+        <div class="validation-info-panel valid panel small" data-default-message="Your information could not be submitted. Please correct the errors before continuing."><span></span></div>
+        <div class="validation-summary-valid text-warning panel small" data-valmsg-summary="true"><span>Your information could not be submitted. Please fix the errors below before continuing.</span>
+<ul><li style="display:none"></li>
+</ul></div>
+        <div class="row">
+            <div id="collectible-content" class="col-md-6">
+                <img class="img-rounded img-responsive" src="/Uploads/Collectibles/21-Kevin-Harvick-Diecast-2005-Reeses-Honey-Roasted-CWC-124-Action-ARC-1.jpg">
+                <div class="collectible-driver">Kevin Harvick</div>
+                <div class="collectible-details">
+                    #21 Reeses Honey Roasted 2003 Chevy Monte Carlo<br>2005 Action / Lionel ARC 1:24 CWC
+                    <span class="seq-produced">
+                                                <span>(2340)</span>
+
+                    </span>
+                </div>
+            </div>
+            <div id="form-content" class="col-sm-6 col-md-6">
+
+
+<form action="/MyGarage/RegisterDiecast/6286b1ca-8884-466e-943a-ddd531d992cc" class="form-vertical" id="register-diecast-form" method="post" role="form" novalidate="novalidate"><input name="__RequestVerificationToken" type="hidden" value="j_k5lIevhJ7ON2KWICWuyZkpw3hADg5G8QZeCQ3gXBSSkklnv5VziH3ch3wT21jRkMihftCXeAJz1PjIyqOol0OQWNeFmPhU7lMaHuAUXnWEI_ZWJ_HyG7PlzX_1I0w96b1-jc75zOSHESMDSWZFpA2">        <h4>NSN Collectible</h4>
+        <p class="small">The diecast you are adding to your garage is not sequentially numbered.</p>
+    <div id="condition" class="form-group">
+        <label class="control-label required" for="ConditionId" aria-required="true">Condition</label><br>
+        <p class="small">Please select an option that best describes your diecast's condition.</p>
+        <select class="form-control" data-url="/MyGarage/GetCondition" data-val="true" data-val-required="Please select a condition for this diecast." id="ConditionId" name="ConditionId"><option selected="selected" value="c84378d8-1ee5-4c24-a432-fe54397cb7d1">Mint</option>
+<option value="65f9215a-7d09-48f4-b603-3f11f337d823">Excellent</option>
+<option value="d10edcc7-6bab-476f-be81-74384e5ce9ab">Very Good</option>
+<option value="184f0a77-9608-42e0-9209-6f3cbe5b5803">Good</option>
+<option value="a27aaf01-c0c3-44b0-a67d-5879942c0e2e">Average</option>
+<option value="05030c2c-4d3e-494a-a586-57cd96ef7af6">Below Average</option>
+<option value="03ca91c4-3fd2-4eee-9800-37ceffd8d268">New</option>
+</select>
+        <div class="option-text small"><span><em>No chassis defects, blemishes, or scratches viewable upon very close inspection</em></span></div>
+        <span class="field-validation-valid" data-valmsg-for="ConditionId" data-valmsg-replace="true"></span>
+    </div>
+        <div class="form-group">
+            <label for="IsAutographed">Is your diecast autographed?</label>
+            <div class="autographed">
+                <div class="radio radio-primary radio-inline">
+                    <input data-val="true" data-val-required="The Is your diecast autographed? field is required." id="IsAutographed" name="IsAutographed" type="radio" value="True">
+                    <label for="IsAutographed">Yes</label>
+                </div>
+                <div class="radio radio-primary radio-inline">
+                    <input checked="checked" id="IsAutographedFalse" name="IsAutographed" type="radio" value="False">
+                    <label for="IsAutographedFalse">No</label>
+                </div>
+            </div>
+        </div>
+    <div class="form-group">
+        <label for="IsPrototype">Is your diecast a prototype?</label>
+        <div class="prototype">
+            <div class="radio radio-primary radio-inline">
+                <input data-val="true" data-val-required="The Is your diecast a prototype? field is required." id="IsPrototype" name="IsPrototype" type="radio" value="True">
+                <label for="IsPrototype">Yes</label>
+            </div>
+            <div class="radio radio-primary radio-inline">
+                <input checked="checked" id="IsPrototypeFalse" name="IsPrototype" type="radio" value="False">
+                <label for="IsPrototypeFalse">No</label>
+            </div>
+        </div>
+    </div>
+    <div id="for-sale" class="form-group">
+            <span class="text-danger"><i class="fa fa-exclamation-triangle"></i>&nbsp;</span>
+        <label for="IsForSale">Is your diecast for sale?</label>
+        <div class="form-group is-for-sale">
+            <div class="radio radio-primary radio-inline">
+                <input data-val="true" data-val-required="The Is your diecast for sale? field is required." disabled="disabled" id="IsForSale" name="IsForSale" type="radio" value="True">
+                <label for="IsForSale">Yes</label>
+            </div>
+            <div class="radio radio-primary radio-inline">
+                <input checked="checked" disabled="disabled" id="IsForSaleFalse" name="IsForSale" type="radio" value="False">
+                <label for="IsForSaleFalse">No</label>
+            </div>
+        </div>
+
+        <div class="for-sale-prices collapse">
+            <div class="form-group">
+                <div><label class="control-label" for="AskingPrice">Enter the sale price</label></div>
+                <div class="input-group">
+                    <span class="input-group-addon"><i class="fa fa-dollar"></i></span>
+                    <input class="form-control" data-val="true" data-val-number="The field Enter the sale price must be a number." data-val-range="Please enter an asking price of $1.00 or higher" data-val-range-max="1.79769313486232E+308" data-val-range-min="1" data-val-requiredif="You must provide a sale price if your diecast is &quot;For Sale&quot;." data-val-requiredif-dependentproperty="IsForSale" data-val-requiredif-dependentvalue="True" data-val-requiredif-operator="EqualTo" id="AskingPrice" name="AskingPrice" type="text" value="">
+                    <span class="input-group-addon"> USD</span>
+                </div>
+                <span class="field-validation-valid" data-valmsg-for="AskingPrice" data-valmsg-replace="true"></span>
+            </div>
+
+            <div class="form-group">
+                <div><label class="control-label" for="Shipping">Enter a flat shipping cost</label></div>
+                <div class="input-group">
+                    <span class="input-group-addon"><i class="fa fa-dollar"></i></span>
+                    <input class="form-control" data-val="true" data-val-number="The field Enter a flat shipping cost must be a number." data-val-range="The shipping amount cannot be less than $0.00" data-val-range-max="1.79769313486232E+308" data-val-range-min="0" data-val-requiredif="A shipping amount is required if your diecast is &quot;For Sale&quot;." data-val-requiredif-dependentproperty="IsForSale" data-val-requiredif-dependentvalue="True" data-val-requiredif-operator="EqualTo" id="Shipping" name="Shipping" type="text" value="">
+                    <span class="input-group-addon"> USD</span>
+                </div>
+                <span class="field-validation-valid" data-valmsg-for="Shipping" data-valmsg-replace="true"></span>
+            </div>
+        </div>
+    </div>
+    <div class="form-group">
+        <div class="field-description">
+            <label class="control-label" for="Details">Comments</label>
+        </div>
+        <div><textarea class="form-control fluid text-area-sm" cols="20" id="Details" maxlength="4000" name="Details" rows="2"></textarea></div>
+    </div></form>
+            </div>
+        </div> <!-- .row -->
+            <div class="row">
+                <div class="col-sm-12">
+                        <div class="alert alert-danger">
+                            <ul class="fa-ul">
+                                <li><i class="fa fa-exclamation-triangle fa-lg fa-li"></i></li>
+                                <li>You must have a valid mailing address, phone number, PayPal ID, and a Terms of Sale in your profile before you can list a diecast for sale.</li>
+                            </ul>
+                        </div>
+                </div>
+            </div>
+
+    </div> <!-- .modal-body -->
+    <div class="modal-footer">
+        <div class="form-buttons dlg-buttons pull-right">
+            <button id="btnSubmit" class="btn btn-primary" type="submit">Add Diecast to My Garage</button>
+            <button id="btnCancel" class="btn btn-default" type="button" data-dismiss="modal">Cancel</button>
+        </div>
+    </div> <!-- .modal-footer -->
+</div>

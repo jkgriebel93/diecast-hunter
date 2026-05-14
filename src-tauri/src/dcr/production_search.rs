@@ -23,6 +23,7 @@ use crate::dcr::parse::{
 };
 use crate::dcr::DcrClient;
 use crate::error::{AppError, AppResult};
+use crate::progress::ProgressEmitter;
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
@@ -79,28 +80,20 @@ struct UpdateFilterResponse {
     url: String,
 }
 
-pub async fn search(
+/// Run a /Production search, walking every page of results (capped at 200
+/// pages as a safety net) and emitting per-page progress events via the
+/// supplied emitter. `subject` is interpolated into progress labels — pass
+/// `Some("Jeff Gordon")` for driver-scoped searches, `None` for generic
+/// searches. Pass `ProgressEmitter::null(...)` when events aren't desired.
+pub async fn search_all_pages_with_progress(
     client: &DcrClient,
     filter: &ProductionSearchFilter,
-) -> AppResult<Vec<ProductionSearchResult>> {
-    let (results, _pages) = search_all_pages_capped(client, filter, 1).await?;
-    Ok(results)
-}
-
-/// Walk every page of results for the given filter (capped at 200 pages
-/// for safety). Returns (results, pages_fetched).
-pub async fn search_all_pages(
-    client: &DcrClient,
-    filter: &ProductionSearchFilter,
+    progress: &ProgressEmitter,
+    subject: Option<&str>,
 ) -> AppResult<(Vec<ProductionSearchResult>, u32)> {
-    search_all_pages_capped(client, filter, 200).await
-}
+    progress.check_cancelled()?;
+    progress.step("Applying filter…", None, None);
 
-async fn search_all_pages_capped(
-    client: &DcrClient,
-    filter: &ProductionSearchFilter,
-    max_pages: u32,
-) -> AppResult<(Vec<ProductionSearchResult>, u32)> {
     // 1. GET /Production for the form anti-forgery token.
     let initial = client.get_html("/Production").await?;
     let token = extract_form_token(&initial).ok_or_else(|| {
@@ -128,14 +121,27 @@ async fn search_all_pages_capped(
         crate::dcr::parse::parse_pagination(&first_doc)
     };
 
+    let suffix = subject
+        .map(|s| format!(" for {s}"))
+        .unwrap_or_default();
+    progress.step(
+        format!("Fetching page 1 of {total}{suffix}…"),
+        Some(1),
+        Some(total),
+    );
+
     let mut all_results = parse_results(&first_page_html);
     let mut pages_fetched = 1u32;
 
-    let stop_at = total.min(max_pages.max(1));
+    let stop_at = total.min(200);
     for page in (current + 1)..=stop_at {
-        let html = client
-            .get_html(&format!("/Production/{page}"))
-            .await?;
+        progress.check_cancelled()?;
+        progress.step(
+            format!("Fetching page {page} of {total}{suffix}…"),
+            Some(page),
+            Some(total),
+        );
+        let html = client.get_html(&format!("/Production/{page}")).await?;
         let mut more = parse_results(&html);
         all_results.append(&mut more);
         pages_fetched += 1;

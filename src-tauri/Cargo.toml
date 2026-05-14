@@ -29,6 +29,7 @@ thiserror = "1"
 keyring = { version = "3", features = ["windows-native", "apple-native", "sync-secret-service", "crypto-rust"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
 chrono = { version = "0.4", features = ["serde"] }
 directories = "5"
 reqwest = { version = "0.12", default-features = false, features = ["native-tls", "cookies", "gzip", "stream"] }
