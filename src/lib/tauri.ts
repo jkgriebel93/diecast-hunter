@@ -137,17 +137,10 @@ export const api = {
   rematchAllListings: () => invoke<MatchSummary>("rematch_all_listings"),
   confirmListingMatch: (listingId: number) =>
     invoke<void>("confirm_listing_match", { listingId }),
-  setListingMatch: (listingId: number, registryEntryId: number) =>
-    invoke<void>("set_listing_match", { listingId, registryEntryId }),
   clearListingMatch: (listingId: number) =>
     invoke<void>("clear_listing_match", { listingId }),
   rejectListingMatch: (listingId: number) =>
     invoke<void>("reject_listing_match", { listingId }),
-  searchRegistryForMatch: (query: string, limit: number) =>
-    invoke<RegistryPickerRow[]>("search_registry_for_match", {
-      query,
-      limit,
-    }),
   refreshRegistryFormOptions: () =>
     invoke<RefreshOptionsSummary>("refresh_registry_form_options"),
   listRegistryFormOptions: (field: string) =>
@@ -362,19 +355,6 @@ export interface RegisterDiecastSummary {
   registration_number: string;
   registry_int_id: number;
   refreshed_items_seen: number;
-}
-
-export interface RegistryPickerRow {
-  id: number;
-  driver_name: string | null;
-  year: number | null;
-  year_raced: number | null;
-  scheme_text: string | null;
-  oem: string | null;
-  brand: string | null;
-  scale: string | null;
-  retail_value_cents: number | null;
-  wholesale_value_cents: number | null;
 }
 
 export interface WatchlistSyncSummary {

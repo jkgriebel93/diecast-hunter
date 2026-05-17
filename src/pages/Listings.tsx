@@ -8,7 +8,6 @@ import {
   type ProductionSearchResult,
   type ReceivedOffer,
   type RefreshSummary,
-  type RegistryPickerRow,
   type WatchlistSyncSummary,
 } from "@/lib/tauri";
 
@@ -37,7 +36,6 @@ export function Listings() {
   >(new Map());
 
   const [viewMode, setViewMode] = useState<ViewMode>("flat");
-  const [pickerListing, setPickerListing] = useState<ListingRow | null>(null);
   const [registrySearchListing, setRegistrySearchListing] =
     useState<ListingRow | null>(null);
 
@@ -315,20 +313,6 @@ export function Listings() {
     sortMode,
   ]);
 
-  async function onPickRegistryEntry(
-    listingId: number,
-    registryEntryId: number,
-  ) {
-    setError(null);
-    try {
-      await api.setListingMatch(listingId, registryEntryId);
-      setPickerListing(null);
-      await load();
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-
   return (
     <div className="p-6 space-y-4">
       <header className="flex items-end justify-between">
@@ -555,8 +539,7 @@ export function Listings() {
               onConfirmMatch={() => onConfirmMatch(r.listing_id)}
               onClearMatch={() => onClearMatch(r.listing_id)}
               onRejectMatch={() => onRejectMatch(r.listing_id)}
-              onChangeMatch={() => setPickerListing(r)}
-              onSearchRegistry={() => setRegistrySearchListing(r)}
+              onChangeMatch={() => setRegistrySearchListing(r)}
             />
           ))}
         </ul>
@@ -571,18 +554,7 @@ export function Listings() {
           onConfirmMatch={onConfirmMatch}
           onClearMatch={onClearMatch}
           onRejectMatch={onRejectMatch}
-          onChangeMatch={setPickerListing}
-          onSearchRegistry={setRegistrySearchListing}
-        />
-      )}
-
-      {pickerListing && (
-        <MatchPicker
-          listing={pickerListing}
-          onClose={() => setPickerListing(null)}
-          onPick={(entryId) =>
-            onPickRegistryEntry(pickerListing.listing_id, entryId)
-          }
+          onChangeMatch={setRegistrySearchListing}
         />
       )}
 
@@ -611,7 +583,6 @@ function ListingCard({
   onClearMatch,
   onRejectMatch,
   onChangeMatch,
-  onSearchRegistry,
 }: {
   row: ListingRow;
   offer: ReceivedOffer | undefined;
@@ -623,7 +594,6 @@ function ListingCard({
   onClearMatch: () => void;
   onRejectMatch: () => void;
   onChangeMatch: () => void;
-  onSearchRegistry: () => void;
 }) {
   const total =
     row.price_cents !== null
@@ -760,16 +730,9 @@ function ListingCard({
             className="text-xs text-fg-muted hover:text-fg"
             type="button"
             onClick={onChangeMatch}
+            title="Search the diecastregistry.com catalog and link a result to this listing"
           >
             {matched ? "Change match…" : "Match…"}
-          </button>
-          <button
-            className="text-xs text-fg-muted hover:text-fg"
-            type="button"
-            onClick={onSearchRegistry}
-            title="Search the full diecastregistry.com registry"
-          >
-            Search registry…
           </button>
           {matched && (
             <button
@@ -869,7 +832,6 @@ function GroupedByDriver({
   onClearMatch,
   onRejectMatch,
   onChangeMatch,
-  onSearchRegistry,
 }: {
   rows: ListingRow[];
   offersByItemId: Map<string, ReceivedOffer>;
@@ -881,7 +843,6 @@ function GroupedByDriver({
   onClearMatch: (id: number) => void;
   onRejectMatch: (id: number) => void;
   onChangeMatch: (row: ListingRow) => void;
-  onSearchRegistry: (row: ListingRow) => void;
 }) {
   // Bucket by driver name; matched first, then "Unmatched" / "No-match" at
   // the bottom.
@@ -934,7 +895,6 @@ function GroupedByDriver({
                     onClearMatch={() => onClearMatch(r.listing_id)}
                     onRejectMatch={() => onRejectMatch(r.listing_id)}
                     onChangeMatch={() => onChangeMatch(r)}
-                    onSearchRegistry={() => onSearchRegistry(r)}
                   />
                 </li>
               ))}
@@ -942,128 +902,6 @@ function GroupedByDriver({
           </details>
         );
       })}
-    </div>
-  );
-}
-
-function MatchPicker({
-  listing,
-  onClose,
-  onPick,
-}: {
-  listing: ListingRow;
-  onClose: () => void;
-  onPick: (registryEntryId: number) => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<RegistryPickerRow[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [pickerError, setPickerError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    const handle = setTimeout(async () => {
-      try {
-        const r = await api.searchRegistryForMatch(query, 100);
-        if (!cancelled) setResults(r);
-      } catch (e) {
-        if (!cancelled) setPickerError(String(e));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }, 150);
-    return () => {
-      cancelled = true;
-      clearTimeout(handle);
-    };
-  }, [query]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-16 px-4 bg-black/60"
-      onClick={onClose}
-    >
-      <div
-        className="card w-full max-w-2xl max-h-[80vh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between mb-3">
-          <div className="min-w-0">
-            <h3 className="text-base font-medium">Match listing</h3>
-            <p
-              className="text-xs text-fg-subtle mt-0.5 truncate"
-              title={listing.title}
-            >
-              {listing.title}
-            </p>
-          </div>
-          <button
-            type="button"
-            className="text-fg-muted hover:text-fg text-xl leading-none px-2"
-            onClick={onClose}
-          >
-            ×
-          </button>
-        </div>
-
-        <input
-          autoFocus
-          type="text"
-          className="input mb-3"
-          placeholder="Search by driver, year, scheme, OEM, brand…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-
-        <div className="flex-1 overflow-y-auto -mx-1 px-1 space-y-1 min-h-[10rem]">
-          {pickerError && (
-            <div className="text-xs text-red-400">{pickerError}</div>
-          )}
-          {loading && results === null ? (
-            <div className="text-sm text-fg-subtle">Loading…</div>
-          ) : results && results.length === 0 ? (
-            <div className="text-sm text-fg-subtle">No matches.</div>
-          ) : (
-            results?.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                className="w-full text-left rounded-md border border-border bg-bg-elevated hover:border-accent hover:bg-accent/5 px-3 py-2"
-                onClick={() => onPick(r.id)}
-              >
-                <div className="text-sm font-medium">
-                  {r.driver_name ?? "(no driver)"}
-                  {r.year && (
-                    <span className="text-fg-subtle ml-2">{r.year}</span>
-                  )}
-                </div>
-                <div className="text-xs text-fg-subtle truncate">
-                  {r.scheme_text ?? "(no scheme)"}
-                </div>
-                <div className="text-xs text-fg-faint">
-                  {[r.oem, r.brand, r.scale].filter(Boolean).join(" · ")}
-                  {r.retail_value_cents !== null && (
-                    <span className="ml-2">
-                      retail {formatCents(r.retail_value_cents)}
-                    </span>
-                  )}
-                </div>
-              </button>
-            ))
-          )}
-        </div>
-
-        <div className="flex items-center justify-end gap-2 mt-3 pt-3 border-t border-border">
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={onClose}
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -1143,13 +981,20 @@ function RegistrySearchDialog({
     const titleTokens = new Set(
       title.split(/\W+/).filter((t) => t.length > 0),
     );
+    // Prefer the most specific match: "Dale Earnhardt Sr" should win over
+    // "Dale Earnhardt" when both fit the title's tokens.
+    let best: { display: string; value: string; len: number } | null = null;
     for (const d of drivers) {
       const dt = d.display.toLowerCase().split(/\s+/).filter((t) => t.length > 0);
       if (dt.length > 0 && dt.every((t) => titleTokens.has(t))) {
-        setDriverInput(d.display);
-        setSelectedDriverGuid(d.value);
-        break;
+        if (best === null || dt.length > best.len) {
+          best = { display: d.display, value: d.value, len: dt.length };
+        }
       }
+    }
+    if (best) {
+      setDriverInput(best.display);
+      setSelectedDriverGuid(best.value);
     }
   }
 
