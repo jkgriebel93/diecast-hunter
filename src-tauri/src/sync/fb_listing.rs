@@ -121,12 +121,6 @@ pub async fn upsert_from_payload(
     .execute(pool)
     .await?;
 
-    // Run the matcher so the listing arrives matched (or marked for review)
-    // by the time the UI loads it. Non-fatal on failure.
-    if let Err(e) = crate::sync::listing_match::match_listing(pool, listing_id).await {
-        tracing::warn!("auto-match for fb listing {listing_id} failed: {e}");
-    }
-
     let matched_registry_entry_id: Option<(Option<i64>,)> = sqlx::query_as(
         "SELECT registry_entry_id FROM listing_matches WHERE listing_id = ?",
     )

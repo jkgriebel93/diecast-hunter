@@ -1,7 +1,7 @@
-//! Glue between the registry-search dialog and the existing matcher: given
-//! a listing + a registry entry GUID (selected from search results), ensure
-//! the entry exists locally (creating a stub if needed), enrich it via the
-//! M3 detail-page fetcher, then set the manual match. The caller can then
+//! Backs the registry-search dialog: given a listing + a registry entry
+//! GUID (selected from search results), ensure the entry exists locally
+//! (creating a stub if needed), enrich it via the M3 detail-page fetcher,
+//! then write the manual match into `listing_matches`. The caller can then
 //! re-render the listing card with full registry data.
 
 use chrono::Utc;

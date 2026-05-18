@@ -4,7 +4,6 @@ import {
   formatCents,
   type FormOptionRow,
   type ListingRow,
-  type MatchSummary,
   type ProductionSearchResult,
   type ReceivedOffer,
   type RefreshSummary,
@@ -69,9 +68,6 @@ export function Listings() {
   const [syncingWatchlist, setSyncingWatchlist] = useState(false);
   const [watchlistSummary, setWatchlistSummary] =
     useState<WatchlistSyncSummary | null>(null);
-
-  const [rematching, setRematching] = useState(false);
-  const [matchSummary, setMatchSummary] = useState<MatchSummary | null>(null);
 
   async function load() {
     setError(null);
@@ -183,31 +179,6 @@ export function Listings() {
       setError(String(e));
     } finally {
       setSyncingWatchlist(false);
-    }
-  }
-
-  async function onRematchAll() {
-    setRematching(true);
-    setMatchSummary(null);
-    setError(null);
-    try {
-      const summary = await api.rematchAllListings();
-      setMatchSummary(summary);
-      await load();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setRematching(false);
-    }
-  }
-
-  async function onConfirmMatch(listingId: number) {
-    setError(null);
-    try {
-      await api.confirmListingMatch(listingId);
-      await load();
-    } catch (e) {
-      setError(String(e));
     }
   }
 
@@ -344,25 +315,14 @@ export function Listings() {
             {syncingWatchlist ? "Syncing…" : "Sync watchlist"}
           </button>
           {rows && rows.length > 0 && (
-            <>
-              <button
-                className="btn-secondary"
-                type="button"
-                onClick={onRematchAll}
-                disabled={rematching}
-                title="Re-run the title→registry matcher against every listing"
-              >
-                {rematching ? "Matching…" : "Re-match all"}
-              </button>
-              <button
-                className="btn-secondary"
-                type="button"
-                onClick={onRefreshAll}
-                disabled={bulkRefreshing}
-              >
-                {bulkRefreshing ? "Refreshing…" : "Refresh all"}
-              </button>
-            </>
+            <button
+              className="btn-secondary"
+              type="button"
+              onClick={onRefreshAll}
+              disabled={bulkRefreshing}
+            >
+              {bulkRefreshing ? "Refreshing…" : "Refresh all"}
+            </button>
           )}
         </div>
       </header>
@@ -408,13 +368,6 @@ export function Listings() {
           {watchlistSummary.pages_fetched} page
           {watchlistSummary.pages_fetched === 1 ? "" : "s"} (
           {watchlistSummary.items_seen} items total).
-        </div>
-      )}
-      {matchSummary && (
-        <div className="text-xs text-emerald-400">
-          Matched: {matchSummary.auto_matched} auto-matched,{" "}
-          {matchSummary.needs_review} need review,{" "}
-          {matchSummary.unmatched} unmatched (of {matchSummary.considered}).
         </div>
       )}
       {error && (
@@ -548,7 +501,6 @@ export function Listings() {
               unwatching={unwatchingId === r.listing_id}
               onRefresh={() => onRefreshOne(r.listing_id)}
               onUnwatch={() => onUnwatch(r)}
-              onConfirmMatch={() => onConfirmMatch(r.listing_id)}
               onClearMatch={() => onClearMatch(r.listing_id)}
               onRejectMatch={() => onRejectMatch(r.listing_id)}
               onChangeMatch={() => setRegistrySearchListing(r)}
@@ -564,7 +516,6 @@ export function Listings() {
           unwatchingId={unwatchingId}
           onRefresh={onRefreshOne}
           onUnwatch={onUnwatch}
-          onConfirmMatch={onConfirmMatch}
           onClearMatch={onClearMatch}
           onRejectMatch={onRejectMatch}
           onChangeMatch={setRegistrySearchListing}
@@ -593,7 +544,6 @@ function ListingCard({
   unwatching,
   onRefresh,
   onUnwatch,
-  onConfirmMatch,
   onClearMatch,
   onRejectMatch,
   onChangeMatch,
@@ -605,7 +555,6 @@ function ListingCard({
   unwatching: boolean;
   onRefresh: () => void;
   onUnwatch: () => void;
-  onConfirmMatch: () => void;
   onClearMatch: () => void;
   onRejectMatch: () => void;
   onChangeMatch: () => void;
@@ -650,9 +599,7 @@ function ListingCard({
         {matched ? (
           <div className="mt-2 rounded-md border border-border bg-bg-elevated px-2 py-1.5 text-xs">
             <div className="flex items-center gap-2">
-              <span className="text-emerald-400">
-                {row.match_user_confirmed ? "✓ confirmed" : "✓ matched"}
-              </span>
+              <span className="text-emerald-400">✓ matched</span>
               <span className="text-fg-muted truncate">
                 {row.matched_driver_name}
                 {row.matched_scheme_text
@@ -669,12 +616,6 @@ function ListingCard({
               ]
                 .filter(Boolean)
                 .join(" · ")}
-              {row.match_confidence !== null &&
-                !row.match_user_confirmed && (
-                  <span className="ml-2 text-fg-faint">
-                    ({row.match_confidence.toFixed(0)}% confidence)
-                  </span>
-                )}
             </div>
             {row.matched_detail_url && (
               <a
@@ -693,7 +634,7 @@ function ListingCard({
           </div>
         ) : (
           <div className="mt-2 text-xs text-amber-400/80">
-            Unmatched — no registry entry found for this listing.
+            Unmatched — link a registry entry to enable retail comparison.
           </div>
         )}
 
@@ -732,16 +673,6 @@ function ListingCard({
               {unwatching ? "Removing…" : "Remove from watchlist"}
             </button>
           )}
-          {matched && !row.match_user_confirmed && (
-            <button
-              className="text-xs text-emerald-400 hover:text-emerald-300"
-              type="button"
-              onClick={onConfirmMatch}
-              title="Lock this match so re-match-all leaves it alone"
-            >
-              Confirm
-            </button>
-          )}
           <button
             className="text-xs text-fg-muted hover:text-fg"
             type="button"
@@ -755,7 +686,7 @@ function ListingCard({
               className="text-xs text-fg-subtle hover:text-fg-muted"
               type="button"
               onClick={onClearMatch}
-              title="Remove the match and let auto-match try again"
+              title="Remove the link to the registry entry"
             >
               Clear
             </button>
@@ -775,8 +706,9 @@ function ListingCard({
               className="text-xs text-fg-subtle hover:text-fg-muted"
               type="button"
               onClick={onClearMatch}
+              title="Clear the no-match flag"
             >
-              Allow auto-match
+              Reset
             </button>
           )}
         </div>
@@ -844,7 +776,6 @@ function GroupedByDriver({
   unwatchingId,
   onRefresh,
   onUnwatch,
-  onConfirmMatch,
   onClearMatch,
   onRejectMatch,
   onChangeMatch,
@@ -856,7 +787,6 @@ function GroupedByDriver({
   unwatchingId: number | null;
   onRefresh: (id: number) => void;
   onUnwatch: (row: ListingRow) => void;
-  onConfirmMatch: (id: number) => void;
   onClearMatch: (id: number) => void;
   onRejectMatch: (id: number) => void;
   onChangeMatch: (row: ListingRow) => void;
@@ -909,7 +839,6 @@ function GroupedByDriver({
                     unwatching={unwatchingId === r.listing_id}
                     onRefresh={() => onRefresh(r.listing_id)}
                     onUnwatch={() => onUnwatch(r)}
-                    onConfirmMatch={() => onConfirmMatch(r.listing_id)}
                     onClearMatch={() => onClearMatch(r.listing_id)}
                     onRejectMatch={() => onRejectMatch(r.listing_id)}
                     onChangeMatch={() => onChangeMatch(r)}

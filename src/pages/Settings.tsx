@@ -592,9 +592,10 @@ export function Settings() {
             <div className="text-sm font-medium">Pre-warm registry by driver</div>
             <div className="text-xs text-fg-subtle mt-1">
               Pull every registry entry for one driver and store them locally
-              so the listing matcher has candidates to score against. Takes a
-              minute or two for a prolific driver — pages are paced to be
-              polite. Repeat for every driver you watch.
+              so the registry-search dialog can surface candidates without
+              hitting diecastregistry.com on every keystroke. Takes a minute
+              or two for a prolific driver — pages are paced to be polite.
+              Repeat for every driver you watch.
             </div>
           </div>
 

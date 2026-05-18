@@ -621,38 +621,7 @@ pub async fn list_listings(
         .collect())
 }
 
-#[tauri::command]
-pub async fn rematch_all_listings(
-    state: State<'_, AppState>,
-    app: tauri::AppHandle,
-) -> AppResult<sync::MatchSummary> {
-    let progress = ProgressEmitter::new(app, "rematch");
-    set_active_cancel(&state, &progress).await;
-    let result = sync::match_all(&state.db.pool, &progress).await;
-    clear_active_cancel(&state).await;
-    finish_progress(&progress, &result, "Re-match");
-    result
-}
-
-/// Lock the current auto-match as user-confirmed so re-match-all won't
-/// overwrite it. No-op if there's no current match row.
-#[tauri::command]
-pub async fn confirm_listing_match(
-    state: State<'_, AppState>,
-    listing_id: i64,
-) -> AppResult<()> {
-    sqlx::query(
-        "UPDATE listing_matches SET user_confirmed = 1, matched_at = ?
-         WHERE listing_id = ?",
-    )
-    .bind(chrono::Utc::now().timestamp())
-    .bind(listing_id)
-    .execute(&state.db.pool)
-    .await?;
-    Ok(())
-}
-
-/// Clear a match and allow auto-rematch to consider it again next time.
+/// Clear the manual link between this listing and its registry entry.
 #[tauri::command]
 pub async fn clear_listing_match(
     state: State<'_, AppState>,
@@ -665,8 +634,8 @@ pub async fn clear_listing_match(
     Ok(())
 }
 
-/// Lock the listing as explicitly unmatched. Auto-rematch won't touch it
-/// until the user clears or sets a match.
+/// Lock the listing as explicitly unmatched (user has reviewed and found
+/// no registry entry).
 #[tauri::command]
 pub async fn reject_listing_match(
     state: State<'_, AppState>,

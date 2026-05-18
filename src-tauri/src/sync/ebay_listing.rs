@@ -68,10 +68,6 @@ pub async fn add_listing_from_input(
 
     let (listing_id, created) = upsert_listing(pool, &item).await?;
     insert_history(pool, listing_id, &item).await?;
-    if let Err(e) = crate::sync::listing_match::match_listing(pool, listing_id).await {
-        // Match failure is non-fatal — the listing is saved either way.
-        tracing::warn!("auto-match for listing {listing_id} failed: {e}");
-    }
 
     Ok(AddListingResult {
         listing_id: Some(listing_id),
@@ -112,9 +108,6 @@ pub async fn refresh_listing(pool: &SqlitePool, listing_id: i64) -> AppResult<()
     let item = fetch_item_by_legacy_id(&client, &legacy_id).await?;
     upsert_listing(pool, &item).await?;
     insert_history(pool, listing_id, &item).await?;
-    if let Err(e) = crate::sync::listing_match::match_listing(pool, listing_id).await {
-        tracing::warn!("auto-match for listing {listing_id} failed: {e}");
-    }
     Ok(())
 }
 

@@ -4,7 +4,6 @@ mod dcr;
 mod ebay;
 mod error;
 mod listing_receiver;
-mod matcher;
 mod progress;
 mod saved;
 mod settings;
@@ -86,8 +85,6 @@ pub fn run() {
             commands::refresh_all_ebay_listings,
             commands::sync_ebay_watchlist,
             commands::list_listings,
-            commands::rematch_all_listings,
-            commands::confirm_listing_match,
             commands::clear_listing_match,
             commands::reject_listing_match,
             commands::refresh_registry_form_options,

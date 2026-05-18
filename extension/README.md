@@ -13,7 +13,8 @@ recent Chromium browser (Chrome, Edge, Brave, etc.).
    (title, image, price, URL, description) and shows a preview.
 4. Click **Save to Diecast Hunter** to POST the data to the desktop app's
    localhost listing-receiver. The listing appears on the
-   *Saved Listings* page and runs through the matcher automatically.
+   *Saved Listings* page, where you can link it to a registry entry
+   manually via the **Match…** button.
 
 The extension does not collect any data beyond what the user explicitly
 chooses to save, and only contacts the desktop app on `localhost`. No data

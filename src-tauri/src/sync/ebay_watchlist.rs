@@ -197,9 +197,9 @@ pub async fn watch_and_save(
     let (env, token) = user_iaf_token(pool).await?;
     add_to_watchlist(env, &token, &legacy_id).await?;
 
-    // Local mirror. Reuses the diecast-filter + listing_history + matcher
-    // pipeline. If the local save says "filtered" (non-diecast) we still
-    // want it on eBay, so we propagate the result rather than rolling back.
+    // Local mirror. Reuses the diecast-filter + listing_history pipeline.
+    // If the local save says "filtered" (non-diecast) we still want it on
+    // eBay, so we propagate the result rather than rolling back.
     ebay_listing::add_listing_from_input(pool, input).await
 }
 

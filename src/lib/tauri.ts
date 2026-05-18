@@ -134,9 +134,6 @@ export const api = {
   syncEbayWatchlist: () =>
     invoke<WatchlistSyncSummary>("sync_ebay_watchlist"),
   listListings: () => invoke<ListingRow[]>("list_listings"),
-  rematchAllListings: () => invoke<MatchSummary>("rematch_all_listings"),
-  confirmListingMatch: (listingId: number) =>
-    invoke<void>("confirm_listing_match", { listingId }),
   clearListingMatch: (listingId: number) =>
     invoke<void>("clear_listing_match", { listingId }),
   rejectListingMatch: (listingId: number) =>
@@ -485,13 +482,6 @@ export interface ListingRow {
   matched_detail_url: string | null;
   /** Total (price + shipping) as percentage of registry retail. Lower = better deal. */
   deal_score: number | null;
-}
-
-export interface MatchSummary {
-  considered: number;
-  auto_matched: number;
-  needs_review: number;
-  unmatched: number;
 }
 
 export function formatCents(cents: number | null): string {

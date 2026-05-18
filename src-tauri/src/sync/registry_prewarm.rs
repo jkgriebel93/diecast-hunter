@@ -1,10 +1,10 @@
 //! Bulk-populates `registry_entries` for a single driver by walking every
 //! page of the /Production search filtered to that driver. Each result
 //! becomes an upserted stub row carrying the data the search page itself
-//! exposes (year, OEM, brand, scale, scheme, retail/wholesale). The
-//! matcher can use those rows immediately — no detail-page fetch required.
-//! Full M3 enrichment can run later for fields the search page doesn't
-//! expose (production qty, finish, registration #).
+//! exposes (year, OEM, brand, scale, scheme, retail/wholesale), giving the
+//! registry-search dialog candidates to surface immediately — no detail-page
+//! fetch required. Full M3 enrichment can run later for fields the search
+//! page doesn't expose (production qty, finish, registration #).
 
 use chrono::Utc;
 use serde::Serialize;
