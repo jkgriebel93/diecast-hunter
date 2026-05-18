@@ -7,6 +7,14 @@ import {
   type EbaySearchPage,
 } from "@/lib/tauri";
 import { Link } from "react-router-dom";
+import { useImageSize, type ImageSize } from "@/lib/imageSize";
+import { ImageSizeToggle } from "@/components/ImageSizeToggle";
+
+const IMG_CLASS: Record<ImageSize, string> = {
+  sm: "w-24 h-24",
+  md: "w-48 h-48",
+  lg: "w-72 h-72",
+};
 
 const PAGE_SIZE = 50;
 
@@ -48,6 +56,7 @@ export function Browse() {
   const [offset, setOffset] = useState(0);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [imgSize, setImgSize] = useImageSize("browse");
   const [busyItemId, setBusyItemId] = useState<string | null>(null);
   /** itemId → local listings.id. Populated from existing saved listings on
    *  mount and after every watch/unwatch so the UI can flip the button. */
@@ -372,6 +381,7 @@ export function Browse() {
               : "No results."}
           </div>
           <div className="flex items-center gap-2">
+            <ImageSizeToggle size={imgSize} onChange={setImgSize} />
             <button
               type="button"
               className="btn-secondary"
@@ -424,6 +434,7 @@ export function Browse() {
                     ? () => onSaveSeller(username)
                     : undefined
                 }
+                imgSizeClass={IMG_CLASS[imgSize]}
               />
             );
           })}
@@ -442,6 +453,7 @@ function SearchCard({
   onWatch,
   onUnwatch,
   onSaveSeller,
+  imgSizeClass,
 }: {
   item: EbaySearchItem;
   busy: boolean;
@@ -451,6 +463,7 @@ function SearchCard({
   onWatch: () => void;
   onUnwatch: () => void;
   onSaveSeller?: () => void;
+  imgSizeClass: string;
 }) {
   const total =
     item.price_cents !== null
@@ -464,10 +477,10 @@ function SearchCard({
             src={item.image_url}
             alt=""
             loading="lazy"
-            className="w-24 h-24 object-cover rounded border border-border shrink-0"
+            className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
           />
         ) : (
-          <div className="w-24 h-24 rounded border border-border bg-bg-elevated shrink-0" />
+          <div className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`} />
         )}
         <div className="min-w-0 flex-1">
           <div

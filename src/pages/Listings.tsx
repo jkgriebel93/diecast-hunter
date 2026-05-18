@@ -10,6 +10,14 @@ import {
   type RefreshSummary,
   type WatchlistSyncSummary,
 } from "@/lib/tauri";
+import { useImageSize, type ImageSize } from "@/lib/imageSize";
+import { ImageSizeToggle } from "@/components/ImageSizeToggle";
+
+const IMG_CLASS: Record<ImageSize, string> = {
+  sm: "w-24 h-24",
+  md: "w-48 h-48",
+  lg: "w-72 h-72",
+};
 
 type ViewMode = "flat" | "byDriver";
 type StatusFilter = "all" | "active" | "ended";
@@ -38,6 +46,7 @@ export function Listings() {
   const [viewMode, setViewMode] = useState<ViewMode>("flat");
   const [registrySearchListing, setRegistrySearchListing] =
     useState<ListingRow | null>(null);
+  const [imgSize, setImgSize] = useImageSize("listings");
 
   const [searchText, setSearchText] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
@@ -481,30 +490,33 @@ export function Listings() {
               ]}
               onChange={(v) => setSourceFilter(v as SourceFilter)}
             />
-            <div className="ml-auto flex items-center gap-2">
-              <span className="text-fg-subtle">View:</span>
-              <button
-                type="button"
-                className={`px-2 py-1 rounded border ${
-                  viewMode === "flat"
-                    ? "border-accent text-accent bg-accent/10"
-                    : "border-border text-fg-muted hover:text-fg"
-                }`}
-                onClick={() => setViewMode("flat")}
-              >
-                Flat
-              </button>
-              <button
-                type="button"
-                className={`px-2 py-1 rounded border ${
-                  viewMode === "byDriver"
-                    ? "border-accent text-accent bg-accent/10"
-                    : "border-border text-fg-muted hover:text-fg"
-                }`}
-                onClick={() => setViewMode("byDriver")}
-              >
-                By driver
-              </button>
+            <div className="ml-auto flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-fg-subtle">View:</span>
+                <button
+                  type="button"
+                  className={`px-2 py-1 rounded border ${
+                    viewMode === "flat"
+                      ? "border-accent text-accent bg-accent/10"
+                      : "border-border text-fg-muted hover:text-fg"
+                  }`}
+                  onClick={() => setViewMode("flat")}
+                >
+                  Flat
+                </button>
+                <button
+                  type="button"
+                  className={`px-2 py-1 rounded border ${
+                    viewMode === "byDriver"
+                      ? "border-accent text-accent bg-accent/10"
+                      : "border-border text-fg-muted hover:text-fg"
+                  }`}
+                  onClick={() => setViewMode("byDriver")}
+                >
+                  By driver
+                </button>
+              </div>
+              <ImageSizeToggle size={imgSize} onChange={setImgSize} />
             </div>
           </div>
           {filteredRows && filteredRows.length !== rows.length && (
@@ -540,6 +552,7 @@ export function Listings() {
               onClearMatch={() => onClearMatch(r.listing_id)}
               onRejectMatch={() => onRejectMatch(r.listing_id)}
               onChangeMatch={() => setRegistrySearchListing(r)}
+              imgSizeClass={IMG_CLASS[imgSize]}
             />
           ))}
         </ul>
@@ -555,6 +568,7 @@ export function Listings() {
           onClearMatch={onClearMatch}
           onRejectMatch={onRejectMatch}
           onChangeMatch={setRegistrySearchListing}
+          imgSizeClass={IMG_CLASS[imgSize]}
         />
       )}
 
@@ -583,6 +597,7 @@ function ListingCard({
   onClearMatch,
   onRejectMatch,
   onChangeMatch,
+  imgSizeClass,
 }: {
   row: ListingRow;
   offer: ReceivedOffer | undefined;
@@ -594,6 +609,7 @@ function ListingCard({
   onClearMatch: () => void;
   onRejectMatch: () => void;
   onChangeMatch: () => void;
+  imgSizeClass: string;
 }) {
   const total =
     row.price_cents !== null
@@ -607,7 +623,7 @@ function ListingCard({
         <img
           src={row.image_url}
           alt=""
-          className="w-24 h-24 object-cover rounded border border-border shrink-0"
+          className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
         />
       )}
       <div className="flex-1 min-w-0">
@@ -832,6 +848,7 @@ function GroupedByDriver({
   onClearMatch,
   onRejectMatch,
   onChangeMatch,
+  imgSizeClass,
 }: {
   rows: ListingRow[];
   offersByItemId: Map<string, ReceivedOffer>;
@@ -843,6 +860,7 @@ function GroupedByDriver({
   onClearMatch: (id: number) => void;
   onRejectMatch: (id: number) => void;
   onChangeMatch: (row: ListingRow) => void;
+  imgSizeClass: string;
 }) {
   // Bucket by driver name; matched first, then "Unmatched" / "No-match" at
   // the bottom.
@@ -895,6 +913,7 @@ function GroupedByDriver({
                     onClearMatch={() => onClearMatch(r.listing_id)}
                     onRejectMatch={() => onRejectMatch(r.listing_id)}
                     onChangeMatch={() => onChangeMatch(r)}
+                    imgSizeClass={imgSizeClass}
                   />
                 </li>
               ))}
@@ -1225,10 +1244,10 @@ function RegistrySearchDialog({
                       }
                       alt=""
                       loading="lazy"
-                      className="w-16 h-16 object-cover rounded border border-border shrink-0"
+                      className="w-32 h-32 object-cover rounded border border-border shrink-0"
                     />
                   ) : (
-                    <div className="w-16 h-16 rounded border border-border bg-bg shrink-0" />
+                    <div className="w-32 h-32 rounded border border-border bg-bg shrink-0" />
                   )}
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium truncate">

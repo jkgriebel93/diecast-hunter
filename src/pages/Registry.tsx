@@ -6,6 +6,14 @@ import {
   type FormOptionRow,
   type ProductionSearchResult,
 } from "@/lib/tauri";
+import { useImageSize, type ImageSize } from "@/lib/imageSize";
+import { ImageSizeToggle } from "@/components/ImageSizeToggle";
+
+const IMG_CLASS: Record<ImageSize, string> = {
+  sm: "w-24 h-24",
+  md: "w-48 h-48",
+  lg: "w-72 h-72",
+};
 
 const DCR_BASE = "https://www.diecastregistry.com";
 
@@ -47,6 +55,7 @@ export function Registry() {
   const [info, setInfo] = useState<string | null>(null);
 
   const [addTarget, setAddTarget] = useState<ProductionSearchResult | null>(null);
+  const [imgSize, setImgSize] = useImageSize("registry");
 
   useEffect(() => {
     void loadOptions();
@@ -135,14 +144,12 @@ export function Registry() {
 
   return (
     <div className="p-6 space-y-4">
-      <header className="flex items-end justify-between">
-        <div>
-          <h2 className="text-2xl font-semibold">Registry search</h2>
-          <p className="text-sm text-fg-subtle">
-            Search diecastregistry.com's production catalog. Results link out
-            to the registry's detail pages.
-          </p>
-        </div>
+      <header>
+        <h2 className="text-2xl font-semibold">Registry search</h2>
+        <p className="text-sm text-fg-subtle">
+          Search diecastregistry.com's production catalog. Results link out
+          to the registry's detail pages.
+        </p>
       </header>
 
       {!optionsLoaded ? (
@@ -304,8 +311,11 @@ export function Registry() {
         <div className="card text-sm text-fg-muted">No results.</div>
       ) : (
         <>
-          <div className="text-xs text-fg-subtle">
-            {results.length} result{results.length === 1 ? "" : "s"}.
+          <div className="flex items-center justify-between text-xs text-fg-subtle">
+            <div>
+              {results.length} result{results.length === 1 ? "" : "s"}.
+            </div>
+            <ImageSizeToggle size={imgSize} onChange={setImgSize} />
           </div>
           <ul className="space-y-2">
             {results.map((r) => (
@@ -322,10 +332,10 @@ export function Registry() {
                     }
                     alt=""
                     loading="lazy"
-                    className="w-24 h-24 object-cover rounded border border-border shrink-0"
+                    className={`${IMG_CLASS[imgSize]} object-cover rounded border border-border shrink-0`}
                   />
                 ) : (
-                  <div className="w-24 h-24 rounded border border-border bg-bg shrink-0" />
+                  <div className={`${IMG_CLASS[imgSize]} rounded border border-border bg-bg shrink-0`} />
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium truncate">

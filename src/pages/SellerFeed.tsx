@@ -10,6 +10,14 @@ import {
   type SavedSellerInput,
   type SavedSyncSummary,
 } from "@/lib/tauri";
+import { useImageSize, type ImageSize } from "@/lib/imageSize";
+import { ImageSizeToggle } from "@/components/ImageSizeToggle";
+
+const IMG_CLASS: Record<ImageSize, string> = {
+  sm: "w-24 h-24",
+  md: "w-48 h-48",
+  lg: "w-72 h-72",
+};
 
 const PAGE_SIZE = 50;
 
@@ -45,6 +53,7 @@ export function SellerFeed() {
     new Map(),
   );
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [imgSize, setImgSize] = useImageSize("sellerFeed");
 
   const [query, setQuery] = useState("");
   /** Snapshot of `query` at the time of the last submit. Used for paging so
@@ -327,17 +336,15 @@ export function SellerFeed() {
             Recent diecast listings across your saved sellers.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => loadFeed(offset)}
-            disabled={loading}
-            title="Refresh the current page"
-          >
-            {loading ? "Refreshing…" : "Refresh"}
-          </button>
-        </div>
+        <button
+          type="button"
+          className="btn-secondary"
+          onClick={() => loadFeed(offset)}
+          disabled={loading}
+          title="Refresh the current page"
+        >
+          {loading ? "Refreshing…" : "Refresh"}
+        </button>
       </header>
 
       <form onSubmit={onApplyFilters} className="card space-y-3">
@@ -514,6 +521,7 @@ export function SellerFeed() {
               {page.total.toLocaleString()} results
             </div>
             <div className="flex items-center gap-2">
+              <ImageSizeToggle size={imgSize} onChange={setImgSize} />
               <button
                 type="button"
                 className="btn-secondary"
@@ -542,6 +550,7 @@ export function SellerFeed() {
                 watched={watchedByItemId.has(item.item_id)}
                 onWatch={() => onWatch(item)}
                 onUnwatch={() => onUnwatch(item)}
+                imgSizeClass={IMG_CLASS[imgSize]}
               />
             ))}
           </ul>
@@ -752,12 +761,14 @@ function FeedCard({
   watched,
   onWatch,
   onUnwatch,
+  imgSizeClass,
 }: {
   item: EbaySearchItem;
   busy: boolean;
   watched: boolean;
   onWatch: () => void;
   onUnwatch: () => void;
+  imgSizeClass: string;
 }) {
   const total =
     item.price_cents !== null
@@ -771,10 +782,10 @@ function FeedCard({
             src={item.image_url}
             alt=""
             loading="lazy"
-            className="w-24 h-24 object-cover rounded border border-border shrink-0"
+            className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
           />
         ) : (
-          <div className="w-24 h-24 rounded border border-border bg-bg-elevated shrink-0" />
+          <div className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`} />
         )}
         <div className="min-w-0 flex-1">
           <div

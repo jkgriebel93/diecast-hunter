@@ -4,6 +4,14 @@ import {
   formatCents,
   type CollectionRow,
 } from "@/lib/tauri";
+import { useImageSize, type ImageSize } from "@/lib/imageSize";
+import { ImageSizeToggle } from "@/components/ImageSizeToggle";
+
+const IMG_CLASS: Record<ImageSize, string> = {
+  sm: "w-24 h-24",
+  md: "w-48 h-48",
+  lg: "w-72 h-72",
+};
 
 const DCR_BASE = "https://www.diecastregistry.com";
 
@@ -31,6 +39,7 @@ export function Collection() {
   const [scaleFilter, setScaleFilter] = useState<string>("");
   const [oemFilter, setOemFilter] = useState<string>("");
   const [sortMode, setSortMode] = useState<SortMode>("driver-asc");
+  const [imgSize, setImgSize] = useImageSize("collection");
 
   async function load() {
     setError(null);
@@ -262,6 +271,9 @@ export function Collection() {
         </div>
       ) : (
         <div className="space-y-2">
+          <div className="flex justify-end">
+            <ImageSizeToggle size={imgSize} onChange={setImgSize} />
+          </div>
           {(groups ?? []).map((g) => {
             const key =
               g.driver_id != null ? g.driver_id : `name:${g.driver_name}`;
@@ -272,6 +284,7 @@ export function Collection() {
                 group={g}
                 expanded={isOpen}
                 onToggle={() => toggleGroup(key)}
+                imgSizeClass={IMG_CLASS[imgSize]}
               />
             );
           })}
@@ -285,10 +298,12 @@ function DriverCard({
   group,
   expanded,
   onToggle,
+  imgSizeClass,
 }: {
   group: DriverGroupView;
   expanded: boolean;
   onToggle: () => void;
+  imgSizeClass: string;
 }) {
   return (
     <div className="card !p-0 overflow-hidden">
@@ -322,7 +337,7 @@ function DriverCard({
                   <img
                     src={resolveImage(item.image_url)}
                     alt=""
-                    className="w-24 h-24 object-cover rounded border border-border shrink-0"
+                    className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
                   />
                 )}
                 <div className="flex-1 min-w-0">

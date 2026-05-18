@@ -8,6 +8,14 @@ import {
   type SavedSearch,
   type SavedSeller,
 } from "@/lib/tauri";
+import { useImageSize, type ImageSize } from "@/lib/imageSize";
+import { ImageSizeToggle } from "@/components/ImageSizeToggle";
+
+const IMG_CLASS: Record<ImageSize, string> = {
+  sm: "w-12 h-12",
+  md: "w-24 h-24",
+  lg: "w-36 h-36",
+};
 
 export function Ebay() {
   const [rows, setRows] = useState<ListingRow[] | null>(null);
@@ -19,6 +27,7 @@ export function Ebay() {
   const [syncingAll, setSyncingAll] = useState(false);
   const [syncSummary, setSyncSummary] =
     useState<EbaySyncAllSummary | null>(null);
+  const [imgSize, setImgSize] = useImageSize("ebay");
 
   async function loadAll() {
     setError(null);
@@ -178,6 +187,12 @@ export function Ebay() {
             </div>
           </section>
 
+          {(summary.endingSoon.length > 0 || summary.bestDeals.length > 0) && (
+            <div className="flex justify-end">
+              <ImageSizeToggle size={imgSize} onChange={setImgSize} />
+            </div>
+          )}
+
           {summary.endingSoon.length > 0 && (
             <section className="card !p-0 overflow-hidden">
               <div className="px-4 py-3 border-b border-border flex items-center justify-between">
@@ -188,7 +203,7 @@ export function Ebay() {
               </div>
               <ul className="divide-y divide-border">
                 {summary.endingSoon.map((r) => (
-                  <ListingPreview key={r.listing_id} row={r} />
+                  <ListingPreview key={r.listing_id} row={r} imgSizeClass={IMG_CLASS[imgSize]} />
                 ))}
               </ul>
             </section>
@@ -206,7 +221,7 @@ export function Ebay() {
               </div>
               <ul className="divide-y divide-border">
                 {summary.bestDeals.map((r) => (
-                  <ListingPreview key={r.listing_id} row={r} />
+                  <ListingPreview key={r.listing_id} row={r} imgSizeClass={IMG_CLASS[imgSize]} />
                 ))}
               </ul>
             </section>
@@ -272,7 +287,13 @@ function Stat({ label, value }: { label: string; value: number | string }) {
   );
 }
 
-function ListingPreview({ row }: { row: ListingRow }) {
+function ListingPreview({
+  row,
+  imgSizeClass,
+}: {
+  row: ListingRow;
+  imgSizeClass: string;
+}) {
   const total =
     row.price_cents !== null
       ? row.price_cents + (row.shipping_cents ?? 0)
@@ -283,10 +304,10 @@ function ListingPreview({ row }: { row: ListingRow }) {
         <img
           src={row.image_url}
           alt=""
-          className="w-12 h-12 object-cover rounded border border-border shrink-0"
+          className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
         />
       ) : (
-        <div className="w-12 h-12 rounded border border-border bg-bg-elevated shrink-0" />
+        <div className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`} />
       )}
       <div className="flex-1 min-w-0">
         <a

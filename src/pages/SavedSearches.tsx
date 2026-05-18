@@ -8,6 +8,14 @@ import {
   type SavedSearchInput,
   type SavedSyncSummary,
 } from "@/lib/tauri";
+import { useImageSize, type ImageSize } from "@/lib/imageSize";
+import { ImageSizeToggle } from "@/components/ImageSizeToggle";
+
+const IMG_CLASS: Record<ImageSize, string> = {
+  sm: "w-12 h-12",
+  md: "w-24 h-24",
+  lg: "w-36 h-36",
+};
 
 const PAGE_SIZE = 50;
 
@@ -40,6 +48,7 @@ export function SavedSearches() {
   const [resultsOffset, setResultsOffset] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [imgSize, setImgSize] = useImageSize("savedSearches");
 
   async function onSync() {
     setSyncing(true);
@@ -236,6 +245,8 @@ export function SavedSearches() {
                     setResultsFor(null);
                     setResults(null);
                   }}
+                  imgSize={imgSize}
+                  onChangeImgSize={setImgSize}
                 />
               )}
             </li>
@@ -275,12 +286,17 @@ function ResultsPanel({
   offset,
   onPage,
   onClose,
+  imgSize,
+  onChangeImgSize,
 }: {
   page: EbaySearchPage;
   offset: number;
   onPage: (offset: number) => void;
   onClose: () => void;
+  imgSize: ImageSize;
+  onChangeImgSize: (s: ImageSize) => void;
 }) {
+  const imgSizeClass = IMG_CLASS[imgSize];
   const showingFrom = page.items.length > 0 ? offset + 1 : 0;
   const showingTo = offset + page.items.length;
   return (
@@ -292,6 +308,7 @@ function ResultsPanel({
             : "No results."}
         </div>
         <div className="flex items-center gap-2">
+          <ImageSizeToggle size={imgSize} onChange={onChangeImgSize} />
           <button
             type="button"
             className="btn-secondary text-xs"
@@ -319,14 +336,20 @@ function ResultsPanel({
       </div>
       <ul className="divide-y divide-border">
         {page.items.map((item) => (
-          <ResultRow key={item.item_id} item={item} />
+          <ResultRow key={item.item_id} item={item} imgSizeClass={imgSizeClass} />
         ))}
       </ul>
     </div>
   );
 }
 
-function ResultRow({ item }: { item: EbaySearchItem }) {
+function ResultRow({
+  item,
+  imgSizeClass,
+}: {
+  item: EbaySearchItem;
+  imgSizeClass: string;
+}) {
   const total =
     item.price_cents !== null
       ? item.price_cents + (item.shipping_cents ?? 0)
@@ -338,10 +361,10 @@ function ResultRow({ item }: { item: EbaySearchItem }) {
           src={item.image_url}
           alt=""
           loading="lazy"
-          className="w-12 h-12 object-cover rounded border border-border shrink-0"
+          className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
         />
       ) : (
-        <div className="w-12 h-12 rounded border border-border bg-bg-elevated shrink-0" />
+        <div className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`} />
       )}
       <div className="flex-1 min-w-0">
         <a
