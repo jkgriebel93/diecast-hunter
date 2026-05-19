@@ -91,7 +91,7 @@ pub async fn enrich_pending_registry_entries(
     Ok(summary)
 }
 
-async fn enrich_one(
+pub(crate) async fn enrich_one(
     pool: &SqlitePool,
     client: &DcrClient,
     row_id: i64,

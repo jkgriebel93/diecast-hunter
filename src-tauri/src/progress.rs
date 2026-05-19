@@ -46,16 +46,6 @@ impl ProgressEmitter {
         }
     }
 
-    /// Headless emitter — useful when an orchestration is invoked outside
-    /// a Tauri command (e.g. in unit tests or from another op).
-    pub fn null(op: impl Into<String>) -> Self {
-        Self {
-            app: None,
-            op: op.into(),
-            cancelled: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
     /// Hand the cancel token out so the AppState can flip it from a
     /// separate Tauri command.
     pub fn cancel_handle(&self) -> Arc<AtomicBool> {

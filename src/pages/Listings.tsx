@@ -1,8 +1,12 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
   api,
   formatCents,
+  isPreferredOem,
   type FormOptionRow,
+  type ListingGroup,
+  type ListingGroupInput,
   type ListingRow,
   type ProductionSearchResult,
   type ReceivedOffer,
@@ -18,11 +22,14 @@ const IMG_CLASS: Record<ImageSize, string> = {
   lg: "w-72 h-72",
 };
 
-type ViewMode = "flat" | "byDriver";
+type ViewMode = "flat" | "byDriver" | "byGroup";
 type StatusFilter = "all" | "active" | "ended";
 type MatchFilter = "all" | "matched" | "unmatched";
 type SourceFilter = "all" | "ebay" | "fb";
 type OfferFilter = "all" | "unresponded" | "with" | "without";
+/** "all" = no group filter; "none" = listings with zero groups; otherwise the
+ *  numeric group id as a string. */
+type GroupFilter = string;
 type SortMode =
   | "newest"
   | "price-asc"
@@ -47,11 +54,19 @@ export function Listings() {
     useState<ListingRow | null>(null);
   const [imgSize, setImgSize] = useImageSize("listings");
 
+  const [groups, setGroups] = useState<ListingGroup[]>([]);
+  const [manageGroupsOpen, setManageGroupsOpen] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMessage, setBulkMessage] = useState<string | null>(null);
+
   const [searchText, setSearchText] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
   const [matchFilter, setMatchFilter] = useState<MatchFilter>("all");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [offerFilter, setOfferFilter] = useState<OfferFilter>("all");
+  const [groupFilter, setGroupFilter] = useState<GroupFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("newest");
 
   const [input, setInput] = useState("");
@@ -82,7 +97,103 @@ export function Listings() {
   useEffect(() => {
     load();
     void loadOffers();
+    void loadGroups();
   }, []);
+
+  async function loadGroups() {
+    try {
+      const list = await api.listListingGroups();
+      setGroups(list);
+    } catch (e) {
+      // Surface group failures inline; listings still work without them.
+      setError(String(e));
+    }
+  }
+
+  async function onAddListingToGroup(listingId: number, groupId: number) {
+    setError(null);
+    try {
+      await api.addListingToGroup(groupId, listingId);
+      await Promise.all([load(), loadGroups()]);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function onRemoveListingFromGroup(
+    listingId: number,
+    groupId: number,
+  ) {
+    setError(null);
+    try {
+      await api.removeListingFromGroup(groupId, listingId);
+      await Promise.all([load(), loadGroups()]);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  function toggleSelected(listingId: number) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(listingId)) next.delete(listingId);
+      else next.add(listingId);
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
+
+  function exitSelectMode() {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+    setBulkMessage(null);
+  }
+
+  async function onBulkAddToGroup(groupId: number) {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    setBulkMessage(null);
+    setError(null);
+    try {
+      const result = await api.addListingsToGroup(groupId, ids);
+      const group = groups.find((g) => g.id === groupId);
+      const name = group?.name ?? "group";
+      setBulkMessage(
+        `Added ${result.added} to "${name}"` +
+          (result.already_present > 0
+            ? ` (${result.already_present} already there).`
+            : "."),
+      );
+      await Promise.all([load(), loadGroups()]);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function onBulkRemoveFromGroup(groupId: number) {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    setBulkMessage(null);
+    setError(null);
+    try {
+      const removed = await api.removeListingsFromGroup(groupId, ids);
+      const group = groups.find((g) => g.id === groupId);
+      const name = group?.name ?? "group";
+      setBulkMessage(`Removed ${removed} from "${name}".`);
+      await Promise.all([load(), loadGroups()]);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBulkBusy(false);
+    }
+  }
 
   async function loadOffers() {
     try {
@@ -228,6 +339,14 @@ export function Listings() {
         return false;
       if (sourceFilter !== "all" && row.seller_code !== sourceFilter)
         return false;
+      if (groupFilter !== "all") {
+        if (groupFilter === "none") {
+          if (row.group_ids.length > 0) return false;
+        } else {
+          const wanted = Number(groupFilter);
+          if (!row.group_ids.includes(wanted)) return false;
+        }
+      }
       if (offerFilter !== "all") {
         const offer = offersByItemId.get(
           legacyIdFromExternalId(row.external_id),
@@ -289,6 +408,7 @@ export function Listings() {
     matchFilter,
     sourceFilter,
     offerFilter,
+    groupFilter,
     offersByItemId,
     sortMode,
   ]);
@@ -443,6 +563,44 @@ export function Listings() {
               ]}
               onChange={(v) => setSourceFilter(v as SourceFilter)}
             />
+            <div className="flex items-center gap-1.5">
+              <span className="text-fg-subtle">Group:</span>
+              <select
+                className="input !w-auto !py-0.5 !text-[11px]"
+                value={groupFilter}
+                onChange={(e) => setGroupFilter(e.target.value)}
+                title="Filter listings by group membership"
+              >
+                <option value="all">All</option>
+                <option value="none">Ungrouped</option>
+                {groups
+                  .filter((g) => !g.archived)
+                  .map((g) => (
+                    <option key={g.id} value={String(g.id)}>
+                      {g.name} ({g.member_count})
+                    </option>
+                  ))}
+                {groups.some((g) => g.archived) && (
+                  <optgroup label="Archived">
+                    {groups
+                      .filter((g) => g.archived)
+                      .map((g) => (
+                        <option key={g.id} value={String(g.id)}>
+                          {g.name} ({g.member_count})
+                        </option>
+                      ))}
+                  </optgroup>
+                )}
+              </select>
+              <button
+                type="button"
+                className="text-fg-subtle hover:text-fg underline decoration-dotted underline-offset-2"
+                onClick={() => setManageGroupsOpen(true)}
+                title="Create, rename, archive, or delete listing groups"
+              >
+                Manage…
+              </button>
+            </div>
             <div className="ml-auto flex items-center gap-3">
               <div className="flex items-center gap-2">
                 <span className="text-fg-subtle">View:</span>
@@ -468,7 +626,33 @@ export function Listings() {
                 >
                   By driver
                 </button>
+                <button
+                  type="button"
+                  className={`px-2 py-1 rounded border ${
+                    viewMode === "byGroup"
+                      ? "border-accent text-accent bg-accent/10"
+                      : "border-border text-fg-muted hover:text-fg"
+                  }`}
+                  onClick={() => setViewMode("byGroup")}
+                >
+                  By group
+                </button>
               </div>
+              <button
+                type="button"
+                className={`px-2 py-1 rounded border ${
+                  selectMode
+                    ? "border-accent text-accent bg-accent/10"
+                    : "border-border text-fg-muted hover:text-fg"
+                }`}
+                onClick={() => {
+                  if (selectMode) exitSelectMode();
+                  else setSelectMode(true);
+                }}
+                title="Pick multiple listings to bulk-add to a group"
+              >
+                {selectMode ? "Done selecting" : "Select"}
+              </button>
               <ImageSizeToggle size={imgSize} onChange={setImgSize} />
             </div>
           </div>
@@ -496,6 +680,7 @@ export function Listings() {
             <ListingCard
               key={r.listing_id}
               row={r}
+              groups={groups}
               offer={offersByItemId.get(legacyIdFromExternalId(r.external_id))}
               refreshing={refreshingId === r.listing_id}
               unwatching={unwatchingId === r.listing_id}
@@ -504,13 +689,21 @@ export function Listings() {
               onClearMatch={() => onClearMatch(r.listing_id)}
               onRejectMatch={() => onRejectMatch(r.listing_id)}
               onChangeMatch={() => setRegistrySearchListing(r)}
+              onAddToGroup={(gid) => onAddListingToGroup(r.listing_id, gid)}
+              onRemoveFromGroup={(gid) =>
+                onRemoveListingFromGroup(r.listing_id, gid)
+              }
+              selectMode={selectMode}
+              selected={selectedIds.has(r.listing_id)}
+              onToggleSelect={() => toggleSelected(r.listing_id)}
               imgSizeClass={IMG_CLASS[imgSize]}
             />
           ))}
         </ul>
-      ) : (
-        <GroupedByDriver
+      ) : viewMode === "byGroup" ? (
+        <GroupedByGroup
           rows={filteredRows ?? []}
+          groups={groups}
           offersByItemId={offersByItemId}
           refreshingId={refreshingId}
           unwatchingId={unwatchingId}
@@ -519,7 +712,60 @@ export function Listings() {
           onClearMatch={onClearMatch}
           onRejectMatch={onRejectMatch}
           onChangeMatch={setRegistrySearchListing}
+          onAddToGroup={onAddListingToGroup}
+          onRemoveFromGroup={onRemoveListingFromGroup}
+          selectMode={selectMode}
+          selectedIds={selectedIds}
+          onToggleSelect={toggleSelected}
           imgSizeClass={IMG_CLASS[imgSize]}
+        />
+      ) : (
+        <GroupedByDriver
+          rows={filteredRows ?? []}
+          groups={groups}
+          offersByItemId={offersByItemId}
+          refreshingId={refreshingId}
+          unwatchingId={unwatchingId}
+          onRefresh={onRefreshOne}
+          onUnwatch={onUnwatch}
+          onClearMatch={onClearMatch}
+          onRejectMatch={onRejectMatch}
+          onChangeMatch={setRegistrySearchListing}
+          onAddToGroup={onAddListingToGroup}
+          onRemoveFromGroup={onRemoveListingFromGroup}
+          selectMode={selectMode}
+          selectedIds={selectedIds}
+          onToggleSelect={toggleSelected}
+          imgSizeClass={IMG_CLASS[imgSize]}
+        />
+      )}
+
+      {selectMode && (
+        <BulkSelectionBar
+          selectedCount={selectedIds.size}
+          visibleCount={filteredRows?.length ?? 0}
+          groups={groups}
+          busy={bulkBusy}
+          message={bulkMessage}
+          onSelectAllVisible={() => {
+            setSelectedIds(
+              new Set((filteredRows ?? []).map((r) => r.listing_id)),
+            );
+          }}
+          onClear={clearSelection}
+          onDone={exitSelectMode}
+          onAddToGroup={onBulkAddToGroup}
+          onRemoveFromGroup={onBulkRemoveFromGroup}
+        />
+      )}
+
+      {manageGroupsOpen && (
+        <ManageGroupsDialog
+          groups={groups}
+          onClose={() => setManageGroupsOpen(false)}
+          onChanged={async () => {
+            await Promise.all([load(), loadGroups()]);
+          }}
         />
       )}
 
@@ -539,6 +785,7 @@ export function Listings() {
 
 function ListingCard({
   row,
+  groups,
   offer,
   refreshing,
   unwatching,
@@ -547,9 +794,15 @@ function ListingCard({
   onClearMatch,
   onRejectMatch,
   onChangeMatch,
+  onAddToGroup,
+  onRemoveFromGroup,
+  selectMode,
+  selected,
+  onToggleSelect,
   imgSizeClass,
 }: {
   row: ListingRow;
+  groups: ListingGroup[];
   offer: ReceivedOffer | undefined;
   refreshing: boolean;
   unwatching: boolean;
@@ -558,6 +811,11 @@ function ListingCard({
   onClearMatch: () => void;
   onRejectMatch: () => void;
   onChangeMatch: () => void;
+  onAddToGroup: (groupId: number) => void;
+  onRemoveFromGroup: (groupId: number) => void;
+  selectMode: boolean;
+  selected: boolean;
+  onToggleSelect: () => void;
   imgSizeClass: string;
 }) {
   const total =
@@ -567,7 +825,27 @@ function ListingCard({
   const ended = row.status === "ended";
   const matched = row.registry_entry_id !== null;
   return (
-    <li className={`card flex gap-4 ${ended ? "opacity-60" : ""}`}>
+    <li
+      className={`card flex gap-4 ${ended ? "opacity-60" : ""} ${
+        selectMode && selected ? "ring-2 ring-accent/60" : ""
+      }`}
+    >
+      {selectMode && (
+        <label
+          className="shrink-0 flex items-start pt-1 cursor-pointer"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <input
+            type="checkbox"
+            className="w-4 h-4 accent-accent"
+            checked={selected}
+            onChange={onToggleSelect}
+            aria-label={
+              selected ? "Deselect listing" : "Select listing"
+            }
+          />
+        </label>
+      )}
       {row.image_url && (
         <img
           src={row.image_url}
@@ -596,6 +874,13 @@ function ListingCard({
             .join(" · ")}
         </div>
 
+        <GroupChipRow
+          row={row}
+          groups={groups}
+          onAddToGroup={onAddToGroup}
+          onRemoveFromGroup={onRemoveFromGroup}
+        />
+
         {matched ? (
           <div className="mt-2 rounded-md border border-border bg-bg-elevated px-2 py-1.5 text-xs">
             <div className="flex items-center gap-2">
@@ -621,8 +906,12 @@ function ListingCard({
               <a
                 className="text-accent hover:underline mt-0.5 inline-block"
                 href={"https://www.diecastregistry.com" + row.matched_detail_url}
-                target="_blank"
-                rel="noreferrer"
+                onClick={(e) => {
+                  e.preventDefault();
+                  void openExternal(
+                    "https://www.diecastregistry.com" + row.matched_detail_url,
+                  );
+                }}
               >
                 View on diecastregistry.com →
               </a>
@@ -649,8 +938,10 @@ function ListingCard({
           <a
             className="text-xs text-accent hover:underline"
             href={row.url}
-            target="_blank"
-            rel="noreferrer"
+            onClick={(e) => {
+              e.preventDefault();
+              void openExternal(row.url);
+            }}
           >
             View on eBay →
           </a>
@@ -771,6 +1062,7 @@ function DealBadge({ score }: { score: number }) {
 
 function GroupedByDriver({
   rows,
+  groups,
   offersByItemId,
   refreshingId,
   unwatchingId,
@@ -779,9 +1071,15 @@ function GroupedByDriver({
   onClearMatch,
   onRejectMatch,
   onChangeMatch,
+  onAddToGroup,
+  onRemoveFromGroup,
+  selectMode,
+  selectedIds,
+  onToggleSelect,
   imgSizeClass,
 }: {
   rows: ListingRow[];
+  groups: ListingGroup[];
   offersByItemId: Map<string, ReceivedOffer>;
   refreshingId: number | null;
   unwatchingId: number | null;
@@ -790,11 +1088,16 @@ function GroupedByDriver({
   onClearMatch: (id: number) => void;
   onRejectMatch: (id: number) => void;
   onChangeMatch: (row: ListingRow) => void;
+  onAddToGroup: (listingId: number, groupId: number) => void;
+  onRemoveFromGroup: (listingId: number, groupId: number) => void;
+  selectMode: boolean;
+  selectedIds: Set<number>;
+  onToggleSelect: (listingId: number) => void;
   imgSizeClass: string;
 }) {
   // Bucket by driver name; matched first, then "Unmatched" / "No-match" at
   // the bottom.
-  const groups = useMemo(() => {
+  const driverBuckets = useMemo(() => {
     const map = new Map<string, ListingRow[]>();
     for (const r of rows) {
       const key = r.matched_driver_name ?? "Unmatched";
@@ -811,7 +1114,7 @@ function GroupedByDriver({
 
   return (
     <div className="space-y-3">
-      {groups.map(([driver, items]) => {
+      {driverBuckets.map(([driver, items]) => {
         const totalCents = items.reduce(
           (s, r) => s + (r.price_cents ?? 0) + (r.shipping_cents ?? 0),
           0,
@@ -834,6 +1137,7 @@ function GroupedByDriver({
                 <li key={r.listing_id} className="px-4 py-2">
                   <ListingCard
                     row={r}
+                    groups={groups}
                     offer={offersByItemId.get(legacyIdFromExternalId(r.external_id))}
                     refreshing={refreshingId === r.listing_id}
                     unwatching={unwatchingId === r.listing_id}
@@ -842,6 +1146,13 @@ function GroupedByDriver({
                     onClearMatch={() => onClearMatch(r.listing_id)}
                     onRejectMatch={() => onRejectMatch(r.listing_id)}
                     onChangeMatch={() => onChangeMatch(r)}
+                    onAddToGroup={(gid) => onAddToGroup(r.listing_id, gid)}
+                    onRemoveFromGroup={(gid) =>
+                      onRemoveFromGroup(r.listing_id, gid)
+                    }
+                    selectMode={selectMode}
+                    selected={selectedIds.has(r.listing_id)}
+                    onToggleSelect={() => onToggleSelect(r.listing_id)}
                     imgSizeClass={imgSizeClass}
                   />
                 </li>
@@ -850,6 +1161,756 @@ function GroupedByDriver({
           </details>
         );
       })}
+    </div>
+  );
+}
+
+function GroupedByGroup({
+  rows,
+  groups,
+  offersByItemId,
+  refreshingId,
+  unwatchingId,
+  onRefresh,
+  onUnwatch,
+  onClearMatch,
+  onRejectMatch,
+  onChangeMatch,
+  onAddToGroup,
+  onRemoveFromGroup,
+  selectMode,
+  selectedIds,
+  onToggleSelect,
+  imgSizeClass,
+}: {
+  rows: ListingRow[];
+  groups: ListingGroup[];
+  offersByItemId: Map<string, ReceivedOffer>;
+  refreshingId: number | null;
+  unwatchingId: number | null;
+  onRefresh: (id: number) => void;
+  onUnwatch: (row: ListingRow) => void;
+  onClearMatch: (id: number) => void;
+  onRejectMatch: (id: number) => void;
+  onChangeMatch: (row: ListingRow) => void;
+  onAddToGroup: (listingId: number, groupId: number) => void;
+  onRemoveFromGroup: (listingId: number, groupId: number) => void;
+  selectMode: boolean;
+  selectedIds: Set<number>;
+  onToggleSelect: (listingId: number) => void;
+  imgSizeClass: string;
+}) {
+  // Bucket by group; a listing in N groups appears in N buckets. An
+  // "Ungrouped" bucket collects everything with zero memberships.
+  const buckets = useMemo(() => {
+    const byId = new Map<number, ListingRow[]>();
+    for (const g of groups) byId.set(g.id, []);
+    const ungrouped: ListingRow[] = [];
+    for (const r of rows) {
+      if (r.group_ids.length === 0) {
+        ungrouped.push(r);
+        continue;
+      }
+      for (const gid of r.group_ids) {
+        if (!byId.has(gid)) byId.set(gid, []);
+        byId.get(gid)!.push(r);
+      }
+    }
+    const ordered = groups
+      .map((g) => ({ group: g, items: byId.get(g.id) ?? [] }))
+      .sort((a, b) => {
+        if (a.group.archived !== b.group.archived) {
+          return a.group.archived ? 1 : -1;
+        }
+        return a.group.name.localeCompare(b.group.name);
+      });
+    return { ordered, ungrouped };
+  }, [rows, groups]);
+
+  if (groups.length === 0) {
+    return (
+      <div className="card text-sm text-fg-muted">
+        No groups yet. Use “Manage…” next to the Group filter to create one.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {buckets.ordered.map(({ group, items }) => {
+        const totalCents = items.reduce(
+          (s, r) => s + (r.price_cents ?? 0) + (r.shipping_cents ?? 0),
+          0,
+        );
+        const overTarget =
+          group.target_price_cents !== null
+            ? items.filter(
+                (r) =>
+                  r.price_cents !== null &&
+                  r.price_cents + (r.shipping_cents ?? 0) >
+                    (group.target_price_cents ?? 0),
+              ).length
+            : 0;
+        return (
+          <details
+            key={group.id}
+            className={`card !p-0 overflow-hidden ${group.archived ? "opacity-70" : ""}`}
+            open={!group.archived}
+          >
+            <summary className="cursor-pointer list-none px-4 py-3 flex items-start justify-between gap-4 hover:bg-bg-elevated">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">{group.name}</span>
+                  {group.archived && (
+                    <span className="text-[10px] uppercase tracking-wide text-fg-subtle border border-border rounded px-1">
+                      archived
+                    </span>
+                  )}
+                  <span className="text-xs text-fg-subtle">
+                    {items.length} listing{items.length === 1 ? "" : "s"}
+                  </span>
+                </div>
+                {group.description && (
+                  <div className="text-xs text-fg-subtle mt-0.5 whitespace-pre-wrap">
+                    {group.description}
+                  </div>
+                )}
+                {group.target_price_cents !== null && (
+                  <div className="text-xs text-fg-subtle mt-0.5">
+                    target ≤ {formatCents(group.target_price_cents)}
+                    {overTarget > 0 && (
+                      <span className="text-amber-400 ml-2">
+                        {overTarget} over target
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="text-xs text-fg-subtle tabular-nums shrink-0">
+                total {formatCents(totalCents)}
+              </div>
+            </summary>
+            {items.length === 0 ? (
+              <div className="px-4 py-3 text-xs text-fg-subtle">
+                No listings in this group yet.
+              </div>
+            ) : (
+              <ul className="divide-y divide-border">
+                {items.map((r) => (
+                  <li key={r.listing_id} className="px-4 py-2">
+                    <ListingCard
+                      row={r}
+                      groups={groups}
+                      offer={offersByItemId.get(
+                        legacyIdFromExternalId(r.external_id),
+                      )}
+                      refreshing={refreshingId === r.listing_id}
+                      unwatching={unwatchingId === r.listing_id}
+                      onRefresh={() => onRefresh(r.listing_id)}
+                      onUnwatch={() => onUnwatch(r)}
+                      onClearMatch={() => onClearMatch(r.listing_id)}
+                      onRejectMatch={() => onRejectMatch(r.listing_id)}
+                      onChangeMatch={() => onChangeMatch(r)}
+                      onAddToGroup={(gid) => onAddToGroup(r.listing_id, gid)}
+                      onRemoveFromGroup={(gid) =>
+                        onRemoveFromGroup(r.listing_id, gid)
+                      }
+                      selectMode={selectMode}
+                      selected={selectedIds.has(r.listing_id)}
+                      onToggleSelect={() => onToggleSelect(r.listing_id)}
+                      imgSizeClass={imgSizeClass}
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </details>
+        );
+      })}
+
+      {buckets.ungrouped.length > 0 && (
+        <details className="card !p-0 overflow-hidden">
+          <summary className="cursor-pointer list-none px-4 py-3 flex items-center justify-between hover:bg-bg-elevated">
+            <div className="flex items-center gap-2">
+              <span className="font-medium text-fg-muted">Ungrouped</span>
+              <span className="text-xs text-fg-subtle">
+                {buckets.ungrouped.length} listing
+                {buckets.ungrouped.length === 1 ? "" : "s"}
+              </span>
+            </div>
+          </summary>
+          <ul className="divide-y divide-border">
+            {buckets.ungrouped.map((r) => (
+              <li key={r.listing_id} className="px-4 py-2">
+                <ListingCard
+                  row={r}
+                  groups={groups}
+                  offer={offersByItemId.get(
+                    legacyIdFromExternalId(r.external_id),
+                  )}
+                  refreshing={refreshingId === r.listing_id}
+                  unwatching={unwatchingId === r.listing_id}
+                  onRefresh={() => onRefresh(r.listing_id)}
+                  onUnwatch={() => onUnwatch(r)}
+                  onClearMatch={() => onClearMatch(r.listing_id)}
+                  onRejectMatch={() => onRejectMatch(r.listing_id)}
+                  onChangeMatch={() => onChangeMatch(r)}
+                  onAddToGroup={(gid) => onAddToGroup(r.listing_id, gid)}
+                  onRemoveFromGroup={(gid) =>
+                    onRemoveFromGroup(r.listing_id, gid)
+                  }
+                  selectMode={selectMode}
+                  selected={selectedIds.has(r.listing_id)}
+                  onToggleSelect={() => onToggleSelect(r.listing_id)}
+                  imgSizeClass={imgSizeClass}
+                />
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function GroupChipRow({
+  row,
+  groups,
+  onAddToGroup,
+  onRemoveFromGroup,
+}: {
+  row: ListingRow;
+  groups: ListingGroup[];
+  onAddToGroup: (groupId: number) => void;
+  onRemoveFromGroup: (groupId: number) => void;
+}) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const memberOf = useMemo(() => {
+    const ids = new Set(row.group_ids);
+    return groups.filter((g) => ids.has(g.id));
+  }, [row.group_ids, groups]);
+  const available = useMemo(() => {
+    const ids = new Set(row.group_ids);
+    return groups.filter((g) => !ids.has(g.id) && !g.archived);
+  }, [row.group_ids, groups]);
+
+  const total =
+    row.price_cents !== null ? row.price_cents + (row.shipping_cents ?? 0) : null;
+
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-1">
+      {memberOf.map((g) => {
+        const overTarget =
+          g.target_price_cents !== null &&
+          total !== null &&
+          total > g.target_price_cents;
+        return (
+          <span
+            key={g.id}
+            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] ${
+              overTarget
+                ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                : "border-border bg-bg-elevated text-fg-muted"
+            }`}
+            title={
+              g.target_price_cents !== null
+                ? `target ≤ ${formatCents(g.target_price_cents)}${overTarget ? " — this listing is over target" : ""}`
+                : "in this group"
+            }
+          >
+            {g.name}
+            <button
+              type="button"
+              className="text-fg-subtle hover:text-red-300 leading-none"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemoveFromGroup(g.id);
+              }}
+              title="Remove from this group"
+            >
+              ×
+            </button>
+          </span>
+        );
+      })}
+      {available.length > 0 && (
+        <div className="relative">
+          <button
+            type="button"
+            className="text-[10px] px-1.5 py-0.5 rounded border border-dashed border-border text-fg-subtle hover:text-fg hover:border-fg-muted"
+            onClick={() => setPickerOpen((v) => !v)}
+          >
+            + group
+          </button>
+          {pickerOpen && (
+            <>
+              {/* Click-away catcher. */}
+              <div
+                className="fixed inset-0 z-30"
+                onClick={() => setPickerOpen(false)}
+              />
+              <div className="absolute z-40 mt-1 min-w-[12rem] rounded border border-border bg-bg-elevated shadow-lg py-1 max-h-64 overflow-y-auto">
+                {available.map((g) => (
+                  <button
+                    key={g.id}
+                    type="button"
+                    className="block w-full text-left px-2 py-1 text-xs hover:bg-bg"
+                    onClick={() => {
+                      setPickerOpen(false);
+                      onAddToGroup(g.id);
+                    }}
+                  >
+                    {g.name}
+                    {g.member_count > 0 && (
+                      <span className="text-fg-subtle ml-1">
+                        ({g.member_count})
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BulkSelectionBar({
+  selectedCount,
+  visibleCount,
+  groups,
+  busy,
+  message,
+  onSelectAllVisible,
+  onClear,
+  onDone,
+  onAddToGroup,
+  onRemoveFromGroup,
+}: {
+  selectedCount: number;
+  visibleCount: number;
+  groups: ListingGroup[];
+  busy: boolean;
+  message: string | null;
+  onSelectAllVisible: () => void;
+  onClear: () => void;
+  onDone: () => void;
+  onAddToGroup: (groupId: number) => void;
+  onRemoveFromGroup: (groupId: number) => void;
+}) {
+  const activeGroups = groups.filter((g) => !g.archived);
+  return (
+    <div className="sticky bottom-2 z-30 mx-auto mt-4 w-fit max-w-full">
+      <div className="card flex items-center gap-3 shadow-xl border-accent/40 bg-bg-elevated">
+        <div className="text-sm">
+          <span className="font-medium">{selectedCount}</span>{" "}
+          <span className="text-fg-subtle">selected</span>
+        </div>
+        <div className="h-5 w-px bg-border" />
+        <button
+          type="button"
+          className="text-xs text-fg-muted hover:text-fg"
+          onClick={onSelectAllVisible}
+          disabled={busy || visibleCount === 0}
+          title="Select every listing matching the current filters"
+        >
+          Select all visible ({visibleCount})
+        </button>
+        <button
+          type="button"
+          className="text-xs text-fg-muted hover:text-fg"
+          onClick={onClear}
+          disabled={busy || selectedCount === 0}
+        >
+          Clear
+        </button>
+        <div className="h-5 w-px bg-border" />
+        <BulkGroupMenu
+          label="Add to group"
+          groups={activeGroups}
+          disabled={busy || selectedCount === 0 || activeGroups.length === 0}
+          onPick={onAddToGroup}
+          emptyHint="No groups yet — open Manage…"
+        />
+        <BulkGroupMenu
+          label="Remove from group"
+          groups={groups}
+          disabled={busy || selectedCount === 0 || groups.length === 0}
+          onPick={onRemoveFromGroup}
+          emptyHint="No groups exist."
+        />
+        <div className="h-5 w-px bg-border" />
+        <button
+          type="button"
+          className="text-xs text-fg-subtle hover:text-fg"
+          onClick={onDone}
+          disabled={busy}
+        >
+          Done
+        </button>
+        {message && (
+          <span className="text-xs text-emerald-400 ml-2 whitespace-nowrap">
+            {message}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BulkGroupMenu({
+  label,
+  groups,
+  disabled,
+  onPick,
+  emptyHint,
+}: {
+  label: string;
+  groups: ListingGroup[];
+  disabled: boolean;
+  onPick: (groupId: number) => void;
+  emptyHint: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        className="text-xs px-2 py-1 rounded border border-border text-fg-muted hover:text-fg disabled:opacity-50 disabled:cursor-not-allowed"
+        onClick={() => setOpen((v) => !v)}
+        disabled={disabled}
+      >
+        {label} ▾
+      </button>
+      {open && !disabled && (
+        <>
+          <div
+            className="fixed inset-0 z-30"
+            onClick={() => setOpen(false)}
+          />
+          <div className="absolute z-40 bottom-full mb-1 right-0 min-w-[14rem] rounded border border-border bg-bg-elevated shadow-lg py-1 max-h-64 overflow-y-auto">
+            {groups.length === 0 ? (
+              <div className="px-2 py-1 text-xs text-fg-subtle">
+                {emptyHint}
+              </div>
+            ) : (
+              groups.map((g) => (
+                <button
+                  key={g.id}
+                  type="button"
+                  className="block w-full text-left px-2 py-1 text-xs hover:bg-bg"
+                  onClick={() => {
+                    setOpen(false);
+                    onPick(g.id);
+                  }}
+                >
+                  {g.name}
+                  {g.archived && (
+                    <span className="text-fg-subtle ml-1">(archived)</span>
+                  )}
+                </button>
+              ))
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ManageGroupsDialog({
+  groups,
+  onClose,
+  onChanged,
+}: {
+  groups: ListingGroup[];
+  onClose: () => void;
+  onChanged: () => Promise<void>;
+}) {
+  const [editing, setEditing] = useState<ListingGroup | "new" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function onDelete(g: ListingGroup) {
+    if (
+      !window.confirm(
+        `Delete the group "${g.name}"? Listings in it will not be deleted.`,
+      )
+    )
+      return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.deleteListingGroup(g.id);
+      await onChanged();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onToggleArchive(g: ListingGroup) {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.updateListingGroup(g.id, {
+        name: g.name,
+        description: g.description,
+        target_price_cents: g.target_price_cents,
+        archived: !g.archived,
+      });
+      await onChanged();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center pt-12 px-4 bg-black/60"
+      onClick={onClose}
+    >
+      <div
+        className="card w-full max-w-2xl max-h-[85vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between mb-3">
+          <div>
+            <h3 className="text-base font-medium">Manage groups</h3>
+            <p className="text-xs text-fg-subtle mt-0.5">
+              Create named buckets for paint schemes or hunts. A listing can
+              belong to any number of groups.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="text-fg-muted hover:text-fg text-xl leading-none px-2"
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </div>
+
+        {error && <div className="text-xs text-red-400 mb-2">{error}</div>}
+
+        <div className="flex-1 overflow-y-auto -mx-1 px-1 space-y-2 min-h-[6rem]">
+          {groups.length === 0 ? (
+            <div className="text-sm text-fg-subtle">No groups yet.</div>
+          ) : (
+            groups.map((g) => (
+              <div
+                key={g.id}
+                className={`rounded border border-border px-3 py-2 ${g.archived ? "opacity-70" : ""}`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium flex items-center gap-2">
+                      {g.name}
+                      {g.archived && (
+                        <span className="text-[10px] uppercase tracking-wide text-fg-subtle border border-border rounded px-1">
+                          archived
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-fg-subtle">
+                      {g.member_count} listing
+                      {g.member_count === 1 ? "" : "s"}
+                      {g.target_price_cents !== null && (
+                        <> · target ≤ {formatCents(g.target_price_cents)}</>
+                      )}
+                    </div>
+                    {g.description && (
+                      <div className="text-xs text-fg-muted mt-0.5 whitespace-pre-wrap">
+                        {g.description}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      className="text-xs text-fg-muted hover:text-fg"
+                      onClick={() => setEditing(g)}
+                      disabled={busy}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="text-xs text-fg-muted hover:text-fg"
+                      onClick={() => onToggleArchive(g)}
+                      disabled={busy}
+                    >
+                      {g.archived ? "Unarchive" : "Archive"}
+                    </button>
+                    <button
+                      type="button"
+                      className="text-xs text-fg-subtle hover:text-red-300"
+                      onClick={() => onDelete(g)}
+                      disabled={busy}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="flex items-center justify-between mt-3 pt-3 border-t border-border">
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => setEditing("new")}
+            disabled={busy}
+          >
+            New group
+          </button>
+          <button type="button" className="btn-secondary" onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        {editing !== null && (
+          <GroupEditorDialog
+            initial={editing === "new" ? null : editing}
+            onCancel={() => setEditing(null)}
+            onSaved={async () => {
+              setEditing(null);
+              await onChanged();
+            }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function GroupEditorDialog({
+  initial,
+  onCancel,
+  onSaved,
+}: {
+  initial: ListingGroup | null;
+  onCancel: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [description, setDescription] = useState(initial?.description ?? "");
+  const [targetDollars, setTargetDollars] = useState(
+    initial?.target_price_cents !== null && initial?.target_price_cents !== undefined
+      ? (initial.target_price_cents / 100).toFixed(2)
+      : "",
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    let targetCents: number | null = null;
+    const t = targetDollars.trim();
+    if (t.length > 0) {
+      const parsed = Number(t);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        setError("Target price must be a non-negative number.");
+        return;
+      }
+      targetCents = Math.round(parsed * 100);
+    }
+    const input: ListingGroupInput = {
+      name: name.trim(),
+      description: description.trim() === "" ? null : description.trim(),
+      target_price_cents: targetCents,
+      archived: initial?.archived ?? false,
+    };
+    setBusy(true);
+    try {
+      if (initial === null) {
+        await api.createListingGroup(input);
+      } else {
+        await api.updateListingGroup(initial.id, input);
+      }
+      await onSaved();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-start justify-center pt-16 px-4 bg-black/60"
+      onClick={onCancel}
+    >
+      <form
+        className="card w-full max-w-md"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={onSubmit}
+      >
+        <h4 className="text-base font-medium mb-3">
+          {initial === null ? "New group" : "Edit group"}
+        </h4>
+        <div className="space-y-3">
+          <div>
+            <label className="label">Name</label>
+            <input
+              className="input"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Hendrick #5 Mountain Dew"
+              autoFocus
+              required
+            />
+          </div>
+          <div>
+            <label className="label">Notes (optional)</label>
+            <textarea
+              className="input min-h-[4rem]"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What are you looking for? Any constraints?"
+            />
+          </div>
+          <div>
+            <label className="label">Target max price (optional)</label>
+            <input
+              className="input"
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="0.01"
+              value={targetDollars}
+              onChange={(e) => setTargetDollars(e.target.value)}
+              placeholder="e.g. 75.00"
+            />
+            <p className="text-[11px] text-fg-subtle mt-1">
+              Listings over this price get a yellow flag in the group view.
+            </p>
+          </div>
+        </div>
+        {error && <div className="text-xs text-red-400 mt-2">{error}</div>}
+        <div className="flex items-center justify-end gap-2 mt-4 pt-3 border-t border-border">
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={onCancel}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+          <button className="btn-primary" type="submit" disabled={busy || name.trim() === ""}>
+            {busy ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -867,13 +1928,24 @@ function RegistrySearchDialog({
   const [oems, setOems] = useState<FormOptionRow[]>([]);
   const [scales, setScales] = useState<FormOptionRow[]>([]);
   const [years, setYears] = useState<FormOptionRow[]>([]);
+  const [brands, setBrands] = useState<FormOptionRow[]>([]);
+  const [makes, setMakes] = useState<FormOptionRow[]>([]);
+  const [finishes, setFinishes] = useState<FormOptionRow[]>([]);
   const [optionsLoaded, setOptionsLoaded] = useState(false);
 
   const [driverInput, setDriverInput] = useState("");
   const [selectedDriverGuid, setSelectedDriverGuid] = useState("");
   const [selectedYear, setSelectedYear] = useState("");
+  const [oemInput, setOemInput] = useState("");
   const [selectedOemGuid, setSelectedOemGuid] = useState("");
+  const [showAllOems, setShowAllOems] = useState(false);
   const [selectedScaleGuid, setSelectedScaleGuid] = useState("");
+  const [brandInput, setBrandInput] = useState("");
+  const [selectedBrandGuid, setSelectedBrandGuid] = useState("");
+  const [makeInput, setMakeInput] = useState("");
+  const [selectedMakeGuid, setSelectedMakeGuid] = useState("");
+  const [finishInput, setFinishInput] = useState("");
+  const [selectedFinishGuid, setSelectedFinishGuid] = useState("");
 
   const [results, setResults] = useState<ProductionSearchResult[] | null>(
     null,
@@ -892,16 +1964,22 @@ function RegistrySearchDialog({
   async function loadOptions() {
     setDialogError(null);
     try {
-      const [d, o, s, y] = await Promise.all([
+      const [d, o, s, y, b, m, f] = await Promise.all([
         api.listRegistryFormOptions("driver"),
         api.listRegistryFormOptions("oem"),
         api.listRegistryFormOptions("scale"),
         api.listRegistryFormOptions("year"),
+        api.listRegistryFormOptions("brand"),
+        api.listRegistryFormOptions("make"),
+        api.listRegistryFormOptions("finish"),
       ]);
       setDrivers(d);
       setOems(o);
       setScales(s);
       setYears(y);
+      setBrands(b);
+      setMakes(m);
+      setFinishes(f);
       setOptionsLoaded(true);
       prefillFromListing(d, s, y);
     } catch (e) {
@@ -973,6 +2051,9 @@ function RegistrySearchDialog({
         years: selectedYear ? [selectedYear] : [],
         oem_guids: selectedOemGuid ? [selectedOemGuid] : [],
         scale_guids: selectedScaleGuid ? [selectedScaleGuid] : [],
+        brand_guids: selectedBrandGuid ? [selectedBrandGuid] : [],
+        make_guids: selectedMakeGuid ? [selectedMakeGuid] : [],
+        finish_guids: selectedFinishGuid ? [selectedFinishGuid] : [],
         autographed: false,
         raced: false,
       });
@@ -1013,19 +2094,36 @@ function RegistrySearchDialog({
         className="card w-full max-w-3xl max-h-[85vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between mb-3">
-          <div className="min-w-0">
+        <div className="flex items-start gap-3 mb-3">
+          {listing.image_url && (
+            <img
+              src={listing.image_url}
+              alt=""
+              className="w-16 h-16 object-cover rounded border border-border flex-shrink-0"
+              referrerPolicy="no-referrer"
+            />
+          )}
+          <div className="min-w-0 flex-1">
             <h3 className="text-base font-medium">Search registry</h3>
-            <p
-              className="text-xs text-fg-subtle mt-0.5 truncate"
-              title={listing.title}
-            >
+            <p className="text-xs text-fg-subtle mt-0.5" title={listing.title}>
               {listing.title}
             </p>
+            {listing.url && (
+              <a
+                href={listing.url}
+                onClick={(e) => {
+                  e.preventDefault();
+                  void openExternal(listing.url);
+                }}
+                className="text-xs text-accent hover:underline mt-1 inline-block"
+              >
+                View on eBay →
+              </a>
+            )}
           </div>
           <button
             type="button"
-            className="text-fg-muted hover:text-fg text-xl leading-none px-2"
+            className="text-fg-muted hover:text-fg text-xl leading-none px-2 flex-shrink-0"
             onClick={onClose}
           >
             ×
@@ -1092,18 +2190,37 @@ function RegistrySearchDialog({
               </div>
               <div>
                 <label className="label">OEM</label>
-                <select
-                  value={selectedOemGuid}
-                  onChange={(e) => setSelectedOemGuid(e.target.value)}
+                <input
+                  list="dcr-oems-list"
+                  type="text"
+                  value={oemInput}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setOemInput(v);
+                    const match = oems.find((o) => o.display === v);
+                    setSelectedOemGuid(match?.value ?? "");
+                  }}
                   className="input"
-                >
-                  <option value="">Any</option>
-                  {oems.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.display}
-                    </option>
+                  placeholder="Any (type to search…)"
+                  autoComplete="off"
+                />
+                <datalist id="dcr-oems-list">
+                  {(oemInput.trim() === "" && !showAllOems
+                    ? oems.filter((o) => isPreferredOem(o.display))
+                    : oems
+                  ).map((o) => (
+                    <option key={o.value} value={o.display} />
                   ))}
-                </select>
+                </datalist>
+                {oemInput.trim() === "" && !showAllOems && (
+                  <button
+                    type="button"
+                    className="text-xs text-fg-subtle hover:text-fg-muted mt-1"
+                    onClick={() => setShowAllOems(true)}
+                  >
+                    More…
+                  </button>
+                )}
               </div>
               <div>
                 <label className="label">Scale</label>
@@ -1119,6 +2236,72 @@ function RegistrySearchDialog({
                     </option>
                   ))}
                 </select>
+              </div>
+              <div>
+                <label className="label">Brand</label>
+                <input
+                  list="dcr-brands-list"
+                  type="text"
+                  value={brandInput}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setBrandInput(v);
+                    const match = brands.find((b) => b.display === v);
+                    setSelectedBrandGuid(match?.value ?? "");
+                  }}
+                  className="input"
+                  placeholder="Any (type to search…)"
+                  autoComplete="off"
+                />
+                <datalist id="dcr-brands-list">
+                  {brands.map((b) => (
+                    <option key={b.value} value={b.display} />
+                  ))}
+                </datalist>
+              </div>
+              <div>
+                <label className="label">Make</label>
+                <input
+                  list="dcr-makes-list"
+                  type="text"
+                  value={makeInput}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setMakeInput(v);
+                    const match = makes.find((m) => m.display === v);
+                    setSelectedMakeGuid(match?.value ?? "");
+                  }}
+                  className="input"
+                  placeholder="Any (type to search…)"
+                  autoComplete="off"
+                />
+                <datalist id="dcr-makes-list">
+                  {makes.map((m) => (
+                    <option key={m.value} value={m.display} />
+                  ))}
+                </datalist>
+              </div>
+              <div>
+                <label className="label">Finish</label>
+                <input
+                  list="dcr-finishes-list"
+                  type="text"
+                  value={finishInput}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setFinishInput(v);
+                    const match = finishes.find((f) => f.display === v);
+                    setSelectedFinishGuid(match?.value ?? "");
+                  }}
+                  className="input"
+                  placeholder="Any (type to search…)"
+                  autoComplete="off"
+                />
+                <datalist id="dcr-finishes-list">
+                  {finishes.map((f) => (
+                    <option key={f.value} value={f.display} />
+                  ))}
+                </datalist>
               </div>
             </div>
 
@@ -1193,6 +2376,26 @@ function RegistrySearchDialog({
                         .filter(Boolean)
                         .join(" · ")}
                     </div>
+                    {r.detail_url && (
+                      <a
+                        href={
+                          r.detail_url.startsWith("http")
+                            ? r.detail_url
+                            : "https://www.diecastregistry.com" + r.detail_url
+                        }
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          const url = r.detail_url!.startsWith("http")
+                            ? r.detail_url!
+                            : "https://www.diecastregistry.com" + r.detail_url!;
+                          void openExternal(url);
+                        }}
+                        className="text-xs text-accent hover:underline mt-1 inline-block"
+                      >
+                        View on diecastregistry.com →
+                      </a>
+                    )}
                   </div>
                   <div className="text-right text-xs tabular-nums shrink-0">
                     <div>retail {formatCents(r.retail_value_cents)}</div>
@@ -1270,8 +2473,10 @@ function OfferBadge({ offer }: { offer: ReceivedOffer }) {
   return (
     <a
       href={offer.item_web_url}
-      target="_blank"
-      rel="noreferrer"
+      onClick={(e) => {
+        e.preventDefault();
+        void openExternal(offer.item_web_url);
+      }}
       title="A seller sent you a discount offer on this item — open eBay to accept or decline"
       className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 text-[11px] hover:bg-emerald-500/20"
     >

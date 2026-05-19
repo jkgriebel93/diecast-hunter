@@ -1,0 +1,24 @@
+## OEMs to Populate Dropdown(s) With and Corresponding Brands
+- Action/Lionel
+  - ARC
+  - Castaway
+  - Clear & 1/2 Clear
+  - Clearly Collectibles
+  - Crystal Car
+  - Elite
+  - Muscle Machines
+  - Museum Series
+  - NASCAR Authentics
+  - Other
+  - QVC FRFO
+  - RCCA
+  - SelectNet
+- Brookfield
+- ERTL
+- Other
+- Racing Champions
+- Revell
+- Team Caliber
+- Winners Circle
+- Include remaining in an expandable sub-list or something?
+

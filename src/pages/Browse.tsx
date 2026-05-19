@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
+import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
   api,
   formatCents,
@@ -543,8 +544,10 @@ function SearchCard({
         <a
           className="text-accent hover:underline"
           href={item.web_url}
-          target="_blank"
-          rel="noreferrer"
+          onClick={(e) => {
+            e.preventDefault();
+            void openExternal(item.web_url);
+          }}
         >
           View on eBay →
         </a>

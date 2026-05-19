@@ -79,12 +79,15 @@ pub async fn link_listing_to_registry(
     };
 
     // 2. Enrich the entry from its detail page (M3 path). We log into DCR
-    //    and run a targeted enrichment for just this entry by temporarily
-    //    blanking its details_fetched_at so the existing pass picks it up.
-    let enriched = run_targeted_enrichment(pool, entry_id).await.unwrap_or_else(|e| {
-        tracing::warn!("registry-link: enrichment of entry {entry_id} failed: {e}");
-        false
-    });
+    //    and fetch the single entry's detail page directly — earlier versions
+    //    re-used the global "enrich all pending entries" pass, which hangs
+    //    for many minutes if there's a backlog of stubs.
+    let enriched = run_targeted_enrichment(pool, entry_id, registry_guid, detail_url)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!("registry-link: enrichment of entry {entry_id} failed: {e}");
+            false
+        });
 
     // 3. Lock in the manual match.
     sqlx::query(
@@ -109,29 +112,50 @@ pub async fn link_listing_to_registry(
     })
 }
 
-async fn run_targeted_enrichment(pool: &SqlitePool, entry_id: i64) -> AppResult<bool> {
-    // Force re-enrichment of just this row by clearing details_fetched_at,
-    // then running a non-force enrichment pass and counting our row in the
-    // results.
-    sqlx::query(
-        "UPDATE registry_entries SET details_fetched_at = NULL WHERE id = ?",
-    )
-    .bind(entry_id)
-    .execute(pool)
-    .await?;
+async fn run_targeted_enrichment(
+    pool: &SqlitePool,
+    entry_id: i64,
+    registry_guid: &str,
+    detail_url: Option<&str>,
+) -> AppResult<bool> {
+    let detail_url = match detail_url {
+        Some(u) => u.to_string(),
+        None => match lookup_detail_url(pool, entry_id).await? {
+            Some(u) => u,
+            None => {
+                tracing::warn!(
+                    "registry-link: entry {entry_id} has no detail_url — skipping enrichment"
+                );
+                return Ok(false);
+            }
+        },
+    };
 
     let (username, password) = load_dcr_credentials(pool).await?;
     let client = DcrClient::new()?;
     client.login(&username, &password).await?;
 
-    let summary = dcr_registry::enrich_pending_registry_entries(
-        pool,
-        &client,
-        false,
-        &crate::progress::ProgressEmitter::null("registry_link"),
-    )
-    .await?;
-    Ok(summary.enriched > 0)
+    dcr_registry::enrich_one(pool, &client, entry_id, registry_guid, &detail_url).await?;
+    Ok(true)
+}
+
+async fn lookup_detail_url(pool: &SqlitePool, entry_id: i64) -> AppResult<Option<String>> {
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT raw_json FROM registry_entries WHERE id = ?")
+            .bind(entry_id)
+            .fetch_optional(pool)
+            .await?;
+    let raw_json = match row.and_then(|(rj,)| rj) {
+        Some(rj) => rj,
+        None => return Ok(None),
+    };
+    let v: serde_json::Value = match serde_json::from_str(&raw_json) {
+        Ok(v) => v,
+        Err(_) => return Ok(None),
+    };
+    Ok(v.get("detail_url")
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_string()))
 }
 
 async fn load_dcr_credentials(pool: &SqlitePool) -> AppResult<(String, String)> {

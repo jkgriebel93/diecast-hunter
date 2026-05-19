@@ -84,7 +84,7 @@ struct UpdateFilterResponse {
 /// pages as a safety net) and emitting per-page progress events via the
 /// supplied emitter. `subject` is interpolated into progress labels — pass
 /// `Some("Jeff Gordon")` for driver-scoped searches, `None` for generic
-/// searches. Pass `ProgressEmitter::null(...)` when events aren't desired.
+/// searches.
 pub async fn search_all_pages_with_progress(
     client: &DcrClient,
     filter: &ProductionSearchFilter,

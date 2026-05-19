@@ -4,6 +4,7 @@ use std::sync::atomic::Ordering;
 use tauri::State;
 
 use crate::error::{AppError, AppResult};
+use crate::listing_groups;
 use crate::progress::ProgressEmitter;
 use crate::saved;
 use crate::settings;
@@ -497,6 +498,9 @@ pub struct ListingRow {
     /// Total cost (price + shipping) as a percentage of registry retail. None
     /// if either side is missing. Lower = better deal.
     pub deal_score: Option<f64>,
+    /// ids of the user-curated groups this listing belongs to. Empty when
+    /// the listing isn't in any group. See `listing_groups` module.
+    pub group_ids: Vec<i64>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -530,6 +534,7 @@ struct ListingRowRaw {
     matched_retail_cents: Option<i64>,
     matched_wholesale_cents: Option<i64>,
     matched_raw_json: Option<String>,
+    group_ids_csv: Option<String>,
 }
 
 #[tauri::command]
@@ -553,7 +558,10 @@ pub async fn list_listings(
                 re.scale AS matched_scale,
                 re.retail_value_cents AS matched_retail_cents,
                 re.wholesale_value_cents AS matched_wholesale_cents,
-                re.raw_json AS matched_raw_json
+                re.raw_json AS matched_raw_json,
+                (SELECT GROUP_CONCAT(group_id)
+                   FROM listing_group_members
+                  WHERE listing_id = l.id) AS group_ids_csv
          FROM listings l
          JOIN sellers s ON s.id = l.seller_id
          LEFT JOIN listing_matches lm ON lm.listing_id = l.id
@@ -616,6 +624,15 @@ pub async fn list_listings(
                 matched_wholesale_cents: r.matched_wholesale_cents,
                 matched_detail_url,
                 deal_score,
+                group_ids: r
+                    .group_ids_csv
+                    .as_deref()
+                    .map(|csv| {
+                        csv.split(',')
+                            .filter_map(|s| s.trim().parse::<i64>().ok())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default(),
             }
         })
         .collect())
@@ -1274,4 +1291,71 @@ pub async fn saved_sellers_feed(
     let q = query.as_deref().unwrap_or("").trim();
     let client = crate::ebay::EbayClient::from_settings(state.db.pool.clone()).await?;
     crate::ebay::search_diecasts(&client, q, &merged, limit, offset).await
+}
+
+// --- Listing groups -------------------------------------------------------
+
+#[tauri::command]
+pub async fn list_listing_groups(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<listing_groups::ListingGroup>> {
+    listing_groups::list_groups(&state.db.pool).await
+}
+
+#[tauri::command]
+pub async fn create_listing_group(
+    state: State<'_, AppState>,
+    input: listing_groups::ListingGroupInput,
+) -> AppResult<listing_groups::ListingGroup> {
+    listing_groups::create_group(&state.db.pool, input).await
+}
+
+#[tauri::command]
+pub async fn update_listing_group(
+    state: State<'_, AppState>,
+    id: i64,
+    input: listing_groups::ListingGroupInput,
+) -> AppResult<listing_groups::ListingGroup> {
+    listing_groups::update_group(&state.db.pool, id, input).await
+}
+
+#[tauri::command]
+pub async fn delete_listing_group(state: State<'_, AppState>, id: i64) -> AppResult<()> {
+    listing_groups::delete_group(&state.db.pool, id).await
+}
+
+#[tauri::command]
+pub async fn add_listing_to_group(
+    state: State<'_, AppState>,
+    group_id: i64,
+    listing_id: i64,
+) -> AppResult<()> {
+    listing_groups::add_listing(&state.db.pool, group_id, listing_id).await
+}
+
+#[tauri::command]
+pub async fn remove_listing_from_group(
+    state: State<'_, AppState>,
+    group_id: i64,
+    listing_id: i64,
+) -> AppResult<()> {
+    listing_groups::remove_listing(&state.db.pool, group_id, listing_id).await
+}
+
+#[tauri::command]
+pub async fn add_listings_to_group(
+    state: State<'_, AppState>,
+    group_id: i64,
+    listing_ids: Vec<i64>,
+) -> AppResult<listing_groups::BulkAddResult> {
+    listing_groups::add_listings(&state.db.pool, group_id, &listing_ids).await
+}
+
+#[tauri::command]
+pub async fn remove_listings_from_group(
+    state: State<'_, AppState>,
+    group_id: i64,
+    listing_ids: Vec<i64>,
+) -> AppResult<i64> {
+    listing_groups::remove_listings(&state.db.pool, group_id, &listing_ids).await
 }

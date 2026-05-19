@@ -199,7 +199,50 @@ export const api = {
     }),
   syncEbaySaved: () => invoke<SavedSyncSummary>("sync_ebay_saved"),
   syncEbayAll: () => invoke<EbaySyncAllSummary>("sync_ebay_all"),
+  listListingGroups: () => invoke<ListingGroup[]>("list_listing_groups"),
+  createListingGroup: (input: ListingGroupInput) =>
+    invoke<ListingGroup>("create_listing_group", { input }),
+  updateListingGroup: (id: number, input: ListingGroupInput) =>
+    invoke<ListingGroup>("update_listing_group", { id, input }),
+  deleteListingGroup: (id: number) =>
+    invoke<void>("delete_listing_group", { id }),
+  addListingToGroup: (groupId: number, listingId: number) =>
+    invoke<void>("add_listing_to_group", { groupId, listingId }),
+  removeListingFromGroup: (groupId: number, listingId: number) =>
+    invoke<void>("remove_listing_from_group", { groupId, listingId }),
+  addListingsToGroup: (groupId: number, listingIds: number[]) =>
+    invoke<BulkAddResult>("add_listings_to_group", {
+      groupId,
+      listingIds,
+    }),
+  removeListingsFromGroup: (groupId: number, listingIds: number[]) =>
+    invoke<number>("remove_listings_from_group", {
+      groupId,
+      listingIds,
+    }),
 };
+
+export interface BulkAddResult {
+  added: number;
+  already_present: number;
+}
+
+export interface ListingGroup {
+  id: number;
+  name: string;
+  description: string | null;
+  target_price_cents: number | null;
+  archived: boolean;
+  created_at: number;
+  member_count: number;
+}
+
+export interface ListingGroupInput {
+  name: string;
+  description: string | null;
+  target_price_cents: number | null;
+  archived: boolean;
+}
 
 export interface SavedSyncSummary {
   searches_seen: number;
@@ -292,6 +335,26 @@ export interface FormOptionRow {
   value: string;
   display: string;
   normalized: string;
+}
+
+export const PREFERRED_OEM_DISPLAYS = [
+  "Action/Lionel",
+  "Racing Champions",
+  "Revell",
+  "Team Caliber",
+  "Winners Circle",
+];
+
+function normalizeOemKey(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+const PREFERRED_OEM_KEYS = new Set(
+  PREFERRED_OEM_DISPLAYS.map(normalizeOemKey),
+);
+
+export function isPreferredOem(display: string): boolean {
+  return PREFERRED_OEM_KEYS.has(normalizeOemKey(display));
 }
 
 export interface ProductionSearchFilter {
@@ -482,6 +545,8 @@ export interface ListingRow {
   matched_detail_url: string | null;
   /** Total (price + shipping) as percentage of registry retail. Lower = better deal. */
   deal_score: number | null;
+  /** ids of user-curated listing groups this row belongs to. */
+  group_ids: number[];
 }
 
 export function formatCents(cents: number | null): string {

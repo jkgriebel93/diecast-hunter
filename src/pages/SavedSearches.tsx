@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
+import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
   api,
   formatCents,
@@ -369,8 +370,10 @@ function ResultRow({
       <div className="flex-1 min-w-0">
         <a
           href={item.web_url}
-          target="_blank"
-          rel="noreferrer"
+          onClick={(e) => {
+            e.preventDefault();
+            void openExternal(item.web_url);
+          }}
           className="text-sm text-fg hover:text-accent truncate block"
         >
           {item.title}

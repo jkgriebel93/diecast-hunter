@@ -3,6 +3,7 @@ mod db;
 mod dcr;
 mod ebay;
 mod error;
+mod listing_groups;
 mod listing_receiver;
 mod progress;
 mod saved;
@@ -111,6 +112,14 @@ pub fn run() {
             commands::saved_sellers_feed,
             commands::sync_ebay_saved,
             commands::sync_ebay_all,
+            commands::list_listing_groups,
+            commands::create_listing_group,
+            commands::update_listing_group,
+            commands::delete_listing_group,
+            commands::add_listing_to_group,
+            commands::remove_listing_from_group,
+            commands::add_listings_to_group,
+            commands::remove_listings_from_group,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

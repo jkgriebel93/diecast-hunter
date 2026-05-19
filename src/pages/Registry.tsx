@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
   api,
   formatCents,
+  isPreferredOem,
   type Condition,
   type FormOptionRow,
   type ProductionSearchResult,
@@ -38,13 +40,24 @@ export function Registry() {
   const [oems, setOems] = useState<FormOptionRow[]>([]);
   const [scales, setScales] = useState<FormOptionRow[]>([]);
   const [years, setYears] = useState<FormOptionRow[]>([]);
+  const [brands, setBrands] = useState<FormOptionRow[]>([]);
+  const [makes, setMakes] = useState<FormOptionRow[]>([]);
+  const [finishes, setFinishes] = useState<FormOptionRow[]>([]);
   const [optionsLoaded, setOptionsLoaded] = useState(false);
 
   const [driverInput, setDriverInput] = useState("");
   const [selectedDriverGuid, setSelectedDriverGuid] = useState("");
   const [selectedYear, setSelectedYear] = useState("");
+  const [oemInput, setOemInput] = useState("");
   const [selectedOemGuid, setSelectedOemGuid] = useState("");
+  const [showAllOems, setShowAllOems] = useState(false);
   const [selectedScaleGuid, setSelectedScaleGuid] = useState("");
+  const [brandInput, setBrandInput] = useState("");
+  const [selectedBrandGuid, setSelectedBrandGuid] = useState("");
+  const [makeInput, setMakeInput] = useState("");
+  const [selectedMakeGuid, setSelectedMakeGuid] = useState("");
+  const [finishInput, setFinishInput] = useState("");
+  const [selectedFinishGuid, setSelectedFinishGuid] = useState("");
   const [autographed, setAutographed] = useState(false);
   const [raced, setRaced] = useState(false);
 
@@ -64,16 +77,22 @@ export function Registry() {
   async function loadOptions() {
     setError(null);
     try {
-      const [d, o, s, y] = await Promise.all([
+      const [d, o, s, y, b, m, f] = await Promise.all([
         api.listRegistryFormOptions("driver"),
         api.listRegistryFormOptions("oem"),
         api.listRegistryFormOptions("scale"),
         api.listRegistryFormOptions("year"),
+        api.listRegistryFormOptions("brand"),
+        api.listRegistryFormOptions("make"),
+        api.listRegistryFormOptions("finish"),
       ]);
       setDrivers(d);
       setOems(o);
       setScales(s);
       setYears(y);
+      setBrands(b);
+      setMakes(m);
+      setFinishes(f);
       setOptionsLoaded(true);
     } catch (e) {
       setError(String(e));
@@ -107,6 +126,9 @@ export function Registry() {
         years: selectedYear ? [selectedYear] : [],
         oem_guids: selectedOemGuid ? [selectedOemGuid] : [],
         scale_guids: selectedScaleGuid ? [selectedScaleGuid] : [],
+        brand_guids: selectedBrandGuid ? [selectedBrandGuid] : [],
+        make_guids: selectedMakeGuid ? [selectedMakeGuid] : [],
+        finish_guids: selectedFinishGuid ? [selectedFinishGuid] : [],
         autographed,
         raced,
       });
@@ -122,8 +144,16 @@ export function Registry() {
     setDriverInput("");
     setSelectedDriverGuid("");
     setSelectedYear("");
+    setOemInput("");
     setSelectedOemGuid("");
+    setShowAllOems(false);
     setSelectedScaleGuid("");
+    setBrandInput("");
+    setSelectedBrandGuid("");
+    setMakeInput("");
+    setSelectedMakeGuid("");
+    setFinishInput("");
+    setSelectedFinishGuid("");
     setAutographed(false);
     setRaced(false);
     setResults(null);
@@ -139,6 +169,9 @@ export function Registry() {
     !!selectedYear ||
     !!selectedOemGuid ||
     !!selectedScaleGuid ||
+    !!selectedBrandGuid ||
+    !!selectedMakeGuid ||
+    !!selectedFinishGuid ||
     autographed ||
     raced;
 
@@ -212,18 +245,37 @@ export function Registry() {
             </div>
             <div>
               <label className="label">OEM</label>
-              <select
-                value={selectedOemGuid}
-                onChange={(e) => setSelectedOemGuid(e.target.value)}
+              <input
+                list="dcr-oems-list"
+                type="text"
+                value={oemInput}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setOemInput(v);
+                  const match = oems.find((o) => o.display === v);
+                  setSelectedOemGuid(match?.value ?? "");
+                }}
                 className="input"
-              >
-                <option value="">Any</option>
-                {oems.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.display}
-                  </option>
+                placeholder="Any (type to search…)"
+                autoComplete="off"
+              />
+              <datalist id="dcr-oems-list">
+                {(oemInput.trim() === "" && !showAllOems
+                  ? oems.filter((o) => isPreferredOem(o.display))
+                  : oems
+                ).map((o) => (
+                  <option key={o.value} value={o.display} />
                 ))}
-              </select>
+              </datalist>
+              {oemInput.trim() === "" && !showAllOems && (
+                <button
+                  type="button"
+                  className="text-xs text-fg-subtle hover:text-fg-muted mt-1"
+                  onClick={() => setShowAllOems(true)}
+                >
+                  More…
+                </button>
+              )}
             </div>
             <div>
               <label className="label">Scale</label>
@@ -239,6 +291,72 @@ export function Registry() {
                   </option>
                 ))}
               </select>
+            </div>
+            <div>
+              <label className="label">Brand</label>
+              <input
+                list="dcr-brands-list"
+                type="text"
+                value={brandInput}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setBrandInput(v);
+                  const match = brands.find((b) => b.display === v);
+                  setSelectedBrandGuid(match?.value ?? "");
+                }}
+                className="input"
+                placeholder="Any (type to search…)"
+                autoComplete="off"
+              />
+              <datalist id="dcr-brands-list">
+                {brands.map((b) => (
+                  <option key={b.value} value={b.display} />
+                ))}
+              </datalist>
+            </div>
+            <div>
+              <label className="label">Make</label>
+              <input
+                list="dcr-makes-list"
+                type="text"
+                value={makeInput}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setMakeInput(v);
+                  const match = makes.find((m) => m.display === v);
+                  setSelectedMakeGuid(match?.value ?? "");
+                }}
+                className="input"
+                placeholder="Any (type to search…)"
+                autoComplete="off"
+              />
+              <datalist id="dcr-makes-list">
+                {makes.map((m) => (
+                  <option key={m.value} value={m.display} />
+                ))}
+              </datalist>
+            </div>
+            <div>
+              <label className="label">Finish</label>
+              <input
+                list="dcr-finishes-list"
+                type="text"
+                value={finishInput}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setFinishInput(v);
+                  const match = finishes.find((f) => f.display === v);
+                  setSelectedFinishGuid(match?.value ?? "");
+                }}
+                className="input"
+                placeholder="Any (type to search…)"
+                autoComplete="off"
+              />
+              <datalist id="dcr-finishes-list">
+                {finishes.map((f) => (
+                  <option key={f.value} value={f.display} />
+                ))}
+              </datalist>
             </div>
           </div>
 
@@ -362,8 +480,10 @@ export function Registry() {
                       <a
                         className="text-xs text-accent hover:underline"
                         href={DCR_BASE + r.detail_url}
-                        target="_blank"
-                        rel="noreferrer"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          void openExternal(DCR_BASE + r.detail_url!);
+                        }}
                       >
                         View on diecastregistry.com →
                       </a>

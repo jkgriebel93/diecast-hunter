@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
   api,
   formatCents,
@@ -374,8 +375,10 @@ function DriverCard({
                       <a
                         className="text-xs text-accent hover:underline"
                         href={DCR_BASE + item.detail_url}
-                        target="_blank"
-                        rel="noreferrer"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          void openExternal(DCR_BASE + item.detail_url!);
+                        }}
                       >
                         View on diecastregistry.com →
                       </a>
