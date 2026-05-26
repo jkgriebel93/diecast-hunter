@@ -68,6 +68,11 @@ pub async fn add_listing_from_input(
 
     let (listing_id, created) = upsert_listing(pool, &item).await?;
     insert_history(pool, listing_id, &item).await?;
+    if let Err(e) = crate::sync::driver_assoc::associate_listing_driver(pool, listing_id).await {
+        // Auto-association is a soft hint — failure shouldn't block the
+        // listing from being saved.
+        tracing::warn!("driver auto-assoc for listing {listing_id} failed: {e}");
+    }
 
     Ok(AddListingResult {
         listing_id: Some(listing_id),
@@ -108,6 +113,9 @@ pub async fn refresh_listing(pool: &SqlitePool, listing_id: i64) -> AppResult<()
     let item = fetch_item_by_legacy_id(&client, &legacy_id).await?;
     upsert_listing(pool, &item).await?;
     insert_history(pool, listing_id, &item).await?;
+    if let Err(e) = crate::sync::driver_assoc::associate_listing_driver(pool, listing_id).await {
+        tracing::warn!("driver auto-assoc for listing {listing_id} failed: {e}");
+    }
     Ok(())
 }
 

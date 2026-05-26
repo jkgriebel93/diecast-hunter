@@ -498,6 +498,15 @@ pub struct ListingRow {
     /// Total cost (price + shipping) as a percentage of registry retail. None
     /// if either side is missing. Lower = better deal.
     pub deal_score: Option<f64>,
+    /// Auto-associated driver from `listings.driver_id` (populated by
+    /// `sync::driver_assoc`). Independent of any registry match: lets the UI
+    /// group/filter by driver even when no `listing_matches` row exists.
+    pub auto_driver_id: Option<i64>,
+    pub auto_driver_name: Option<String>,
+    /// True when the user has manually pinned the driver (via
+    /// set_listing_driver / clear_listing_driver). Auto-association skips
+    /// rows where this is set.
+    pub auto_driver_user_set: bool,
     /// ids of the user-curated groups this listing belongs to. Empty when
     /// the listing isn't in any group. See `listing_groups` module.
     pub group_ids: Vec<i64>,
@@ -534,6 +543,9 @@ struct ListingRowRaw {
     matched_retail_cents: Option<i64>,
     matched_wholesale_cents: Option<i64>,
     matched_raw_json: Option<String>,
+    auto_driver_id: Option<i64>,
+    auto_driver_name: Option<String>,
+    auto_driver_user_set: i64,
     group_ids_csv: Option<String>,
 }
 
@@ -559,6 +571,9 @@ pub async fn list_listings(
                 re.retail_value_cents AS matched_retail_cents,
                 re.wholesale_value_cents AS matched_wholesale_cents,
                 re.raw_json AS matched_raw_json,
+                ad.id AS auto_driver_id,
+                ad.name AS auto_driver_name,
+                l.driver_id_user_set AS auto_driver_user_set,
                 (SELECT GROUP_CONCAT(group_id)
                    FROM listing_group_members
                   WHERE listing_id = l.id) AS group_ids_csv
@@ -567,6 +582,7 @@ pub async fn list_listings(
          LEFT JOIN listing_matches lm ON lm.listing_id = l.id
          LEFT JOIN registry_entries re ON re.id = lm.registry_entry_id
          LEFT JOIN drivers d ON d.id = re.driver_id
+         LEFT JOIN drivers ad ON ad.id = l.driver_id
          ORDER BY l.status = 'active' DESC, l.last_seen_at DESC",
     )
     .fetch_all(&state.db.pool)
@@ -624,6 +640,9 @@ pub async fn list_listings(
                 matched_wholesale_cents: r.matched_wholesale_cents,
                 matched_detail_url,
                 deal_score,
+                auto_driver_id: r.auto_driver_id,
+                auto_driver_name: r.auto_driver_name,
+                auto_driver_user_set: r.auto_driver_user_set != 0,
                 group_ids: r
                     .group_ids_csv
                     .as_deref()
@@ -674,6 +693,134 @@ pub async fn reject_listing_match(
     .execute(&state.db.pool)
     .await?;
     Ok(())
+}
+
+// ----- Listing driver tag (independent of registry match) -----
+
+#[derive(Serialize)]
+pub struct DriverOption {
+    pub id: i64,
+    pub name: String,
+    pub normalized_name: String,
+}
+
+/// Every driver we know about locally. Populated organically by DCR
+/// collection sync, registry pre-warm, and user driver-tag picks below.
+/// Returned alphabetically by name (case-insensitive).
+#[tauri::command]
+pub async fn list_drivers(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<DriverOption>> {
+    let rows: Vec<(i64, String, String)> = sqlx::query_as(
+        "SELECT id, name, normalized_name FROM drivers ORDER BY name COLLATE NOCASE",
+    )
+    .fetch_all(&state.db.pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, name, normalized_name)| DriverOption {
+            id,
+            name,
+            normalized_name,
+        })
+        .collect())
+}
+
+/// User manually tags a listing with a driver. Identified by normalized
+/// name so the caller can pick from either the local `drivers` table or
+/// the DCR form-options cache — if the normalized name doesn't exist
+/// locally yet, we insert a stub row so future listings can reuse it.
+/// Sets `driver_id_user_set = 1` so the auto-association pass leaves
+/// this row alone.
+#[tauri::command]
+pub async fn set_listing_driver(
+    state: State<'_, AppState>,
+    listing_id: i64,
+    driver_name: String,
+    driver_normalized: String,
+) -> AppResult<i64> {
+    let pool = &state.db.pool;
+    let name = driver_name.trim();
+    let normalized = driver_normalized.trim();
+    if name.is_empty() || normalized.is_empty() {
+        return Err(AppError::Parse(
+            "driver_name and driver_normalized are required".into(),
+        ));
+    }
+
+    // Upsert the local driver row. If a row with this normalized name
+    // already exists, keep its display name (avoid clobbering the
+    // canonical capitalization the rest of the app uses).
+    sqlx::query(
+        "INSERT INTO drivers (name, normalized_name) VALUES (?, ?)
+         ON CONFLICT(normalized_name) DO NOTHING",
+    )
+    .bind(name)
+    .bind(normalized)
+    .execute(pool)
+    .await?;
+    let (driver_id,): (i64,) =
+        sqlx::query_as("SELECT id FROM drivers WHERE normalized_name = ?")
+            .bind(normalized)
+            .fetch_one(pool)
+            .await?;
+
+    sqlx::query(
+        "UPDATE listings
+         SET driver_id = ?, driver_id_user_set = 1
+         WHERE id = ?",
+    )
+    .bind(driver_id)
+    .bind(listing_id)
+    .execute(pool)
+    .await?;
+    Ok(driver_id)
+}
+
+/// User explicitly clears the driver tag — pins the listing to "no
+/// driver" so auto-association won't try to fill it in. Different from
+/// `reset_listing_driver`, which drops the pin and re-runs detection.
+#[tauri::command]
+pub async fn clear_listing_driver(
+    state: State<'_, AppState>,
+    listing_id: i64,
+) -> AppResult<()> {
+    sqlx::query(
+        "UPDATE listings
+         SET driver_id = NULL, driver_id_user_set = 1
+         WHERE id = ?",
+    )
+    .bind(listing_id)
+    .execute(&state.db.pool)
+    .await?;
+    Ok(())
+}
+
+/// Drop the manual pin and re-run auto-detection immediately. The
+/// returned `driver_id` is whatever detection landed on (None when the
+/// title doesn't contain any known driver name).
+#[tauri::command]
+pub async fn reset_listing_driver(
+    state: State<'_, AppState>,
+    listing_id: i64,
+) -> AppResult<Option<i64>> {
+    let pool = &state.db.pool;
+    sqlx::query(
+        "UPDATE listings
+         SET driver_id = NULL, driver_id_user_set = 0
+         WHERE id = ?",
+    )
+    .bind(listing_id)
+    .execute(pool)
+    .await?;
+    sync::driver_assoc::associate_listing_driver(pool, listing_id).await?;
+    let row: Option<(Option<i64>,)> = sqlx::query_as(
+        "SELECT driver_id FROM listings WHERE id = ?",
+    )
+    .bind(listing_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.and_then(|(d,)| d))
 }
 
 // ----- eBay listing filter -----

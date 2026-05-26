@@ -138,6 +138,21 @@ export const api = {
     invoke<void>("clear_listing_match", { listingId }),
   rejectListingMatch: (listingId: number) =>
     invoke<void>("reject_listing_match", { listingId }),
+  listDrivers: () => invoke<DriverOption[]>("list_drivers"),
+  setListingDriver: (
+    listingId: number,
+    driverName: string,
+    driverNormalized: string,
+  ) =>
+    invoke<number>("set_listing_driver", {
+      listingId,
+      driverName,
+      driverNormalized,
+    }),
+  clearListingDriver: (listingId: number) =>
+    invoke<void>("clear_listing_driver", { listingId }),
+  resetListingDriver: (listingId: number) =>
+    invoke<number | null>("reset_listing_driver", { listingId }),
   refreshRegistryFormOptions: () =>
     invoke<RefreshOptionsSummary>("refresh_registry_form_options"),
   listRegistryFormOptions: (field: string) =>
@@ -545,8 +560,19 @@ export interface ListingRow {
   matched_detail_url: string | null;
   /** Total (price + shipping) as percentage of registry retail. Lower = better deal. */
   deal_score: number | null;
+  /** Driver auto-detected from the listing title (independent of any registry match). */
+  auto_driver_id: number | null;
+  auto_driver_name: string | null;
+  /** True when the user manually pinned the driver — auto-association leaves it alone. */
+  auto_driver_user_set: boolean;
   /** ids of user-curated listing groups this row belongs to. */
   group_ids: number[];
+}
+
+export interface DriverOption {
+  id: number;
+  name: string;
+  normalized_name: string;
 }
 
 export function formatCents(cents: number | null): string {

@@ -3,6 +3,7 @@
 pub mod dcr_collection;
 pub mod dcr_register;
 pub mod dcr_registry;
+pub mod driver_assoc;
 pub mod ebay_all;
 pub mod ebay_listing;
 pub mod ebay_saved;

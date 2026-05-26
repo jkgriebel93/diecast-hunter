@@ -4,6 +4,7 @@ import {
   api,
   formatCents,
   isPreferredOem,
+  type DriverOption,
   type FormOptionRow,
   type ListingGroup,
   type ListingGroupInput,
@@ -84,6 +85,12 @@ export function Listings() {
   const [watchlistSummary, setWatchlistSummary] =
     useState<WatchlistSyncSummary | null>(null);
 
+  // Driver-picker (independent of registry match). `tagDriverId` holds
+  // the listing currently in edit mode; null when no popover is open.
+  // `localDrivers` is the local drivers table — used for autocomplete.
+  const [localDrivers, setLocalDrivers] = useState<DriverOption[]>([]);
+  const [tagDriverId, setTagDriverId] = useState<number | null>(null);
+
   async function load() {
     setError(null);
     try {
@@ -98,7 +105,54 @@ export function Listings() {
     load();
     void loadOffers();
     void loadGroups();
+    void loadLocalDrivers();
   }, []);
+
+  async function loadLocalDrivers() {
+    try {
+      const list = await api.listDrivers();
+      setLocalDrivers(list);
+    } catch {
+      // Non-fatal: the driver picker still works on free-form input.
+    }
+  }
+
+  async function onSetDriver(
+    listingId: number,
+    name: string,
+    normalized: string,
+  ) {
+    setError(null);
+    try {
+      await api.setListingDriver(listingId, name, normalized);
+      setTagDriverId(null);
+      await Promise.all([load(), loadLocalDrivers()]);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function onClearDriver(listingId: number) {
+    setError(null);
+    try {
+      await api.clearListingDriver(listingId);
+      setTagDriverId(null);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function onResetDriver(listingId: number) {
+    setError(null);
+    try {
+      await api.resetListingDriver(listingId);
+      setTagDriverId(null);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
 
   async function loadGroups() {
     try {
@@ -693,6 +747,15 @@ export function Listings() {
               onRemoveFromGroup={(gid) =>
                 onRemoveListingFromGroup(r.listing_id, gid)
               }
+              localDrivers={localDrivers}
+              tagDriverOpen={tagDriverId === r.listing_id}
+              onOpenTagDriver={() => setTagDriverId(r.listing_id)}
+              onCancelTagDriver={() => setTagDriverId(null)}
+              onSetDriver={(name, normalized) =>
+                onSetDriver(r.listing_id, name, normalized)
+              }
+              onClearDriver={() => onClearDriver(r.listing_id)}
+              onResetDriver={() => onResetDriver(r.listing_id)}
               selectMode={selectMode}
               selected={selectedIds.has(r.listing_id)}
               onToggleSelect={() => toggleSelected(r.listing_id)}
@@ -714,6 +777,13 @@ export function Listings() {
           onChangeMatch={setRegistrySearchListing}
           onAddToGroup={onAddListingToGroup}
           onRemoveFromGroup={onRemoveListingFromGroup}
+          localDrivers={localDrivers}
+          tagDriverId={tagDriverId}
+          onOpenTagDriver={setTagDriverId}
+          onCancelTagDriver={() => setTagDriverId(null)}
+          onSetDriver={onSetDriver}
+          onClearDriver={onClearDriver}
+          onResetDriver={onResetDriver}
           selectMode={selectMode}
           selectedIds={selectedIds}
           onToggleSelect={toggleSelected}
@@ -733,6 +803,13 @@ export function Listings() {
           onChangeMatch={setRegistrySearchListing}
           onAddToGroup={onAddListingToGroup}
           onRemoveFromGroup={onRemoveListingFromGroup}
+          localDrivers={localDrivers}
+          tagDriverId={tagDriverId}
+          onOpenTagDriver={setTagDriverId}
+          onCancelTagDriver={() => setTagDriverId(null)}
+          onSetDriver={onSetDriver}
+          onClearDriver={onClearDriver}
+          onResetDriver={onResetDriver}
           selectMode={selectMode}
           selectedIds={selectedIds}
           onToggleSelect={toggleSelected}
@@ -796,6 +873,13 @@ function ListingCard({
   onChangeMatch,
   onAddToGroup,
   onRemoveFromGroup,
+  localDrivers,
+  tagDriverOpen,
+  onOpenTagDriver,
+  onCancelTagDriver,
+  onSetDriver,
+  onClearDriver,
+  onResetDriver,
   selectMode,
   selected,
   onToggleSelect,
@@ -813,6 +897,13 @@ function ListingCard({
   onChangeMatch: () => void;
   onAddToGroup: (groupId: number) => void;
   onRemoveFromGroup: (groupId: number) => void;
+  localDrivers: DriverOption[];
+  tagDriverOpen: boolean;
+  onOpenTagDriver: () => void;
+  onCancelTagDriver: () => void;
+  onSetDriver: (name: string, normalized: string) => void;
+  onClearDriver: () => void;
+  onResetDriver: () => void;
   selectMode: boolean;
   selected: boolean;
   onToggleSelect: () => void;
@@ -926,6 +1017,17 @@ function ListingCard({
             Unmatched — link a registry entry to enable retail comparison.
           </div>
         )}
+
+        <DriverTagSection
+          row={row}
+          localDrivers={localDrivers}
+          open={tagDriverOpen}
+          onOpen={onOpenTagDriver}
+          onCancel={onCancelTagDriver}
+          onSet={onSetDriver}
+          onClear={onClearDriver}
+          onReset={onResetDriver}
+        />
 
         <div className="text-xs text-fg-subtle mt-1">
           {ended
@@ -1060,6 +1162,159 @@ function DealBadge({ score }: { score: number }) {
   );
 }
 
+/** Lower-case + collapse non-alphanumeric runs to single hyphens. Matches
+ *  the convention used in the local `drivers` table (e.g. "Dale Earnhardt
+ *  Jr." → "dale-earnhardt-jr"). The Rust side doesn't actually care about
+ *  the exact format — it just uses normalized as a unique key — but
+ *  consistency makes the local autocomplete + DCR form-options
+ *  interoperate cleanly. */
+function normalizeDriverName(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function DriverTagSection({
+  row,
+  localDrivers,
+  open,
+  onOpen,
+  onCancel,
+  onSet,
+  onClear,
+  onReset,
+}: {
+  row: ListingRow;
+  localDrivers: DriverOption[];
+  open: boolean;
+  onOpen: () => void;
+  onCancel: () => void;
+  onSet: (name: string, normalized: string) => void;
+  onClear: () => void;
+  onReset: () => void;
+}) {
+  // Picker buffer. Seeded from whatever's currently tagged on the
+  // listing each time the picker opens. Independent of the row's
+  // committed value so cancel doesn't have side effects.
+  const [draft, setDraft] = useState("");
+
+  useEffect(() => {
+    if (open) {
+      setDraft(row.auto_driver_name ?? "");
+    }
+  }, [open, row.auto_driver_name]);
+
+  const userSet = row.auto_driver_user_set;
+  const hasDriver = row.auto_driver_name !== null;
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    const name = draft.trim();
+    if (!name) {
+      // Empty draft means "clear" — pin to no driver.
+      onClear();
+      return;
+    }
+    // If the typed name exactly matches a local driver, reuse its
+    // canonical normalized form (so the same person tagged two
+    // different ways still collapses to one row).
+    const exact = localDrivers.find(
+      (d) => d.name.toLowerCase() === name.toLowerCase(),
+    );
+    const normalized = exact?.normalized_name ?? normalizeDriverName(name);
+    onSet(exact?.name ?? name, normalized);
+  }
+
+  if (!open) {
+    return (
+      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+        {hasDriver ? (
+          <span className="inline-flex items-center gap-1 rounded border border-border bg-bg-elevated px-1.5 py-0.5">
+            <span className="text-fg-muted">Driver:</span>
+            <span className="text-fg">{row.auto_driver_name}</span>
+            {userSet ? (
+              <span
+                className="text-[10px] uppercase tracking-wide text-accent"
+                title="You manually pinned this driver — auto-detection won't change it"
+              >
+                manual
+              </span>
+            ) : (
+              <span
+                className="text-[10px] uppercase tracking-wide text-fg-faint"
+                title="Detected automatically from the listing title"
+              >
+                auto
+              </span>
+            )}
+          </span>
+        ) : userSet ? (
+          <span className="text-fg-subtle">No driver (pinned).</span>
+        ) : null}
+        <button
+          type="button"
+          className="text-fg-muted hover:text-fg"
+          onClick={onOpen}
+          title="Manually tag this listing with a driver — independent of any registry match"
+        >
+          {hasDriver ? "Change driver…" : "Tag driver…"}
+        </button>
+        {userSet && (
+          <button
+            type="button"
+            className="text-fg-subtle hover:text-fg-muted"
+            onClick={onReset}
+            title="Drop the manual pin and re-run auto-detection on the title"
+          >
+            Reset to auto
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  const listId = `driver-options-${row.listing_id}`;
+  return (
+    <form onSubmit={submit} className="mt-1 flex items-center gap-1.5 text-xs">
+      <input
+        list={listId}
+        type="text"
+        autoFocus
+        className="input !py-1 !text-xs flex-1 max-w-xs"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder="Driver name (e.g. Jeff Gordon)"
+      />
+      <datalist id={listId}>
+        {localDrivers.map((d) => (
+          <option key={d.id} value={d.name} />
+        ))}
+      </datalist>
+      <button type="submit" className="text-emerald-400 hover:text-emerald-300">
+        Save
+      </button>
+      <button
+        type="button"
+        className="text-fg-subtle hover:text-fg-muted"
+        onClick={() => {
+          onClear();
+        }}
+        title="Pin this listing to no driver — auto-detection won't try again"
+      >
+        No driver
+      </button>
+      <button
+        type="button"
+        className="text-fg-subtle hover:text-fg-muted"
+        onClick={onCancel}
+      >
+        Cancel
+      </button>
+    </form>
+  );
+}
+
 function GroupedByDriver({
   rows,
   groups,
@@ -1073,6 +1328,13 @@ function GroupedByDriver({
   onChangeMatch,
   onAddToGroup,
   onRemoveFromGroup,
+  localDrivers,
+  tagDriverId,
+  onOpenTagDriver,
+  onCancelTagDriver,
+  onSetDriver,
+  onClearDriver,
+  onResetDriver,
   selectMode,
   selectedIds,
   onToggleSelect,
@@ -1090,17 +1352,27 @@ function GroupedByDriver({
   onChangeMatch: (row: ListingRow) => void;
   onAddToGroup: (listingId: number, groupId: number) => void;
   onRemoveFromGroup: (listingId: number, groupId: number) => void;
+  localDrivers: DriverOption[];
+  tagDriverId: number | null;
+  onOpenTagDriver: (id: number) => void;
+  onCancelTagDriver: () => void;
+  onSetDriver: (id: number, name: string, normalized: string) => void;
+  onClearDriver: (id: number) => void;
+  onResetDriver: (id: number) => void;
   selectMode: boolean;
   selectedIds: Set<number>;
   onToggleSelect: (listingId: number) => void;
   imgSizeClass: string;
 }) {
-  // Bucket by driver name; matched first, then "Unmatched" / "No-match" at
-  // the bottom.
+  // Bucket by driver: prefer the registry-match driver (always present
+  // when there's a manual link), fall back to the auto-associated driver
+  // (populated from the title on every add/refresh), and only bucket as
+  // "Unmatched" when neither is set. "Unmatched" always sorts last.
   const driverBuckets = useMemo(() => {
     const map = new Map<string, ListingRow[]>();
     for (const r of rows) {
-      const key = r.matched_driver_name ?? "Unmatched";
+      const key =
+        r.matched_driver_name ?? r.auto_driver_name ?? "Unmatched";
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(r);
     }
@@ -1150,6 +1422,15 @@ function GroupedByDriver({
                     onRemoveFromGroup={(gid) =>
                       onRemoveFromGroup(r.listing_id, gid)
                     }
+                    localDrivers={localDrivers}
+                    tagDriverOpen={tagDriverId === r.listing_id}
+                    onOpenTagDriver={() => onOpenTagDriver(r.listing_id)}
+                    onCancelTagDriver={onCancelTagDriver}
+                    onSetDriver={(name, normalized) =>
+                      onSetDriver(r.listing_id, name, normalized)
+                    }
+                    onClearDriver={() => onClearDriver(r.listing_id)}
+                    onResetDriver={() => onResetDriver(r.listing_id)}
                     selectMode={selectMode}
                     selected={selectedIds.has(r.listing_id)}
                     onToggleSelect={() => onToggleSelect(r.listing_id)}
@@ -1178,6 +1459,13 @@ function GroupedByGroup({
   onChangeMatch,
   onAddToGroup,
   onRemoveFromGroup,
+  localDrivers,
+  tagDriverId,
+  onOpenTagDriver,
+  onCancelTagDriver,
+  onSetDriver,
+  onClearDriver,
+  onResetDriver,
   selectMode,
   selectedIds,
   onToggleSelect,
@@ -1195,6 +1483,13 @@ function GroupedByGroup({
   onChangeMatch: (row: ListingRow) => void;
   onAddToGroup: (listingId: number, groupId: number) => void;
   onRemoveFromGroup: (listingId: number, groupId: number) => void;
+  localDrivers: DriverOption[];
+  tagDriverId: number | null;
+  onOpenTagDriver: (id: number) => void;
+  onCancelTagDriver: () => void;
+  onSetDriver: (id: number, name: string, normalized: string) => void;
+  onClearDriver: (id: number) => void;
+  onResetDriver: (id: number) => void;
   selectMode: boolean;
   selectedIds: Set<number>;
   onToggleSelect: (listingId: number) => void;
@@ -1315,6 +1610,15 @@ function GroupedByGroup({
                       onRemoveFromGroup={(gid) =>
                         onRemoveFromGroup(r.listing_id, gid)
                       }
+                      localDrivers={localDrivers}
+                      tagDriverOpen={tagDriverId === r.listing_id}
+                      onOpenTagDriver={() => onOpenTagDriver(r.listing_id)}
+                      onCancelTagDriver={onCancelTagDriver}
+                      onSetDriver={(name, normalized) =>
+                        onSetDriver(r.listing_id, name, normalized)
+                      }
+                      onClearDriver={() => onClearDriver(r.listing_id)}
+                      onResetDriver={() => onResetDriver(r.listing_id)}
                       selectMode={selectMode}
                       selected={selectedIds.has(r.listing_id)}
                       onToggleSelect={() => onToggleSelect(r.listing_id)}
@@ -1359,6 +1663,15 @@ function GroupedByGroup({
                   onRemoveFromGroup={(gid) =>
                     onRemoveFromGroup(r.listing_id, gid)
                   }
+                  localDrivers={localDrivers}
+                  tagDriverOpen={tagDriverId === r.listing_id}
+                  onOpenTagDriver={() => onOpenTagDriver(r.listing_id)}
+                  onCancelTagDriver={onCancelTagDriver}
+                  onSetDriver={(name, normalized) =>
+                    onSetDriver(r.listing_id, name, normalized)
+                  }
+                  onClearDriver={() => onClearDriver(r.listing_id)}
+                  onResetDriver={() => onResetDriver(r.listing_id)}
                   selectMode={selectMode}
                   selected={selectedIds.has(r.listing_id)}
                   onToggleSelect={() => onToggleSelect(r.listing_id)}

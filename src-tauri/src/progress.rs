@@ -46,6 +46,17 @@ impl ProgressEmitter {
         }
     }
 
+    /// Headless emitter for background tasks (startup backfills, etc.)
+    /// that don't have an AppHandle and don't surface progress to the UI.
+    /// `step`/`done`/`fail` become no-ops; `check_cancelled` still works.
+    pub fn null(op: impl Into<String>) -> Self {
+        Self {
+            app: None,
+            op: op.into(),
+            cancelled: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
     /// Hand the cancel token out so the AppState can flip it from a
     /// separate Tauri command.
     pub fn cancel_handle(&self) -> Arc<AtomicBool> {

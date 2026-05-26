@@ -121,6 +121,10 @@ pub async fn upsert_from_payload(
     .execute(pool)
     .await?;
 
+    if let Err(e) = crate::sync::driver_assoc::associate_listing_driver(pool, listing_id).await {
+        tracing::warn!("driver auto-assoc for fb listing {listing_id} failed: {e}");
+    }
+
     let matched_registry_entry_id: Option<(Option<i64>,)> = sqlx::query_as(
         "SELECT registry_entry_id FROM listing_matches WHERE listing_id = ?",
     )

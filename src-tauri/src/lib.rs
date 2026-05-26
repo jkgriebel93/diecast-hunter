@@ -52,6 +52,36 @@ pub fn run() {
                     tracing::error!("listing receiver: {e}");
                 }
             });
+
+            // One-shot driver auto-association backfill: any listing whose
+            // driver_id is still NULL (legacy rows from before this feature,
+            // or rows imported while the drivers table was sparse) gets a
+            // fresh attempt on every launch. Non-forcing — won't overwrite
+            // existing values. Runs detached so a slow scan never blocks the
+            // UI from showing up.
+            let backfill_pool = pool.clone();
+            tauri::async_runtime::spawn(async move {
+                let progress = progress::ProgressEmitter::null("driver_assoc_backfill");
+                match sync::driver_assoc::associate_all_listings(
+                    &backfill_pool,
+                    &progress,
+                    false,
+                )
+                .await
+                {
+                    Ok(summary) if summary.considered > 0 => {
+                        tracing::info!(
+                            "driver auto-assoc backfill: {} matched, {} cleared, {} unmatched (of {})",
+                            summary.associated,
+                            summary.cleared,
+                            summary.unmatched,
+                            summary.considered
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!("driver auto-assoc backfill failed: {e}"),
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -88,6 +118,10 @@ pub fn run() {
             commands::list_listings,
             commands::clear_listing_match,
             commands::reject_listing_match,
+            commands::list_drivers,
+            commands::set_listing_driver,
+            commands::clear_listing_driver,
+            commands::reset_listing_driver,
             commands::refresh_registry_form_options,
             commands::list_registry_form_options,
             commands::search_dcr_production,
