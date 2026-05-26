@@ -6,6 +6,7 @@ import {
   generateP256Keypair,
   installEbayFetchMock,
   makeEnv,
+  makeRateLimit,
   signEbayBody,
 } from "./helpers";
 
@@ -55,6 +56,17 @@ function validNotification(id = "notif-123"): string {
 }
 
 describe("handleNotification", () => {
+  it("returns 429 without verifying or writing when rate limited", async () => {
+    const env = makeEnv({ POST_LIMITER: makeRateLimit(false) });
+    const req = await signedReq(validNotification(), keypair.privateKey);
+    const res = await handleNotification(req, env);
+    expect(res.status).toBe(429);
+    // Throttling short-circuits before the KV-backed signature lookup, so no
+    // public-key fetch happens and nothing is written.
+    expect(counts.publicKey).toBe(0);
+    expect(env.DB._rows.size).toBe(0);
+  });
+
   it("returns 412 when x-ebay-signature is missing", async () => {
     const env = makeEnv();
     const res = await handleNotification(postReq(validNotification()), env);

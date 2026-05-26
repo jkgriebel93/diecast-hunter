@@ -27,6 +27,14 @@
  *     Plain "ok" — useful for confirming the deploy is up.
  */
 
+/**
+ * Cloudflare's native rate-limiting binding. The full type isn't in
+ * @cloudflare/workers-types yet, so declare the slice we use.
+ */
+export interface RateLimit {
+  limit(options: { key: string }): Promise<{ success: boolean }>;
+}
+
 export interface Env {
   EBAY_VERIFICATION_TOKEN: string;
   APP_SHARED_SECRET: string;
@@ -41,9 +49,13 @@ export interface Env {
   EBAY_KEY_CACHE: KVNamespace;
   // D1 deletions store. Source of truth for both writes and reads.
   DB: D1Database;
+  // Native rate limiter for POST /marketplace-deletion, checked before the
+  // KV-backed signature lookup so throttled floods cost no KV reads. Bound in
+  // wrangler.toml via [[unsafe.bindings]] type = "ratelimit".
+  POST_LIMITER: RateLimit;
 }
 
-import { verifyEbaySignature } from "./ebay-signature";
+import { parseSigHeader, verifyEbaySignature } from "./ebay-signature";
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
@@ -146,15 +158,62 @@ async function handleVerification(url: URL, env: Env): Promise<Response> {
   );
 }
 
+/**
+ * Discriminating request metadata, logged on every POST to
+ * `/marketplace-deletion`. Aggregate these in Workers Logs to tell real eBay
+ * traffic (verified=true, consistent asn/country) from scanners and abuse
+ * (verified=false, scattered asn, random/absent kid). Each POST carrying any
+ * `x-ebay-signature` header costs one KV read for the public-key lookup, so
+ * the verified=false volume is exactly what's burning the KV free tier.
+ */
+function postMeta(req: Request, sigHeader: string | null) {
+  const cf = req.cf as IncomingRequestCfProperties | undefined;
+  let kid: string | null = null;
+  if (sigHeader) {
+    try {
+      kid = parseSigHeader(sigHeader).kid;
+    } catch {
+      // Malformed header — keep kid null; the outcome field still records it.
+    }
+  }
+  return {
+    ip: req.headers.get("cf-connecting-ip"),
+    asn: cf?.asn ?? null,
+    as_org: cf?.asOrganization ?? null,
+    country: cf?.country ?? null,
+    colo: cf?.colo ?? null,
+    ua: req.headers.get("user-agent"),
+    has_signature: sigHeader !== null,
+    kid,
+  };
+}
+
+function logPost(meta: ReturnType<typeof postMeta>, outcome: string): void {
+  console.log(JSON.stringify({ event: "deletion_post", outcome, ...meta }));
+}
+
 export async function handleNotification(
   req: Request,
   env: Env,
 ): Promise<Response> {
+  const sigHeader = req.headers.get("x-ebay-signature");
+  const meta = postMeta(req, sigHeader);
+
+  // Throttle before the KV-backed signature check so a flood costs no KV
+  // reads. Keyed on client IP; the threshold is far above legitimate eBay
+  // volume, so real notifications are never affected.
+  const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
+  const { success } = await env.POST_LIMITER.limit({ key: ip });
+  if (!success) {
+    logPost(meta, "rate_limited");
+    return new Response("rate limited", { status: 429 });
+  }
+
   // Authenticity gate. The endpoint is publicly registered with eBay so the
   // URL is discoverable; without this gate every drive-by POST writes a KV
   // record. eBay always sends `x-ebay-signature` with a real notification.
-  const sigHeader = req.headers.get("x-ebay-signature");
   if (!sigHeader) {
+    logPost(meta, "missing_signature");
     return new Response("missing signature", { status: 412 });
   }
 
@@ -167,9 +226,11 @@ export async function handleNotification(
     verified = await verifyEbaySignature(sigHeader, rawBody, env);
   } catch (err) {
     console.error("signature verification error", err);
+    logPost(meta, "verification_error");
     return new Response("signature verification failed", { status: 412 });
   }
   if (!verified) {
+    logPost(meta, "invalid_signature");
     return new Response("invalid signature", { status: 412 });
   }
 
@@ -177,6 +238,7 @@ export async function handleNotification(
   try {
     body = JSON.parse(new TextDecoder().decode(rawBody));
   } catch {
+    logPost(meta, "invalid_json");
     return new Response("invalid json", { status: 400 });
   }
 
@@ -185,6 +247,7 @@ export async function handleNotification(
   const id = extractNotificationId(body);
   if (!id) {
     console.warn("verified notification missing notificationId");
+    logPost(meta, "missing_notification_id");
     return new Response("missing notificationId", { status: 400 });
   }
 
@@ -213,6 +276,7 @@ export async function handleNotification(
     )
     .run();
 
+  logPost(meta, "stored");
   return new Response("ok", { status: 200 });
 }
 

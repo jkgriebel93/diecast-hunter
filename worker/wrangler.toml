@@ -13,6 +13,17 @@ ENDPOINT_URL = "https://diecast-hunter-ebay.johnkgriebel.workers.dev/marketplace
 binding = "EBAY_KEY_CACHE"
 id = "ce3715558b634a548c7dc133a0fc149b"
 
+# Native rate limiter for POST /marketplace-deletion. Checked inside the worker
+# before the KV-backed signature lookup, so throttled requests cost no KV
+# reads. 20 requests / 60s per client IP is far above legitimate eBay volume
+# (deletion notifications are rare) but clamps abusive floods. namespace_id is
+# any unique integer string within this worker; period must be 10 or 60.
+[[unsafe.bindings]]
+name = "POST_LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 20, period = 60 }
+
 # Durable store for marketplace account deletion notifications.
 # Provisioned with:
 #   wrangler d1 create diecast-hunter-deletions
