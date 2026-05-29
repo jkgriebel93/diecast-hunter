@@ -28,3 +28,11 @@ database_id   = "278833a2-6bb3-431b-b94d-52611682aaa5"
 # the worker's traffic.
 [triggers]
 crons = ["0 4 * * *"]
+
+# Worker observability — captures invocation logs (incl. the structured
+# `deletion_insert_failed` / `deletion_purge` events) queryable in the
+# dashboard and via `wrangler tail`. head_sampling_rate = 1 keeps 100% of
+# logs; volume here is tiny so there's no reason to sample down.
+[observability]
+enabled = true
+head_sampling_rate = 1

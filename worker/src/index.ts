@@ -197,21 +197,38 @@ export async function handleNotification(
   const data =
     (notification.data as Record<string, unknown> | undefined) ?? {};
 
-  await env.DB.prepare(
-    `INSERT INTO marketplace_deletions
-       (notification_id, received_at, user_id, username, eias_token, raw)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(notification_id) DO NOTHING`,
-  )
-    .bind(
-      id,
-      Date.now(),
-      (data.userId as string | undefined) ?? null,
-      (data.username as string | undefined) ?? null,
-      (data.eiasToken as string | undefined) ?? null,
-      JSON.stringify(notification),
+  // Deliberately swallow store failures and still return 200. eBay treats any
+  // non-2xx as a failed delivery and retries indefinitely — a *permanent*
+  // misconfiguration (e.g. an unbound store, which once turned a dead KV
+  // binding into an infinite retry storm) would otherwise hammer this endpoint
+  // forever and trip eBay's "endpoint down" alerts. For a single-user app a
+  // dropped deletion notification on a genuine failure is acceptable; the
+  // structured error log below makes it visible in Worker observability.
+  try {
+    await env.DB.prepare(
+      `INSERT INTO marketplace_deletions
+         (notification_id, received_at, user_id, username, eias_token, raw)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(notification_id) DO NOTHING`,
     )
-    .run();
+      .bind(
+        id,
+        Date.now(),
+        (data.userId as string | undefined) ?? null,
+        (data.username as string | undefined) ?? null,
+        (data.eiasToken as string | undefined) ?? null,
+        JSON.stringify(notification),
+      )
+      .run();
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        event: "deletion_insert_failed",
+        notification_id: id,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
 
   return new Response("ok", { status: 200 });
 }
