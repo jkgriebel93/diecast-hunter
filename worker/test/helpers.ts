@@ -172,6 +172,15 @@ export function makeD1(): FakeD1 {
   return db as unknown as FakeD1;
 }
 
+/**
+ * Rate-limiter stub. `success: true` lets every request through (the default
+ * for tests that aren't exercising throttling); pass `false` to simulate a
+ * client that's over the limit.
+ */
+export function makeRateLimit(success = true): Env["POST_LIMITER"] {
+  return { limit: async () => ({ success }) };
+}
+
 export function makeEnv(overrides: Partial<Env> = {}): Env & {
   EBAY_KEY_CACHE: FakeKv;
   DB: FakeD1;
@@ -179,6 +188,7 @@ export function makeEnv(overrides: Partial<Env> = {}): Env & {
   return {
     EBAY_KEY_CACHE: makeKv(),
     DB: makeD1(),
+    POST_LIMITER: makeRateLimit(),
     EBAY_VERIFICATION_TOKEN: "verify-token-x".padEnd(40, "x"),
     APP_SHARED_SECRET: "shared-secret",
     ENDPOINT_URL: "https://example.test/marketplace-deletion",
