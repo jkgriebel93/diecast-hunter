@@ -1,0 +1,65 @@
+name: Deploy Cloudflare Worker
+
+# Deploys the eBay marketplace-account-deletion Worker (worker/) to Cloudflare.
+# Triggers only when worker/ changes land on main, plus a manual button.
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN   — token with the "Edit Cloudflare Workers" template
+#                            (Workers Scripts: Edit, plus D1: Edit and Workers
+#                            KV Storage: Edit for this Worker's bindings).
+#   CLOUDFLARE_ACCOUNT_ID  — 5c21ee6b5f2b8669462d642bc95ec7da
+#
+# Worker *secrets* (EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, EBAY_VERIFICATION_TOKEN,
+# APP_SHARED_SECRET) are NOT managed here — they already live in the Worker and
+# persist across deploys. `wrangler deploy` never clears them.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "worker/**"
+      - ".github/workflows/deploy-worker.yml"
+  workflow_dispatch: {}
+
+# Never run two deploys of the same Worker at once; cancel an in-flight run if a
+# newer commit lands.
+concurrency:
+  group: deploy-worker
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: worker/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Gate the deploy on typecheck + tests so a broken Worker never ships.
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+          packageManager: pnpm
