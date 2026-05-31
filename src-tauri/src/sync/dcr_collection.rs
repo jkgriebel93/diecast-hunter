@@ -20,12 +20,14 @@ pub struct SyncSummary {
     pub enrichment: Option<EnrichSummary>,
 }
 
-/// Public entry point: pull the user's My Garage, then enrich any registry
-/// stubs that lack detail-page data. Both steps share one logged-in session
-/// (same DcrClient = same cookie jar).
+/// Public entry point: pull the user's My Garage, then (optionally) enrich any
+/// registry stubs that lack detail-page data. Both steps share one logged-in
+/// session (same DcrClient = same cookie jar). When `enrich` is false, only the
+/// collection pull runs — the registry detail refresh is skipped.
 pub async fn sync_dcr_collection_and_enrich(
     pool: &SqlitePool,
     progress: &ProgressEmitter,
+    enrich: bool,
 ) -> AppResult<SyncSummary> {
     progress.step("Logging in to diecastregistry.com…", None, None);
     let (username, password) = load_credentials(pool).await?;
@@ -35,11 +37,13 @@ pub async fn sync_dcr_collection_and_enrich(
 
     let mut summary = run_collection_sync(pool, &client, progress).await?;
 
-    progress.step("Enriching registry entries…", None, None);
-    match enrich_pending_registry_entries(pool, &client, false, progress).await {
-        Ok(es) => summary.enrichment = Some(es),
-        Err(e) => {
-            tracing::warn!("post-sync enrichment failed: {e}");
+    if enrich {
+        progress.step("Enriching registry entries…", None, None);
+        match enrich_pending_registry_entries(pool, &client, false, progress).await {
+            Ok(es) => summary.enrichment = Some(es),
+            Err(e) => {
+                tracing::warn!("post-sync enrichment failed: {e}");
+            }
         }
     }
 

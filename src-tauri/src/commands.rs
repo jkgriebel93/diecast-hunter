@@ -141,10 +141,12 @@ pub async fn set_setting(
 pub async fn sync_dcr_collection(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
+    enrich: bool,
 ) -> AppResult<sync::SyncSummary> {
     let progress = ProgressEmitter::new(app, "sync");
     set_active_cancel(&state, &progress).await;
-    let result = sync::sync_dcr_collection_and_enrich(&state.db.pool, &progress).await;
+    let result =
+        sync::sync_dcr_collection_and_enrich(&state.db.pool, &progress, enrich).await;
     clear_active_cancel(&state).await;
     finish_progress(&progress, &result, "Sync");
     result

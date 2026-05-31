@@ -74,7 +74,8 @@ export const api = {
     invoke<string | null>("get_setting", { key }),
   setSetting: (key: string, value: string) =>
     invoke<void>("set_setting", { key, value }),
-  syncDcrCollection: () => invoke<SyncSummary>("sync_dcr_collection"),
+  syncDcrCollection: (enrich: boolean) =>
+    invoke<SyncSummary>("sync_dcr_collection", { enrich }),
   registerDiecastInGarage: (input: RegisterDiecastInput) =>
     invoke<RegisterDiecastSummary>("register_diecast_in_garage", { input }),
   refreshRegistryDetails: (force: boolean) =>

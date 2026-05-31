@@ -24,6 +24,7 @@ export function Settings() {
   const [syncing, setSyncing] = useState(false);
   const [syncSummary, setSyncSummary] = useState<SyncSummary | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncEnrich, setSyncEnrich] = useState(true);
 
   const [refreshing, setRefreshing] = useState(false);
   const [refreshSummary, setRefreshSummary] =
@@ -358,7 +359,7 @@ export function Settings() {
     setSyncError(null);
     setSyncSummary(null);
     try {
-      const summary = await api.syncDcrCollection();
+      const summary = await api.syncDcrCollection(syncEnrich);
       setSyncSummary(summary);
       await refresh();
     } catch (e) {
@@ -490,6 +491,15 @@ export function Settings() {
               {syncing ? "Syncing…" : "Sync now"}
             </button>
           </div>
+          <label className="flex items-center gap-2 text-xs text-fg-subtle">
+            <input
+              type="checkbox"
+              checked={syncEnrich}
+              disabled={syncing}
+              onChange={(e) => setSyncEnrich(e.target.checked)}
+            />
+            Refresh registry details after sync (slower)
+          </label>
           {syncSummary && (
             <div className="text-xs text-emerald-400 space-y-1">
               <div>
