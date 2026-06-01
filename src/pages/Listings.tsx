@@ -1315,6 +1315,31 @@ function DriverTagSection({
   );
 }
 
+/** A right-aligned "Collapse all / Expand all" toggle shown above the
+ *  grouped (by-driver / by-group) listing sections. The label flips based on
+ *  whether every section is currently collapsed. */
+function CollapseAllBar({
+  allCollapsed,
+  onCollapseAll,
+  onExpandAll,
+}: {
+  allCollapsed: boolean;
+  onCollapseAll: () => void;
+  onExpandAll: () => void;
+}) {
+  return (
+    <div className="flex justify-end">
+      <button
+        type="button"
+        className="text-xs text-fg-muted hover:text-fg underline decoration-dotted underline-offset-2"
+        onClick={allCollapsed ? onExpandAll : onCollapseAll}
+      >
+        {allCollapsed ? "Expand all" : "Collapse all"}
+      </button>
+    </div>
+  );
+}
+
 function GroupedByDriver({
   rows,
   groups,
@@ -1384,15 +1409,41 @@ function GroupedByDriver({
     return entries;
   }, [rows]);
 
+  // Controlled collapse state, keyed by driver name. Empty = all expanded
+  // (the default). "Collapse all" fills it with every bucket key.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const setOpen = (key: string, isOpen: boolean) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (isOpen) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const allCollapsed =
+    driverBuckets.length > 0 &&
+    driverBuckets.every(([driver]) => collapsed.has(driver));
+
   return (
     <div className="space-y-3">
+      <CollapseAllBar
+        allCollapsed={allCollapsed}
+        onCollapseAll={() =>
+          setCollapsed(new Set(driverBuckets.map(([driver]) => driver)))
+        }
+        onExpandAll={() => setCollapsed(new Set())}
+      />
       {driverBuckets.map(([driver, items]) => {
         const totalCents = items.reduce(
           (s, r) => s + (r.price_cents ?? 0) + (r.shipping_cents ?? 0),
           0,
         );
         return (
-          <details key={driver} className="card !p-0 overflow-hidden" open>
+          <details
+            key={driver}
+            className="card !p-0 overflow-hidden"
+            open={!collapsed.has(driver)}
+            onToggle={(e) => setOpen(driver, e.currentTarget.open)}
+          >
             <summary className="cursor-pointer list-none px-4 py-3 flex items-center justify-between hover:bg-bg-elevated">
               <div className="flex items-center gap-3">
                 <span className="font-medium">{driver}</span>
@@ -1522,6 +1573,29 @@ function GroupedByGroup({
     return { ordered, ungrouped };
   }, [rows, groups]);
 
+  // Controlled collapse state, keyed by group id (stringified) plus the
+  // sentinel "ungrouped". Seeded to preserve the prior defaults: archived
+  // groups and the Ungrouped bucket start collapsed, everything else open.
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
+    const s = new Set<string>(["ungrouped"]);
+    for (const g of groups) if (g.archived) s.add(String(g.id));
+    return s;
+  });
+  const setOpen = (key: string, isOpen: boolean) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (isOpen) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const allKeys = useMemo(() => {
+    const ks = buckets.ordered.map(({ group }) => String(group.id));
+    if (buckets.ungrouped.length > 0) ks.push("ungrouped");
+    return ks;
+  }, [buckets]);
+  const allCollapsed =
+    allKeys.length > 0 && allKeys.every((k) => collapsed.has(k));
+
   if (groups.length === 0) {
     return (
       <div className="card text-sm text-fg-muted">
@@ -1532,6 +1606,11 @@ function GroupedByGroup({
 
   return (
     <div className="space-y-3">
+      <CollapseAllBar
+        allCollapsed={allCollapsed}
+        onCollapseAll={() => setCollapsed(new Set(allKeys))}
+        onExpandAll={() => setCollapsed(new Set())}
+      />
       {buckets.ordered.map(({ group, items }) => {
         const totalCents = items.reduce(
           (s, r) => s + (r.price_cents ?? 0) + (r.shipping_cents ?? 0),
@@ -1550,7 +1629,8 @@ function GroupedByGroup({
           <details
             key={group.id}
             className={`card !p-0 overflow-hidden ${group.archived ? "opacity-70" : ""}`}
-            open={!group.archived}
+            open={!collapsed.has(String(group.id))}
+            onToggle={(e) => setOpen(String(group.id), e.currentTarget.open)}
           >
             <summary className="cursor-pointer list-none px-4 py-3 flex items-start justify-between gap-4 hover:bg-bg-elevated">
               <div className="min-w-0">
@@ -1633,7 +1713,11 @@ function GroupedByGroup({
       })}
 
       {buckets.ungrouped.length > 0 && (
-        <details className="card !p-0 overflow-hidden">
+        <details
+          className="card !p-0 overflow-hidden"
+          open={!collapsed.has("ungrouped")}
+          onToggle={(e) => setOpen("ungrouped", e.currentTarget.open)}
+        >
           <summary className="cursor-pointer list-none px-4 py-3 flex items-center justify-between hover:bg-bg-elevated">
             <div className="flex items-center gap-2">
               <span className="font-medium text-fg-muted">Ungrouped</span>
