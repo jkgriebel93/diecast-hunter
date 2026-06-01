@@ -1090,6 +1090,58 @@ pub async fn prewarm_registry_by_driver(
 }
 
 #[derive(Serialize)]
+pub struct PrewarmedDriver {
+    pub driver_guid: String,
+    pub driver_name: String,
+    /// Number of registry entries currently stored locally for this driver.
+    pub entry_count: i64,
+    /// Unix timestamp of the most recent pre-warm for this driver.
+    pub last_prewarmed_at: i64,
+}
+
+/// List the drivers that have been pre-warmed into the local registry, ordered
+/// by how many registry entries they have. Sourced from the
+/// `dcr.last_prewarm.{guid}` settings keys written by `prewarm_by_driver`; the
+/// display name is resolved from the cached registry driver options, and the
+/// entry count is joined through the shared `normalize_driver_name` key
+/// (`registry_form_options.normalized` = `drivers.normalized_name`).
+#[tauri::command]
+pub async fn list_prewarmed_drivers(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<PrewarmedDriver>> {
+    let rows: Vec<(String, String, i64, i64)> = sqlx::query_as(
+        "SELECT
+            substr(s.key, length('dcr.last_prewarm.') + 1) AS driver_guid,
+            COALESCE(o.display, '(unknown driver)') AS driver_name,
+            (SELECT COUNT(*)
+               FROM registry_entries re
+               JOIN drivers d ON d.id = re.driver_id
+              WHERE d.normalized_name = o.normalized) AS entry_count,
+            CAST(s.value AS INTEGER) AS last_prewarmed_at
+         FROM settings s
+         LEFT JOIN registry_form_options o
+            ON o.field = 'driver'
+           AND o.value = substr(s.key, length('dcr.last_prewarm.') + 1)
+         WHERE s.key LIKE 'dcr.last_prewarm.%'
+         ORDER BY entry_count DESC, driver_name COLLATE NOCASE",
+    )
+    .fetch_all(&state.db.pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(
+            |(driver_guid, driver_name, entry_count, last_prewarmed_at)| PrewarmedDriver {
+                driver_guid,
+                driver_name,
+                entry_count,
+                last_prewarmed_at,
+            },
+        )
+        .collect())
+}
+
+#[derive(Serialize)]
 pub struct DriverGroup {
     pub driver_id: i64,
     pub driver_name: String,

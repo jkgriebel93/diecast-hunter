@@ -127,6 +127,7 @@ pub fn run() {
             commands::search_dcr_production,
             commands::link_listing_to_registry,
             commands::prewarm_registry_by_driver,
+            commands::list_prewarmed_drivers,
             commands::cancel_active_operation,
             commands::get_ebay_filter_non_diecasts,
             commands::set_ebay_filter_non_diecasts,

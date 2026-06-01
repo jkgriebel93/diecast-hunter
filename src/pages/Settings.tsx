@@ -8,6 +8,7 @@ import {
   type EnrichSummary,
   type FormOptionRow,
   type ListingReceiverStatus,
+  type PrewarmedDriver,
   type PrewarmSummary,
   type SyncSummary,
 } from "@/lib/tauri";
@@ -48,6 +49,10 @@ export function Settings() {
   const [prewarmSummary, setPrewarmSummary] =
     useState<PrewarmSummary | null>(null);
   const [prewarmError, setPrewarmError] = useState<string | null>(null);
+  const [prewarmedDrivers, setPrewarmedDrivers] = useState<PrewarmedDriver[]>(
+    [],
+  );
+  const [prewarmedSearch, setPrewarmedSearch] = useState("");
 
   const [receiverStatus, setReceiverStatus] =
     useState<ListingReceiverStatus | null>(null);
@@ -108,6 +113,11 @@ export function Settings() {
       } catch {
         // not fatal — picker shows empty
       }
+      try {
+        setPrewarmedDrivers(await api.listPrewarmedDrivers());
+      } catch {
+        // not fatal — list shows empty
+      }
     } catch (e) {
       setError(String(e));
     }
@@ -156,6 +166,11 @@ export function Settings() {
     try {
       const s = await api.prewarmRegistryByDriver(prewarmDriverGuid);
       setPrewarmSummary(s);
+      try {
+        setPrewarmedDrivers(await api.listPrewarmedDrivers());
+      } catch {
+        // not fatal — list refresh is best-effort
+      }
     } catch (e) {
       setPrewarmError(String(e));
     } finally {
@@ -655,6 +670,61 @@ export function Settings() {
           {prewarmError && (
             <div className="text-xs text-red-400">{prewarmError}</div>
           )}
+
+          <div className="pt-1">
+            <div className="text-xs font-medium text-fg-subtle">
+              Pre-warmed drivers ({prewarmedDrivers.length})
+            </div>
+            {prewarmedDrivers.length === 0 ? (
+              <div className="text-xs text-fg-subtle mt-1">
+                No drivers pre-warmed yet.
+              </div>
+            ) : (
+              (() => {
+                const q = prewarmedSearch.trim().toLowerCase();
+                const filtered = q
+                  ? prewarmedDrivers.filter((d) =>
+                      d.driver_name.toLowerCase().includes(q),
+                    )
+                  : prewarmedDrivers;
+                return (
+                  <>
+                    <input
+                      type="text"
+                      className="input mt-2 w-full"
+                      value={prewarmedSearch}
+                      onChange={(e) => setPrewarmedSearch(e.target.value)}
+                      placeholder="Filter pre-warmed drivers…"
+                      autoComplete="off"
+                    />
+                    {filtered.length === 0 ? (
+                      <div className="text-xs text-fg-subtle mt-2">
+                        No drivers match “{prewarmedSearch}”.
+                      </div>
+                    ) : (
+                      <ul className="mt-2 max-h-64 overflow-y-auto divide-y divide-border rounded-md border border-border">
+                        {filtered.map((d) => (
+                          <li
+                            key={d.driver_guid}
+                            className="flex items-center justify-between gap-3 px-3 py-1.5 text-xs"
+                          >
+                            <span className="truncate">{d.driver_name}</span>
+                            <span className="shrink-0 text-fg-subtle">
+                              {d.entry_count} entr
+                              {d.entry_count === 1 ? "y" : "ies"} ·{" "}
+                              {new Date(
+                                d.last_prewarmed_at * 1000,
+                              ).toLocaleDateString()}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </>
+                );
+              })()
+            )}
+          </div>
         </div>
       </section>
 
