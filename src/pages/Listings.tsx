@@ -4,6 +4,8 @@ import {
   api,
   formatCents,
   isPreferredOem,
+  prepareScaleOptions,
+  prepareYearOptions,
   type DriverOption,
   type FormOptionRow,
   type ListingGroup,
@@ -39,6 +41,8 @@ type SortMode =
   | "deal-asc"
   | "ending-soon"
   | "title";
+/** Ordering of the driver/group sections in the grouped views. */
+type BucketSort = "name" | "count-desc" | "count-asc";
 
 export function Listings() {
   const [rows, setRows] = useState<ListingRow[] | null>(null);
@@ -61,6 +65,12 @@ export function Listings() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkMessage, setBulkMessage] = useState<string | null>(null);
+  const [bulkCreateGroupOpen, setBulkCreateGroupOpen] = useState(false);
+  // When set, the per-listing "create a new group" editor is open for this
+  // listing; on save the freshly created group is applied to it.
+  const [createGroupForListingId, setCreateGroupForListingId] = useState<
+    number | null
+  >(null);
 
   const [searchText, setSearchText] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
@@ -69,6 +79,7 @@ export function Listings() {
   const [offerFilter, setOfferFilter] = useState<OfferFilter>("all");
   const [groupFilter, setGroupFilter] = useState<GroupFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("newest");
+  const [bucketSort, setBucketSort] = useState<BucketSort>("name");
 
   const [input, setInput] = useState("");
   const [adding, setAdding] = useState(false);
@@ -174,6 +185,22 @@ export function Listings() {
     }
   }
 
+  // Apply a just-created group to the single listing it was created from.
+  async function onCreatedGroupForListing(
+    listingId: number,
+    group: ListingGroup,
+  ) {
+    setCreateGroupForListingId(null);
+    setError(null);
+    try {
+      await api.addListingToGroup(group.id, listingId);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      await Promise.all([load(), loadGroups()]);
+    }
+  }
+
   async function onRemoveListingFromGroup(
     listingId: number,
     groupId: number,
@@ -227,6 +254,29 @@ export function Listings() {
       setError(String(e));
     } finally {
       setBulkBusy(false);
+    }
+  }
+
+  // Called after a brand-new group is created from the Select-mode "Add to
+  // group" menu: refresh the group list, then add the current selection to it.
+  async function onBulkCreatedGroup(group: ListingGroup) {
+    setBulkCreateGroupOpen(false);
+    const ids = Array.from(selectedIds);
+    setBulkBusy(true);
+    setBulkMessage(null);
+    setError(null);
+    try {
+      if (ids.length === 0) {
+        setBulkMessage(`Created "${group.name}".`);
+        return;
+      }
+      const result = await api.addListingsToGroup(group.id, ids);
+      setBulkMessage(`Created "${group.name}" and added ${result.added}.`);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBulkBusy(false);
+      await Promise.all([load(), loadGroups()]);
     }
   }
 
@@ -467,6 +517,25 @@ export function Listings() {
     sortMode,
   ]);
 
+  // Keep the selection in sync with what's on screen: any action that drops a
+  // listing from view (a filter change, a group add/remove under an active
+  // group filter, a refresh that ends/removes it) also drops it from the
+  // selection, so bulk actions never silently apply to hidden rows.
+  useEffect(() => {
+    if (!selectMode || !filteredRows) return;
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const visible = new Set(filteredRows.map((r) => r.listing_id));
+      let changed = false;
+      const next = new Set<number>();
+      for (const id of prev) {
+        if (visible.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [filteredRows, selectMode]);
+
   return (
     <div className="p-6 space-y-4">
       <header className="flex items-end justify-between">
@@ -552,6 +621,7 @@ export function Listings() {
 
       {rows && rows.length > 0 && (
         <div className="card !p-3 space-y-2">
+          {/* Search + per-listing display actions */}
           <div className="flex items-center gap-2">
             <input
               type="text"
@@ -560,22 +630,26 @@ export function Listings() {
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
             />
-            <select
-              className="input !w-auto"
-              value={sortMode}
-              onChange={(e) => setSortMode(e.target.value as SortMode)}
-              title="Sort"
+            <button
+              type="button"
+              className={`shrink-0 px-2 py-1 rounded border text-xs ${
+                selectMode
+                  ? "border-accent text-accent bg-accent/10"
+                  : "border-border text-fg-muted hover:text-fg"
+              }`}
+              onClick={() => {
+                if (selectMode) exitSelectMode();
+                else setSelectMode(true);
+              }}
+              title="Pick multiple listings to bulk-add to a group"
             >
-              <option value="newest">Newest first</option>
-              <option value="price-asc">Price low → high</option>
-              <option value="price-desc">Price high → low</option>
-              <option value="total-asc">Total (price + ship) low → high</option>
-              <option value="deal-asc">Best deal first</option>
-              <option value="ending-soon">Ending soonest</option>
-              <option value="title">Title A → Z</option>
-            </select>
+              {selectMode ? "Done selecting" : "Select"}
+            </button>
+            <ImageSizeToggle size={imgSize} onChange={setImgSize} />
           </div>
-          <div className="flex items-center gap-2 text-xs flex-wrap">
+
+          {/* Filters */}
+          <div className="flex items-center gap-x-4 gap-y-2 text-xs flex-wrap">
             <FilterChips
               label="Status"
               value={statusFilter}
@@ -655,61 +729,56 @@ export function Listings() {
                 Manage…
               </button>
             </div>
-            <div className="ml-auto flex items-center gap-3">
-              <div className="flex items-center gap-2">
-                <span className="text-fg-subtle">View:</span>
-                <button
-                  type="button"
-                  className={`px-2 py-1 rounded border ${
-                    viewMode === "flat"
-                      ? "border-accent text-accent bg-accent/10"
-                      : "border-border text-fg-muted hover:text-fg"
-                  }`}
-                  onClick={() => setViewMode("flat")}
-                >
-                  Flat
-                </button>
-                <button
-                  type="button"
-                  className={`px-2 py-1 rounded border ${
-                    viewMode === "byDriver"
-                      ? "border-accent text-accent bg-accent/10"
-                      : "border-border text-fg-muted hover:text-fg"
-                  }`}
-                  onClick={() => setViewMode("byDriver")}
-                >
-                  By driver
-                </button>
-                <button
-                  type="button"
-                  className={`px-2 py-1 rounded border ${
-                    viewMode === "byGroup"
-                      ? "border-accent text-accent bg-accent/10"
-                      : "border-border text-fg-muted hover:text-fg"
-                  }`}
-                  onClick={() => setViewMode("byGroup")}
-                >
-                  By group
-                </button>
-              </div>
-              <button
-                type="button"
-                className={`px-2 py-1 rounded border ${
-                  selectMode
-                    ? "border-accent text-accent bg-accent/10"
-                    : "border-border text-fg-muted hover:text-fg"
-                }`}
-                onClick={() => {
-                  if (selectMode) exitSelectMode();
-                  else setSelectMode(true);
-                }}
-                title="Pick multiple listings to bulk-add to a group"
-              >
-                {selectMode ? "Done selecting" : "Select"}
-              </button>
-              <ImageSizeToggle size={imgSize} onChange={setImgSize} />
-            </div>
           </div>
+
+          {/* View + sort */}
+          <div className="flex items-center gap-x-4 gap-y-2 text-xs flex-wrap">
+            <FilterChips
+              label="View"
+              value={viewMode}
+              options={[
+                { value: "flat", label: "Flat" },
+                { value: "byDriver", label: "By driver" },
+                { value: "byGroup", label: "By group" },
+              ]}
+              onChange={(v) => setViewMode(v as ViewMode)}
+            />
+            <div className="flex items-center gap-1.5">
+              <span className="text-fg-subtle">Sort:</span>
+              <select
+                className="input !w-auto !py-0.5 !text-[11px]"
+                value={sortMode}
+                onChange={(e) => setSortMode(e.target.value as SortMode)}
+                title="Sort listings"
+              >
+                <option value="newest">Newest first</option>
+                <option value="price-asc">Price low → high</option>
+                <option value="price-desc">Price high → low</option>
+                <option value="total-asc">Total (price + ship) low → high</option>
+                <option value="deal-asc">Best deal first</option>
+                <option value="ending-soon">Ending soonest</option>
+                <option value="title">Title A → Z</option>
+              </select>
+            </div>
+            {viewMode !== "flat" && (
+              <div className="flex items-center gap-1.5">
+                <span className="text-fg-subtle">
+                  {viewMode === "byGroup" ? "Groups" : "Drivers"}:
+                </span>
+                <select
+                  className="input !w-auto !py-0.5 !text-[11px]"
+                  value={bucketSort}
+                  onChange={(e) => setBucketSort(e.target.value as BucketSort)}
+                  title={`Order ${viewMode === "byGroup" ? "groups" : "drivers"} by`}
+                >
+                  <option value="name">Name (A→Z)</option>
+                  <option value="count-desc">Most listings first</option>
+                  <option value="count-asc">Fewest listings first</option>
+                </select>
+              </div>
+            )}
+          </div>
+
           {filteredRows && filteredRows.length !== rows.length && (
             <div className="text-xs text-fg-subtle">
               Showing {filteredRows.length} of {rows.length} listings.
@@ -744,6 +813,7 @@ export function Listings() {
               onRejectMatch={() => onRejectMatch(r.listing_id)}
               onChangeMatch={() => setRegistrySearchListing(r)}
               onAddToGroup={(gid) => onAddListingToGroup(r.listing_id, gid)}
+              onCreateGroup={() => setCreateGroupForListingId(r.listing_id)}
               onRemoveFromGroup={(gid) =>
                 onRemoveListingFromGroup(r.listing_id, gid)
               }
@@ -767,6 +837,7 @@ export function Listings() {
         <GroupedByGroup
           rows={filteredRows ?? []}
           groups={groups}
+          bucketSort={bucketSort}
           offersByItemId={offersByItemId}
           refreshingId={refreshingId}
           unwatchingId={unwatchingId}
@@ -776,6 +847,7 @@ export function Listings() {
           onRejectMatch={onRejectMatch}
           onChangeMatch={setRegistrySearchListing}
           onAddToGroup={onAddListingToGroup}
+          onCreateGroup={setCreateGroupForListingId}
           onRemoveFromGroup={onRemoveListingFromGroup}
           localDrivers={localDrivers}
           tagDriverId={tagDriverId}
@@ -793,6 +865,7 @@ export function Listings() {
         <GroupedByDriver
           rows={filteredRows ?? []}
           groups={groups}
+          bucketSort={bucketSort}
           offersByItemId={offersByItemId}
           refreshingId={refreshingId}
           unwatchingId={unwatchingId}
@@ -802,6 +875,7 @@ export function Listings() {
           onRejectMatch={onRejectMatch}
           onChangeMatch={setRegistrySearchListing}
           onAddToGroup={onAddListingToGroup}
+          onCreateGroup={setCreateGroupForListingId}
           onRemoveFromGroup={onRemoveListingFromGroup}
           localDrivers={localDrivers}
           tagDriverId={tagDriverId}
@@ -832,7 +906,19 @@ export function Listings() {
           onClear={clearSelection}
           onDone={exitSelectMode}
           onAddToGroup={onBulkAddToGroup}
+          onCreateGroup={() => setBulkCreateGroupOpen(true)}
           onRemoveFromGroup={onBulkRemoveFromGroup}
+        />
+      )}
+
+      {bulkCreateGroupOpen && (
+        <GroupEditorDialog
+          initial={null}
+          onCancel={() => setBulkCreateGroupOpen(false)}
+          onSaved={async (created) => {
+            if (created) await onBulkCreatedGroup(created);
+            else setBulkCreateGroupOpen(false);
+          }}
         />
       )}
 
@@ -842,6 +928,18 @@ export function Listings() {
           onClose={() => setManageGroupsOpen(false)}
           onChanged={async () => {
             await Promise.all([load(), loadGroups()]);
+          }}
+        />
+      )}
+
+      {createGroupForListingId !== null && (
+        <GroupEditorDialog
+          initial={null}
+          onCancel={() => setCreateGroupForListingId(null)}
+          onSaved={async (created) => {
+            if (created)
+              await onCreatedGroupForListing(createGroupForListingId, created);
+            else setCreateGroupForListingId(null);
           }}
         />
       )}
@@ -872,6 +970,7 @@ function ListingCard({
   onRejectMatch,
   onChangeMatch,
   onAddToGroup,
+  onCreateGroup,
   onRemoveFromGroup,
   localDrivers,
   tagDriverOpen,
@@ -896,6 +995,7 @@ function ListingCard({
   onRejectMatch: () => void;
   onChangeMatch: () => void;
   onAddToGroup: (groupId: number) => void;
+  onCreateGroup: () => void;
   onRemoveFromGroup: (groupId: number) => void;
   localDrivers: DriverOption[];
   tagDriverOpen: boolean;
@@ -969,6 +1069,7 @@ function ListingCard({
           row={row}
           groups={groups}
           onAddToGroup={onAddToGroup}
+          onCreateGroup={onCreateGroup}
           onRemoveFromGroup={onRemoveFromGroup}
         />
 
@@ -1343,6 +1444,7 @@ function CollapseAllBar({
 function GroupedByDriver({
   rows,
   groups,
+  bucketSort,
   offersByItemId,
   refreshingId,
   unwatchingId,
@@ -1352,6 +1454,7 @@ function GroupedByDriver({
   onRejectMatch,
   onChangeMatch,
   onAddToGroup,
+  onCreateGroup,
   onRemoveFromGroup,
   localDrivers,
   tagDriverId,
@@ -1367,6 +1470,7 @@ function GroupedByDriver({
 }: {
   rows: ListingRow[];
   groups: ListingGroup[];
+  bucketSort: BucketSort;
   offersByItemId: Map<string, ReceivedOffer>;
   refreshingId: number | null;
   unwatchingId: number | null;
@@ -1376,6 +1480,7 @@ function GroupedByDriver({
   onRejectMatch: (id: number) => void;
   onChangeMatch: (row: ListingRow) => void;
   onAddToGroup: (listingId: number, groupId: number) => void;
+  onCreateGroup: (listingId: number) => void;
   onRemoveFromGroup: (listingId: number, groupId: number) => void;
   localDrivers: DriverOption[];
   tagDriverId: number | null;
@@ -1401,13 +1506,16 @@ function GroupedByDriver({
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(r);
     }
-    const entries = Array.from(map.entries()).sort(([a], [b]) => {
+    const entries = Array.from(map.entries()).sort(([a, aItems], [b, bItems]) => {
+      // "Unmatched" always sinks to the bottom regardless of sort.
       if (a === "Unmatched") return 1;
       if (b === "Unmatched") return -1;
+      if (bucketSort === "count-desc") return bItems.length - aItems.length;
+      if (bucketSort === "count-asc") return aItems.length - bItems.length;
       return a.localeCompare(b);
     });
     return entries;
-  }, [rows]);
+  }, [rows, bucketSort]);
 
   // Controlled collapse state, keyed by driver name. Empty = all expanded
   // (the default). "Collapse all" fills it with every bucket key.
@@ -1470,6 +1578,7 @@ function GroupedByDriver({
                     onRejectMatch={() => onRejectMatch(r.listing_id)}
                     onChangeMatch={() => onChangeMatch(r)}
                     onAddToGroup={(gid) => onAddToGroup(r.listing_id, gid)}
+                    onCreateGroup={() => onCreateGroup(r.listing_id)}
                     onRemoveFromGroup={(gid) =>
                       onRemoveFromGroup(r.listing_id, gid)
                     }
@@ -1500,6 +1609,7 @@ function GroupedByDriver({
 function GroupedByGroup({
   rows,
   groups,
+  bucketSort,
   offersByItemId,
   refreshingId,
   unwatchingId,
@@ -1509,6 +1619,7 @@ function GroupedByGroup({
   onRejectMatch,
   onChangeMatch,
   onAddToGroup,
+  onCreateGroup,
   onRemoveFromGroup,
   localDrivers,
   tagDriverId,
@@ -1524,6 +1635,7 @@ function GroupedByGroup({
 }: {
   rows: ListingRow[];
   groups: ListingGroup[];
+  bucketSort: BucketSort;
   offersByItemId: Map<string, ReceivedOffer>;
   refreshingId: number | null;
   unwatchingId: number | null;
@@ -1533,6 +1645,7 @@ function GroupedByGroup({
   onRejectMatch: (id: number) => void;
   onChangeMatch: (row: ListingRow) => void;
   onAddToGroup: (listingId: number, groupId: number) => void;
+  onCreateGroup: (listingId: number) => void;
   onRemoveFromGroup: (listingId: number, groupId: number) => void;
   localDrivers: DriverOption[];
   tagDriverId: number | null;
@@ -1565,13 +1678,16 @@ function GroupedByGroup({
     const ordered = groups
       .map((g) => ({ group: g, items: byId.get(g.id) ?? [] }))
       .sort((a, b) => {
+        // Archived groups always sink below active ones.
         if (a.group.archived !== b.group.archived) {
           return a.group.archived ? 1 : -1;
         }
+        if (bucketSort === "count-desc") return b.items.length - a.items.length;
+        if (bucketSort === "count-asc") return a.items.length - b.items.length;
         return a.group.name.localeCompare(b.group.name);
       });
     return { ordered, ungrouped };
-  }, [rows, groups]);
+  }, [rows, groups, bucketSort]);
 
   // Controlled collapse state, keyed by group id (stringified) plus the
   // sentinel "ungrouped". Seeded to preserve the prior defaults: archived
@@ -1687,6 +1803,7 @@ function GroupedByGroup({
                       onRejectMatch={() => onRejectMatch(r.listing_id)}
                       onChangeMatch={() => onChangeMatch(r)}
                       onAddToGroup={(gid) => onAddToGroup(r.listing_id, gid)}
+                      onCreateGroup={() => onCreateGroup(r.listing_id)}
                       onRemoveFromGroup={(gid) =>
                         onRemoveFromGroup(r.listing_id, gid)
                       }
@@ -1744,6 +1861,7 @@ function GroupedByGroup({
                   onRejectMatch={() => onRejectMatch(r.listing_id)}
                   onChangeMatch={() => onChangeMatch(r)}
                   onAddToGroup={(gid) => onAddToGroup(r.listing_id, gid)}
+                  onCreateGroup={() => onCreateGroup(r.listing_id)}
                   onRemoveFromGroup={(gid) =>
                     onRemoveFromGroup(r.listing_id, gid)
                   }
@@ -1774,14 +1892,17 @@ function GroupChipRow({
   row,
   groups,
   onAddToGroup,
+  onCreateGroup,
   onRemoveFromGroup,
 }: {
   row: ListingRow;
   groups: ListingGroup[];
   onAddToGroup: (groupId: number) => void;
+  onCreateGroup: () => void;
   onRemoveFromGroup: (groupId: number) => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const memberOf = useMemo(() => {
     const ids = new Set(row.group_ids);
     return groups.filter((g) => ids.has(g.id));
@@ -1790,6 +1911,11 @@ function GroupChipRow({
     const ids = new Set(row.group_ids);
     return groups.filter((g) => !ids.has(g.id) && !g.archived);
   }, [row.group_ids, groups]);
+  const filteredAvailable = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return available;
+    return available.filter((g) => g.name.toLowerCase().includes(q));
+  }, [available, query]);
 
   const total =
     row.price_cents !== null ? row.price_cents + (row.shipping_cents ?? 0) : null;
@@ -1830,24 +1956,57 @@ function GroupChipRow({
           </span>
         );
       })}
-      {available.length > 0 && (
-        <div className="relative">
-          <button
-            type="button"
-            className="text-[10px] px-1.5 py-0.5 rounded border border-dashed border-border text-fg-subtle hover:text-fg hover:border-fg-muted"
-            onClick={() => setPickerOpen((v) => !v)}
-          >
-            + group
-          </button>
-          {pickerOpen && (
-            <>
-              {/* Click-away catcher. */}
-              <div
-                className="fixed inset-0 z-30"
-                onClick={() => setPickerOpen(false)}
-              />
-              <div className="absolute z-40 mt-1 min-w-[12rem] rounded border border-border bg-bg-elevated shadow-lg py-1 max-h-64 overflow-y-auto">
-                {available.map((g) => (
+      <div className="relative">
+        <button
+          type="button"
+          className="text-[10px] px-1.5 py-0.5 rounded border border-dashed border-border text-fg-subtle hover:text-fg hover:border-fg-muted"
+          onClick={() => {
+            setPickerOpen((v) => !v);
+            setQuery("");
+          }}
+        >
+          + group
+        </button>
+        {pickerOpen && (
+          <>
+            {/* Click-away catcher. */}
+            <div
+              className="fixed inset-0 z-30"
+              onClick={() => setPickerOpen(false)}
+            />
+            <div className="absolute z-40 mt-1 min-w-[12rem] rounded border border-border bg-bg-elevated shadow-lg py-1">
+              {available.length > 0 && (
+                <div className="px-2 pb-1">
+                  <input
+                    type="text"
+                    className="input !py-1 !text-xs"
+                    placeholder="Search groups…"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    autoFocus
+                  />
+                </div>
+              )}
+              <div className="max-h-64 overflow-y-auto">
+                <button
+                  type="button"
+                  className="block w-full text-left px-2 py-1 text-xs text-accent hover:bg-bg"
+                  onClick={() => {
+                    setPickerOpen(false);
+                    onCreateGroup();
+                  }}
+                >
+                  + Create new group…
+                </button>
+                {filteredAvailable.length > 0 && (
+                  <div className="my-1 h-px bg-border" />
+                )}
+                {available.length > 0 && filteredAvailable.length === 0 && (
+                  <div className="px-2 py-1 text-xs text-fg-subtle">
+                    No groups match “{query.trim()}”.
+                  </div>
+                )}
+                {filteredAvailable.map((g) => (
                   <button
                     key={g.id}
                     type="button"
@@ -1866,10 +2025,10 @@ function GroupChipRow({
                   </button>
                 ))}
               </div>
-            </>
-          )}
-        </div>
-      )}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -1884,6 +2043,7 @@ function BulkSelectionBar({
   onClear,
   onDone,
   onAddToGroup,
+  onCreateGroup,
   onRemoveFromGroup,
 }: {
   selectedCount: number;
@@ -1895,6 +2055,7 @@ function BulkSelectionBar({
   onClear: () => void;
   onDone: () => void;
   onAddToGroup: (groupId: number) => void;
+  onCreateGroup: () => void;
   onRemoveFromGroup: (groupId: number) => void;
 }) {
   const activeGroups = groups.filter((g) => !g.archived);
@@ -1927,9 +2088,10 @@ function BulkSelectionBar({
         <BulkGroupMenu
           label="Add to group"
           groups={activeGroups}
-          disabled={busy || selectedCount === 0 || activeGroups.length === 0}
+          disabled={busy || selectedCount === 0}
           onPick={onAddToGroup}
-          emptyHint="No groups yet — open Manage…"
+          onCreateNew={onCreateGroup}
+          emptyHint="No groups yet."
         />
         <BulkGroupMenu
           label="Remove from group"
@@ -1962,21 +2124,32 @@ function BulkGroupMenu({
   groups,
   disabled,
   onPick,
+  onCreateNew,
   emptyHint,
 }: {
   label: string;
   groups: ListingGroup[];
   disabled: boolean;
   onPick: (groupId: number) => void;
+  onCreateNew?: () => void;
   emptyHint: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return groups;
+    return groups.filter((g) => g.name.toLowerCase().includes(q));
+  }, [groups, query]);
   return (
     <div className="relative">
       <button
         type="button"
         className="text-xs px-2 py-1 rounded border border-border text-fg-muted hover:text-fg disabled:opacity-50 disabled:cursor-not-allowed"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          setOpen((v) => !v);
+          setQuery("");
+        }}
         disabled={disabled}
       >
         {label} ▾
@@ -1987,29 +2160,66 @@ function BulkGroupMenu({
             className="fixed inset-0 z-30"
             onClick={() => setOpen(false)}
           />
-          <div className="absolute z-40 bottom-full mb-1 right-0 min-w-[14rem] rounded border border-border bg-bg-elevated shadow-lg py-1 max-h-64 overflow-y-auto">
-            {groups.length === 0 ? (
-              <div className="px-2 py-1 text-xs text-fg-subtle">
-                {emptyHint}
+          <div className="absolute z-40 bottom-full mb-1 right-0 min-w-[14rem] rounded border border-border bg-bg-elevated shadow-lg py-1">
+            {groups.length > 0 && (
+              <div className="px-2 pb-1">
+                <input
+                  type="text"
+                  className="input !py-1 !text-xs"
+                  placeholder="Search groups…"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  autoFocus
+                />
               </div>
-            ) : (
-              groups.map((g) => (
-                <button
-                  key={g.id}
-                  type="button"
-                  className="block w-full text-left px-2 py-1 text-xs hover:bg-bg"
-                  onClick={() => {
-                    setOpen(false);
-                    onPick(g.id);
-                  }}
-                >
-                  {g.name}
-                  {g.archived && (
-                    <span className="text-fg-subtle ml-1">(archived)</span>
-                  )}
-                </button>
-              ))
             )}
+            <div className="max-h-64 overflow-y-auto">
+              {onCreateNew && (
+                <>
+                  <button
+                    type="button"
+                    className="block w-full text-left px-2 py-1 text-xs text-accent hover:bg-bg"
+                    onClick={() => {
+                      setOpen(false);
+                      onCreateNew();
+                    }}
+                  >
+                    + Create new group…
+                  </button>
+                  {filtered.length > 0 && (
+                    <div className="my-1 h-px bg-border" />
+                  )}
+                </>
+              )}
+              {groups.length === 0 ? (
+                onCreateNew ? null : (
+                  <div className="px-2 py-1 text-xs text-fg-subtle">
+                    {emptyHint}
+                  </div>
+                )
+              ) : filtered.length === 0 ? (
+                <div className="px-2 py-1 text-xs text-fg-subtle">
+                  No groups match “{query.trim()}”.
+                </div>
+              ) : (
+                filtered.map((g) => (
+                  <button
+                    key={g.id}
+                    type="button"
+                    className="block w-full text-left px-2 py-1 text-xs hover:bg-bg"
+                    onClick={() => {
+                      setOpen(false);
+                      onPick(g.id);
+                    }}
+                  >
+                    {g.name}
+                    {g.archived && (
+                      <span className="text-fg-subtle ml-1">(archived)</span>
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
           </div>
         </>
       )}
@@ -2195,7 +2405,7 @@ function GroupEditorDialog({
 }: {
   initial: ListingGroup | null;
   onCancel: () => void;
-  onSaved: () => Promise<void>;
+  onSaved: (created: ListingGroup | null) => Promise<void>;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
@@ -2229,11 +2439,12 @@ function GroupEditorDialog({
     setBusy(true);
     try {
       if (initial === null) {
-        await api.createListingGroup(input);
+        const created = await api.createListingGroup(input);
+        await onSaved(created);
       } else {
         await api.updateListingGroup(initial.id, input);
+        await onSaved(null);
       }
-      await onSaved();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -2349,6 +2560,7 @@ function RegistrySearchDialog({
   );
   const [searching, setSearching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [criteriaOpen, setCriteriaOpen] = useState(true);
   const [linkingGuid, setLinkingGuid] = useState<string | null>(null);
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -2372,8 +2584,8 @@ function RegistrySearchDialog({
       ]);
       setDrivers(d);
       setOems(o);
-      setScales(s);
-      setYears(y);
+      setScales(prepareScaleOptions(s));
+      setYears(prepareYearOptions(y));
       setBrands(b);
       setMakes(m);
       setFinishes(f);
@@ -2455,6 +2667,9 @@ function RegistrySearchDialog({
         raced: false,
       });
       setResults(r);
+      // Give the results list the full height once there's something to scan;
+      // the user can reopen the criteria to refine.
+      if (r.length > 0) setCriteriaOpen(false);
     } catch (e) {
       setDialogError(String(e));
     } finally {
@@ -2484,11 +2699,11 @@ function RegistrySearchDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-12 px-4 bg-black/60"
+      className="fixed inset-0 z-50 flex items-start justify-center pt-6 px-4 bg-black/60"
       onClick={onClose}
     >
       <div
-        className="card w-full max-w-3xl max-h-[85vh] flex flex-col"
+        className="card w-full max-w-6xl h-[92vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start gap-3 mb-3">
@@ -2546,7 +2761,17 @@ function RegistrySearchDialog({
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              className="flex items-center gap-1.5 text-xs font-medium text-fg-muted hover:text-fg"
+              onClick={() => setCriteriaOpen((v) => !v)}
+              aria-expanded={criteriaOpen}
+            >
+              <span className="text-fg-subtle">{criteriaOpen ? "▾" : "▸"}</span>
+              Search criteria
+            </button>
+            {criteriaOpen && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-2">
               <div>
                 <label className="label">Driver</label>
                 <input
@@ -2701,6 +2926,7 @@ function RegistrySearchDialog({
                 </datalist>
               </div>
             </div>
+            )}
 
             <div className="flex items-center justify-between mt-3">
               <button
@@ -2753,22 +2979,22 @@ function RegistrySearchDialog({
                       }
                       alt=""
                       loading="lazy"
-                      className="w-32 h-32 object-cover rounded border border-border shrink-0"
+                      className="w-48 h-48 object-cover rounded border border-border shrink-0"
                     />
                   ) : (
-                    <div className="w-32 h-32 rounded border border-border bg-bg shrink-0" />
+                    <div className="w-48 h-48 rounded border border-border bg-bg shrink-0" />
                   )}
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium truncate">
+                    <div className="text-base font-medium truncate">
                       {r.driver_name}
                       {r.year && (
                         <span className="text-fg-subtle ml-2">{r.year}</span>
                       )}
                     </div>
-                    <div className="text-xs text-fg-subtle truncate">
+                    <div className="text-sm text-fg-subtle truncate">
                       {r.scheme_text ?? "(no scheme)"}
                     </div>
-                    <div className="text-xs text-fg-faint">
+                    <div className="text-xs text-fg-faint mt-0.5">
                       {[r.oem, r.brand, r.scale, r.make]
                         .filter(Boolean)
                         .join(" · ")}

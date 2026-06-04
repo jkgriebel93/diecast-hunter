@@ -4,6 +4,8 @@ import {
   api,
   formatCents,
   isPreferredOem,
+  prepareScaleOptions,
+  prepareYearOptions,
   type Condition,
   type FormOptionRow,
   type ProductionSearchResult,
@@ -88,8 +90,8 @@ export function Registry() {
       ]);
       setDrivers(d);
       setOems(o);
-      setScales(s);
-      setYears(y);
+      setScales(prepareScaleOptions(s));
+      setYears(prepareYearOptions(y));
       setBrands(b);
       setMakes(m);
       setFinishes(f);

@@ -382,6 +382,40 @@ export function isPreferredOem(display: string): boolean {
   return PREFERRED_OEM_KEYS.has(normalizeOemKey(display));
 }
 
+/** NASCAR's first season was 1948, so registry year dropdowns never need to
+ *  offer anything earlier. Drops pre-1948 (and non-numeric) options and sorts
+ *  the rest newest-first. */
+export const EARLIEST_YEAR = 1948;
+export function prepareYearOptions(years: FormOptionRow[]): FormOptionRow[] {
+  const yearOf = (y: FormOptionRow) => parseInt(y.value || y.display, 10);
+  return years
+    .filter((y) => {
+      const n = yearOf(y);
+      return Number.isFinite(n) && n >= EARLIEST_YEAR;
+    })
+    .sort((a, b) => yearOf(b) - yearOf(a));
+}
+
+/** The only model scales we surface in scale dropdowns, in display order. */
+export const ALLOWED_SCALES = ["1:18", "1:24", "1:32", "1:64"] as const;
+const SCALE_ORDER = new Map<string, number>(
+  ALLOWED_SCALES.map((s, i) => [s, i]),
+);
+
+/** Keep only the allowed model scales, ordered largest → smallest. */
+export function prepareScaleOptions(scales: FormOptionRow[]): FormOptionRow[] {
+  return scales
+    .filter((s) => SCALE_ORDER.has(s.display))
+    .sort((a, b) => SCALE_ORDER.get(a.display)! - SCALE_ORDER.get(b.display)!);
+}
+
+/** Same filtering as prepareScaleOptions, for plain scale strings. */
+export function filterAllowedScales(scales: string[]): string[] {
+  return scales
+    .filter((s) => SCALE_ORDER.has(s))
+    .sort((a, b) => SCALE_ORDER.get(a)! - SCALE_ORDER.get(b)!);
+}
+
 export interface ProductionSearchFilter {
   diecast_type?: string;
   driver_guids?: string[];

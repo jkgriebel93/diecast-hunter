@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
   api,
+  filterAllowedScales,
   formatCents,
   type CollectionRow,
 } from "@/lib/tauri";
@@ -56,12 +57,13 @@ export function Collection() {
     load();
   }, []);
 
-  // Distinct scales / OEMs for filter dropdowns.
+  // Distinct scales / OEMs for filter dropdowns. Scales are limited to the
+  // standard model sizes we surface everywhere (1:18, 1:24, 1:32, 1:64).
   const scales = useMemo(() => {
     const set = new Set<string>();
     for (const i of items ?? [])
       if (i.scale) set.add(i.scale);
-    return Array.from(set).sort();
+    return filterAllowedScales(Array.from(set));
   }, [items]);
 
   const oems = useMemo(() => {
