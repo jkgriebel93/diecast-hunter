@@ -238,11 +238,22 @@ export const api = {
       groupId,
       listingIds,
     }),
+  ensureDriver: (name: string, normalized: string) =>
+    invoke<number>("ensure_driver", { name, normalized }),
+  proposeGroupMigration: (handles: string[]) =>
+    invoke<GroupMigrationProposal[]>("propose_group_migration", { handles }),
+  applyGroupMigration: (items: GroupMigrationItem[]) =>
+    invoke<number>("apply_group_migration", { items }),
 };
 
 export interface BulkAddResult {
   added: number;
   already_present: number;
+}
+
+export interface GroupDriver {
+  id: number;
+  name: string;
 }
 
 export interface ListingGroup {
@@ -253,6 +264,8 @@ export interface ListingGroup {
   archived: boolean;
   created_at: number;
   member_count: number;
+  /** Drivers this group is associated with. Empty = driverless. */
+  drivers: GroupDriver[];
 }
 
 export interface ListingGroupInput {
@@ -260,6 +273,22 @@ export interface ListingGroupInput {
   description: string | null;
   target_price_cents: number | null;
   archived: boolean;
+  /** Driver ids to associate; replaces the existing set on update. */
+  driver_ids: number[];
+}
+
+export interface GroupMigrationProposal {
+  group_id: number;
+  original_name: string;
+  matched_handle: string | null;
+  new_name: string;
+  empty_remainder: boolean;
+}
+
+export interface GroupMigrationItem {
+  group_id: number;
+  new_name: string;
+  driver_ids: number[];
 }
 
 export interface SavedSyncSummary {

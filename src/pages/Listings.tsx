@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Fragment, FormEvent, useEffect, useMemo, useState } from "react";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
   api,
@@ -8,6 +8,7 @@ import {
   prepareYearOptions,
   type DriverOption,
   type FormOptionRow,
+  type GroupMigrationProposal,
   type ListingGroup,
   type ListingGroupInput,
   type ListingRow,
@@ -43,6 +44,59 @@ type SortMode =
   | "title";
 /** Ordering of the driver/group sections in the grouped views. */
 type BucketSort = "name" | "count-desc" | "count-asc";
+
+/** Cluster groups by driver for the filter dropdown and the by-group view.
+ *  A group with multiple drivers appears under each of them. Archived groups
+ *  are kept out of the driver sections — they live in their own bucket so
+ *  resolved hunts don't clutter the active driver lists. */
+function clusterGroupsByDriver(groups: ListingGroup[]): {
+  drivers: { id: number; name: string; groups: ListingGroup[] }[];
+  noDriver: ListingGroup[];
+  archived: ListingGroup[];
+} {
+  const archived = groups.filter((g) => g.archived);
+  const active = groups.filter((g) => !g.archived);
+  const byDriver = new Map<number, { name: string; groups: ListingGroup[] }>();
+  const noDriver: ListingGroup[] = [];
+  for (const g of active) {
+    if (g.drivers.length === 0) {
+      noDriver.push(g);
+      continue;
+    }
+    for (const d of g.drivers) {
+      if (!byDriver.has(d.id)) byDriver.set(d.id, { name: d.name, groups: [] });
+      byDriver.get(d.id)!.groups.push(g);
+    }
+  }
+  const drivers = Array.from(byDriver.entries())
+    .map(([id, v]) => ({ id, name: v.name, groups: v.groups }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  for (const d of drivers) d.groups.sort((a, b) => a.name.localeCompare(b.name));
+  noDriver.sort((a, b) => a.name.localeCompare(b.name));
+  return { drivers, noDriver, archived };
+}
+
+/** Split groups into those tied to any of the given drivers and the rest,
+ *  preserving order. Matches by local driver id where available and falls
+ *  back to case-insensitive name — the registry-match driver on a listing
+ *  has no local id, only a name. Used by the group pickers to float the
+ *  relevant driver's groups to the top without hiding cross-driver groups
+ *  like "Lots". */
+function partitionGroupsByDrivers(
+  groups: ListingGroup[],
+  driverIds: Set<number>,
+  driverNames: Set<string>,
+): { preferred: ListingGroup[]; others: ListingGroup[] } {
+  const preferred: ListingGroup[] = [];
+  const others: ListingGroup[] = [];
+  for (const g of groups) {
+    const hit = g.drivers.some(
+      (d) => driverIds.has(d.id) || driverNames.has(d.name.toLowerCase()),
+    );
+    (hit ? preferred : others).push(g);
+  }
+  return { preferred, others };
+}
 
 export function Listings() {
   const [rows, setRows] = useState<ListingRow[] | null>(null);
@@ -536,6 +590,41 @@ export function Listings() {
     });
   }, [filteredRows, selectMode]);
 
+  // Seed the create-group editor with the listing's driver — registry match
+  // first, then the auto/manual tag — resolved against the local drivers
+  // table where possible. An unresolved name becomes a pending chip that
+  // `ensure_driver` materializes when the group is saved.
+  function prefillDriversForListing(listingId: number): DriverChip[] {
+    const r = rows?.find((x) => x.listing_id === listingId);
+    if (!r) return [];
+    const name = r.matched_driver_name ?? r.auto_driver_name;
+    if (!name) return [];
+    const local = localDrivers.find(
+      (d) => d.name.toLowerCase() === name.toLowerCase(),
+    );
+    if (local) return [{ id: local.id, name: local.name }];
+    if (name === r.auto_driver_name && r.auto_driver_id !== null)
+      return [{ id: r.auto_driver_id, name }];
+    return [{ id: null, name }];
+  }
+
+  // Driver keys (local ids + lower-cased names) across the current
+  // selection, used to float matching groups to the top of the bulk
+  // "Add to group" menu.
+  const selectedDriverKeys = useMemo(() => {
+    const ids = new Set<number>();
+    const names = new Set<string>();
+    if (!filteredRows) return { ids, names };
+    for (const r of filteredRows) {
+      if (!selectedIds.has(r.listing_id)) continue;
+      if (r.auto_driver_id !== null) ids.add(r.auto_driver_id);
+      if (r.matched_driver_name)
+        names.add(r.matched_driver_name.toLowerCase());
+      if (r.auto_driver_name) names.add(r.auto_driver_name.toLowerCase());
+    }
+    return { ids, names };
+  }, [filteredRows, selectedIds]);
+
   return (
     <div className="p-6 space-y-4">
       <header className="flex items-end justify-between">
@@ -701,24 +790,41 @@ export function Listings() {
               >
                 <option value="all">All</option>
                 <option value="none">Ungrouped</option>
-                {groups
-                  .filter((g) => !g.archived)
-                  .map((g) => (
-                    <option key={g.id} value={String(g.id)}>
-                      {g.name} ({g.member_count})
-                    </option>
-                  ))}
-                {groups.some((g) => g.archived) && (
-                  <optgroup label="Archived">
-                    {groups
-                      .filter((g) => g.archived)
-                      .map((g) => (
-                        <option key={g.id} value={String(g.id)}>
-                          {g.name} ({g.member_count})
-                        </option>
+                {(() => {
+                  const { drivers, noDriver, archived } =
+                    clusterGroupsByDriver(groups);
+                  return (
+                    <>
+                      {drivers.map((d) => (
+                        <optgroup key={`d-${d.id}`} label={d.name}>
+                          {d.groups.map((g) => (
+                            <option key={`${d.id}-${g.id}`} value={String(g.id)}>
+                              {g.name} ({g.member_count})
+                            </option>
+                          ))}
+                        </optgroup>
                       ))}
-                  </optgroup>
-                )}
+                      {noDriver.length > 0 && (
+                        <optgroup label="Other (no driver)">
+                          {noDriver.map((g) => (
+                            <option key={g.id} value={String(g.id)}>
+                              {g.name} ({g.member_count})
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {archived.length > 0 && (
+                        <optgroup label="Archived">
+                          {archived.map((g) => (
+                            <option key={g.id} value={String(g.id)}>
+                              {g.name} ({g.member_count})
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </>
+                  );
+                })()}
               </select>
               <button
                 type="button"
@@ -896,6 +1002,7 @@ export function Listings() {
           selectedCount={selectedIds.size}
           visibleCount={filteredRows?.length ?? 0}
           groups={groups}
+          selectedDriverKeys={selectedDriverKeys}
           busy={bulkBusy}
           message={bulkMessage}
           onSelectAllVisible={() => {
@@ -935,6 +1042,7 @@ export function Listings() {
       {createGroupForListingId !== null && (
         <GroupEditorDialog
           initial={null}
+          prefillDrivers={prefillDriversForListing(createGroupForListingId)}
           onCancel={() => setCreateGroupForListingId(null)}
           onSaved={async (created) => {
             if (created)
@@ -1659,9 +1767,9 @@ function GroupedByGroup({
   onToggleSelect: (listingId: number) => void;
   imgSizeClass: string;
 }) {
-  // Bucket by group; a listing in N groups appears in N buckets. An
-  // "Ungrouped" bucket collects everything with zero memberships.
-  const buckets = useMemo(() => {
+  // Per-group listing buckets; a listing in N groups appears in N buckets.
+  // "Ungrouped" collects everything with zero memberships.
+  const groupItems = useMemo(() => {
     const byId = new Map<number, ListingRow[]>();
     for (const g of groups) byId.set(g.id, []);
     const ungrouped: ListingRow[] = [];
@@ -1675,28 +1783,58 @@ function GroupedByGroup({
         byId.get(gid)!.push(r);
       }
     }
-    const ordered = groups
-      .map((g) => ({ group: g, items: byId.get(g.id) ?? [] }))
-      .sort((a, b) => {
-        // Archived groups always sink below active ones.
-        if (a.group.archived !== b.group.archived) {
-          return a.group.archived ? 1 : -1;
-        }
-        if (bucketSort === "count-desc") return b.items.length - a.items.length;
-        if (bucketSort === "count-asc") return a.items.length - b.items.length;
-        return a.group.name.localeCompare(b.group.name);
-      });
-    return { ordered, ungrouped };
-  }, [rows, groups, bucketSort]);
+    return { byId, ungrouped };
+  }, [rows, groups]);
 
-  // Controlled collapse state, keyed by group id (stringified) plus the
-  // sentinel "ungrouped". Seeded to preserve the prior defaults: archived
-  // groups and the Ungrouped bucket start collapsed, everything else open.
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
-    const s = new Set<string>(["ungrouped"]);
-    for (const g of groups) if (g.archived) s.add(String(g.id));
-    return s;
-  });
+  // Two-level layout: a driver section per driver (a multi-driver group
+  // appears under each), then "No driver", then "Archived". `bucketSort`
+  // orders the groups within each section.
+  const sections = useMemo(() => {
+    const { drivers, noDriver, archived } = clusterGroupsByDriver(groups);
+    const sortGroups = (gs: ListingGroup[]) =>
+      [...gs].sort((a, b) => {
+        const ca = groupItems.byId.get(a.id)?.length ?? 0;
+        const cb = groupItems.byId.get(b.id)?.length ?? 0;
+        if (bucketSort === "count-desc") return cb - ca;
+        if (bucketSort === "count-asc") return ca - cb;
+        return a.name.localeCompare(b.name);
+      });
+    const out: {
+      key: string;
+      label: string;
+      muted: boolean;
+      groups: ListingGroup[];
+    }[] = [];
+    for (const d of drivers)
+      out.push({
+        key: `d-${d.id}`,
+        label: d.name,
+        muted: false,
+        groups: sortGroups(d.groups),
+      });
+    if (noDriver.length > 0)
+      out.push({
+        key: "no-driver",
+        label: "No driver",
+        muted: true,
+        groups: sortGroups(noDriver),
+      });
+    if (archived.length > 0)
+      out.push({
+        key: "archived",
+        label: "Archived",
+        muted: true,
+        groups: sortGroups(archived),
+      });
+    return out;
+  }, [groups, groupItems, bucketSort]);
+
+  // Section-level collapse state. Archived and Ungrouped start collapsed;
+  // everything else open. Collapsing a section hides its groups entirely,
+  // so "Collapse all" gives a compact per-driver index.
+  const [collapsed, setCollapsed] = useState<Set<string>>(
+    () => new Set<string>(["archived", "ungrouped"]),
+  );
   const setOpen = (key: string, isOpen: boolean) =>
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -1705,12 +1843,45 @@ function GroupedByGroup({
       return next;
     });
   const allKeys = useMemo(() => {
-    const ks = buckets.ordered.map(({ group }) => String(group.id));
-    if (buckets.ungrouped.length > 0) ks.push("ungrouped");
+    const ks = sections.map((s) => s.key);
+    if (groupItems.ungrouped.length > 0) ks.push("ungrouped");
     return ks;
-  }, [buckets]);
+  }, [sections, groupItems.ungrouped.length]);
   const allCollapsed =
     allKeys.length > 0 && allKeys.every((k) => collapsed.has(k));
+
+  const renderListing = (r: ListingRow) => (
+    <li key={r.listing_id} className="px-4 py-2">
+      <ListingCard
+        row={r}
+        groups={groups}
+        offer={offersByItemId.get(legacyIdFromExternalId(r.external_id))}
+        refreshing={refreshingId === r.listing_id}
+        unwatching={unwatchingId === r.listing_id}
+        onRefresh={() => onRefresh(r.listing_id)}
+        onUnwatch={() => onUnwatch(r)}
+        onClearMatch={() => onClearMatch(r.listing_id)}
+        onRejectMatch={() => onRejectMatch(r.listing_id)}
+        onChangeMatch={() => onChangeMatch(r)}
+        onAddToGroup={(gid) => onAddToGroup(r.listing_id, gid)}
+        onCreateGroup={() => onCreateGroup(r.listing_id)}
+        onRemoveFromGroup={(gid) => onRemoveFromGroup(r.listing_id, gid)}
+        localDrivers={localDrivers}
+        tagDriverOpen={tagDriverId === r.listing_id}
+        onOpenTagDriver={() => onOpenTagDriver(r.listing_id)}
+        onCancelTagDriver={onCancelTagDriver}
+        onSetDriver={(name, normalized) =>
+          onSetDriver(r.listing_id, name, normalized)
+        }
+        onClearDriver={() => onClearDriver(r.listing_id)}
+        onResetDriver={() => onResetDriver(r.listing_id)}
+        selectMode={selectMode}
+        selected={selectedIds.has(r.listing_id)}
+        onToggleSelect={() => onToggleSelect(r.listing_id)}
+        imgSizeClass={imgSizeClass}
+      />
+    </li>
+  );
 
   if (groups.length === 0) {
     return (
@@ -1727,109 +1898,95 @@ function GroupedByGroup({
         onCollapseAll={() => setCollapsed(new Set(allKeys))}
         onExpandAll={() => setCollapsed(new Set())}
       />
-      {buckets.ordered.map(({ group, items }) => {
-        const totalCents = items.reduce(
-          (s, r) => s + (r.price_cents ?? 0) + (r.shipping_cents ?? 0),
-          0,
-        );
-        const overTarget =
-          group.target_price_cents !== null
-            ? items.filter(
-                (r) =>
-                  r.price_cents !== null &&
-                  r.price_cents + (r.shipping_cents ?? 0) >
-                    (group.target_price_cents ?? 0),
-              ).length
-            : 0;
-        return (
-          <details
-            key={group.id}
-            className={`card !p-0 overflow-hidden ${group.archived ? "opacity-70" : ""}`}
-            open={!collapsed.has(String(group.id))}
-            onToggle={(e) => setOpen(String(group.id), e.currentTarget.open)}
-          >
-            <summary className="cursor-pointer list-none px-4 py-3 flex items-start justify-between gap-4 hover:bg-bg-elevated">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">{group.name}</span>
-                  {group.archived && (
-                    <span className="text-[10px] uppercase tracking-wide text-fg-subtle border border-border rounded px-1">
-                      archived
-                    </span>
-                  )}
-                  <span className="text-xs text-fg-subtle">
-                    {items.length} listing{items.length === 1 ? "" : "s"}
-                  </span>
-                </div>
-                {group.description && (
-                  <div className="text-xs text-fg-subtle mt-0.5 whitespace-pre-wrap">
-                    {group.description}
-                  </div>
-                )}
-                {group.target_price_cents !== null && (
-                  <div className="text-xs text-fg-subtle mt-0.5">
-                    target ≤ {formatCents(group.target_price_cents)}
-                    {overTarget > 0 && (
-                      <span className="text-amber-400 ml-2">
-                        {overTarget} over target
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-              <div className="text-xs text-fg-subtle tabular-nums shrink-0">
-                total {formatCents(totalCents)}
-              </div>
-            </summary>
-            {items.length === 0 ? (
-              <div className="px-4 py-3 text-xs text-fg-subtle">
-                No listings in this group yet.
-              </div>
-            ) : (
-              <ul className="divide-y divide-border">
-                {items.map((r) => (
-                  <li key={r.listing_id} className="px-4 py-2">
-                    <ListingCard
-                      row={r}
-                      groups={groups}
-                      offer={offersByItemId.get(
-                        legacyIdFromExternalId(r.external_id),
+      {sections.map((section) => (
+        <details
+          key={section.key}
+          className={`card !p-0 overflow-hidden ${section.muted ? "opacity-80" : ""}`}
+          open={!collapsed.has(section.key)}
+          onToggle={(e) => setOpen(section.key, e.currentTarget.open)}
+        >
+          <summary className="cursor-pointer list-none px-4 py-2.5 flex items-center justify-between hover:bg-bg-elevated bg-bg-elevated/40">
+            <div className="flex items-center gap-2">
+              <span
+                className={`font-semibold ${section.muted ? "text-fg-muted" : ""}`}
+              >
+                {section.label}
+              </span>
+              <span className="text-xs text-fg-subtle">
+                {section.groups.length} group
+                {section.groups.length === 1 ? "" : "s"}
+              </span>
+            </div>
+          </summary>
+          <div className="px-3 py-2 space-y-2">
+            {section.groups.map((group) => {
+              const items = groupItems.byId.get(group.id) ?? [];
+              const gkey = `${section.key}::${group.id}`;
+              const totalCents = items.reduce(
+                (s, r) => s + (r.price_cents ?? 0) + (r.shipping_cents ?? 0),
+                0,
+              );
+              const overTarget =
+                group.target_price_cents !== null
+                  ? items.filter(
+                      (r) =>
+                        r.price_cents !== null &&
+                        r.price_cents + (r.shipping_cents ?? 0) >
+                          (group.target_price_cents ?? 0),
+                    ).length
+                  : 0;
+              return (
+                <details
+                  key={gkey}
+                  className="rounded border border-border overflow-hidden"
+                  open={!collapsed.has(gkey)}
+                  onToggle={(e) => setOpen(gkey, e.currentTarget.open)}
+                >
+                  <summary className="cursor-pointer list-none px-3 py-2 flex items-start justify-between gap-4 hover:bg-bg-elevated">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{group.name}</span>
+                        <span className="text-xs text-fg-subtle">
+                          {items.length} listing{items.length === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                      {group.description && (
+                        <div className="text-xs text-fg-subtle mt-0.5 whitespace-pre-wrap">
+                          {group.description}
+                        </div>
                       )}
-                      refreshing={refreshingId === r.listing_id}
-                      unwatching={unwatchingId === r.listing_id}
-                      onRefresh={() => onRefresh(r.listing_id)}
-                      onUnwatch={() => onUnwatch(r)}
-                      onClearMatch={() => onClearMatch(r.listing_id)}
-                      onRejectMatch={() => onRejectMatch(r.listing_id)}
-                      onChangeMatch={() => onChangeMatch(r)}
-                      onAddToGroup={(gid) => onAddToGroup(r.listing_id, gid)}
-                      onCreateGroup={() => onCreateGroup(r.listing_id)}
-                      onRemoveFromGroup={(gid) =>
-                        onRemoveFromGroup(r.listing_id, gid)
-                      }
-                      localDrivers={localDrivers}
-                      tagDriverOpen={tagDriverId === r.listing_id}
-                      onOpenTagDriver={() => onOpenTagDriver(r.listing_id)}
-                      onCancelTagDriver={onCancelTagDriver}
-                      onSetDriver={(name, normalized) =>
-                        onSetDriver(r.listing_id, name, normalized)
-                      }
-                      onClearDriver={() => onClearDriver(r.listing_id)}
-                      onResetDriver={() => onResetDriver(r.listing_id)}
-                      selectMode={selectMode}
-                      selected={selectedIds.has(r.listing_id)}
-                      onToggleSelect={() => onToggleSelect(r.listing_id)}
-                      imgSizeClass={imgSizeClass}
-                    />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </details>
-        );
-      })}
+                      {group.target_price_cents !== null && (
+                        <div className="text-xs text-fg-subtle mt-0.5">
+                          target ≤ {formatCents(group.target_price_cents)}
+                          {overTarget > 0 && (
+                            <span className="text-amber-400 ml-2">
+                              {overTarget} over target
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-xs text-fg-subtle tabular-nums shrink-0">
+                      total {formatCents(totalCents)}
+                    </div>
+                  </summary>
+                  {items.length === 0 ? (
+                    <div className="px-3 py-2.5 text-xs text-fg-subtle">
+                      No listings in this group yet.
+                    </div>
+                  ) : (
+                    <ul className="divide-y divide-border border-t border-border">
+                      {items.map(renderListing)}
+                    </ul>
+                  )}
+                </details>
+              );
+            })}
+          </div>
+        </details>
+      ))}
 
-      {buckets.ungrouped.length > 0 && (
+      {groupItems.ungrouped.length > 0 && (
         <details
           className="card !p-0 overflow-hidden"
           open={!collapsed.has("ungrouped")}
@@ -1839,48 +1996,13 @@ function GroupedByGroup({
             <div className="flex items-center gap-2">
               <span className="font-medium text-fg-muted">Ungrouped</span>
               <span className="text-xs text-fg-subtle">
-                {buckets.ungrouped.length} listing
-                {buckets.ungrouped.length === 1 ? "" : "s"}
+                {groupItems.ungrouped.length} listing
+                {groupItems.ungrouped.length === 1 ? "" : "s"}
               </span>
             </div>
           </summary>
           <ul className="divide-y divide-border">
-            {buckets.ungrouped.map((r) => (
-              <li key={r.listing_id} className="px-4 py-2">
-                <ListingCard
-                  row={r}
-                  groups={groups}
-                  offer={offersByItemId.get(
-                    legacyIdFromExternalId(r.external_id),
-                  )}
-                  refreshing={refreshingId === r.listing_id}
-                  unwatching={unwatchingId === r.listing_id}
-                  onRefresh={() => onRefresh(r.listing_id)}
-                  onUnwatch={() => onUnwatch(r)}
-                  onClearMatch={() => onClearMatch(r.listing_id)}
-                  onRejectMatch={() => onRejectMatch(r.listing_id)}
-                  onChangeMatch={() => onChangeMatch(r)}
-                  onAddToGroup={(gid) => onAddToGroup(r.listing_id, gid)}
-                  onCreateGroup={() => onCreateGroup(r.listing_id)}
-                  onRemoveFromGroup={(gid) =>
-                    onRemoveFromGroup(r.listing_id, gid)
-                  }
-                  localDrivers={localDrivers}
-                  tagDriverOpen={tagDriverId === r.listing_id}
-                  onOpenTagDriver={() => onOpenTagDriver(r.listing_id)}
-                  onCancelTagDriver={onCancelTagDriver}
-                  onSetDriver={(name, normalized) =>
-                    onSetDriver(r.listing_id, name, normalized)
-                  }
-                  onClearDriver={() => onClearDriver(r.listing_id)}
-                  onResetDriver={() => onResetDriver(r.listing_id)}
-                  selectMode={selectMode}
-                  selected={selectedIds.has(r.listing_id)}
-                  onToggleSelect={() => onToggleSelect(r.listing_id)}
-                  imgSizeClass={imgSizeClass}
-                />
-              </li>
-            ))}
+            {groupItems.ungrouped.map(renderListing)}
           </ul>
         </details>
       )}
@@ -1917,8 +2039,45 @@ function GroupChipRow({
     return available.filter((g) => g.name.toLowerCase().includes(q));
   }, [available, query]);
 
+  // Float this listing's driver's groups to the top of the picker. Registry
+  // match takes precedence over the auto/manual tag for the section label.
+  const driverLabel = row.matched_driver_name ?? row.auto_driver_name;
+  const { preferred, others } = useMemo(() => {
+    const ids = new Set<number>();
+    if (row.auto_driver_id !== null) ids.add(row.auto_driver_id);
+    const names = new Set<string>();
+    if (row.matched_driver_name)
+      names.add(row.matched_driver_name.toLowerCase());
+    if (row.auto_driver_name) names.add(row.auto_driver_name.toLowerCase());
+    if (ids.size === 0 && names.size === 0)
+      return { preferred: [], others: filteredAvailable };
+    return partitionGroupsByDrivers(filteredAvailable, ids, names);
+  }, [
+    filteredAvailable,
+    row.auto_driver_id,
+    row.matched_driver_name,
+    row.auto_driver_name,
+  ]);
+
   const total =
     row.price_cents !== null ? row.price_cents + (row.shipping_cents ?? 0) : null;
+
+  const renderOption = (g: ListingGroup) => (
+    <button
+      key={g.id}
+      type="button"
+      className="block w-full text-left px-2 py-1 text-xs hover:bg-bg"
+      onClick={() => {
+        setPickerOpen(false);
+        onAddToGroup(g.id);
+      }}
+    >
+      {g.name}
+      {g.member_count > 0 && (
+        <span className="text-fg-subtle ml-1">({g.member_count})</span>
+      )}
+    </button>
+  );
 
   return (
     <div className="mt-1 flex flex-wrap items-center gap-1">
@@ -2006,24 +2165,20 @@ function GroupChipRow({
                     No groups match “{query.trim()}”.
                   </div>
                 )}
-                {filteredAvailable.map((g) => (
-                  <button
-                    key={g.id}
-                    type="button"
-                    className="block w-full text-left px-2 py-1 text-xs hover:bg-bg"
-                    onClick={() => {
-                      setPickerOpen(false);
-                      onAddToGroup(g.id);
-                    }}
-                  >
-                    {g.name}
-                    {g.member_count > 0 && (
-                      <span className="text-fg-subtle ml-1">
-                        ({g.member_count})
-                      </span>
+                {preferred.length > 0 && (
+                  <>
+                    <div className="px-2 pt-1 pb-0.5 text-[10px] uppercase tracking-wide text-fg-subtle">
+                      {driverLabel}
+                    </div>
+                    {preferred.map(renderOption)}
+                    {others.length > 0 && (
+                      <div className="px-2 pt-1 pb-0.5 text-[10px] uppercase tracking-wide text-fg-subtle border-t border-border mt-1">
+                        Other groups
+                      </div>
                     )}
-                  </button>
-                ))}
+                  </>
+                )}
+                {others.map(renderOption)}
               </div>
             </div>
           </>
@@ -2037,6 +2192,7 @@ function BulkSelectionBar({
   selectedCount,
   visibleCount,
   groups,
+  selectedDriverKeys,
   busy,
   message,
   onSelectAllVisible,
@@ -2049,6 +2205,7 @@ function BulkSelectionBar({
   selectedCount: number;
   visibleCount: number;
   groups: ListingGroup[];
+  selectedDriverKeys: { ids: Set<number>; names: Set<string> };
   busy: boolean;
   message: string | null;
   onSelectAllVisible: () => void;
@@ -2088,6 +2245,7 @@ function BulkSelectionBar({
         <BulkGroupMenu
           label="Add to group"
           groups={activeGroups}
+          preferredDrivers={selectedDriverKeys}
           disabled={busy || selectedCount === 0}
           onPick={onAddToGroup}
           onCreateNew={onCreateGroup}
@@ -2119,9 +2277,31 @@ function BulkSelectionBar({
   );
 }
 
+function renderBulkOption(
+  g: ListingGroup,
+  setOpen: (v: boolean) => void,
+  onPick: (groupId: number) => void,
+) {
+  return (
+    <button
+      key={g.id}
+      type="button"
+      className="block w-full text-left px-2 py-1 text-xs hover:bg-bg"
+      onClick={() => {
+        setOpen(false);
+        onPick(g.id);
+      }}
+    >
+      {g.name}
+      {g.archived && <span className="text-fg-subtle ml-1">(archived)</span>}
+    </button>
+  );
+}
+
 function BulkGroupMenu({
   label,
   groups,
+  preferredDrivers,
   disabled,
   onPick,
   onCreateNew,
@@ -2129,6 +2309,9 @@ function BulkGroupMenu({
 }: {
   label: string;
   groups: ListingGroup[];
+  /** When set, groups tied to these drivers float to the top in their own
+   *  section (used by "Add to group" with the selection's drivers). */
+  preferredDrivers?: { ids: Set<number>; names: Set<string> };
   disabled: boolean;
   onPick: (groupId: number) => void;
   onCreateNew?: () => void;
@@ -2141,6 +2324,18 @@ function BulkGroupMenu({
     if (!q) return groups;
     return groups.filter((g) => g.name.toLowerCase().includes(q));
   }, [groups, query]);
+  const { preferred, others } = useMemo(() => {
+    if (
+      !preferredDrivers ||
+      (preferredDrivers.ids.size === 0 && preferredDrivers.names.size === 0)
+    )
+      return { preferred: [], others: filtered };
+    return partitionGroupsByDrivers(
+      filtered,
+      preferredDrivers.ids,
+      preferredDrivers.names,
+    );
+  }, [filtered, preferredDrivers]);
   return (
     <div className="relative">
       <button
@@ -2202,22 +2397,20 @@ function BulkGroupMenu({
                   No groups match “{query.trim()}”.
                 </div>
               ) : (
-                filtered.map((g) => (
-                  <button
-                    key={g.id}
-                    type="button"
-                    className="block w-full text-left px-2 py-1 text-xs hover:bg-bg"
-                    onClick={() => {
-                      setOpen(false);
-                      onPick(g.id);
-                    }}
-                  >
-                    {g.name}
-                    {g.archived && (
-                      <span className="text-fg-subtle ml-1">(archived)</span>
-                    )}
-                  </button>
-                ))
+                <>
+                  {preferred.length > 0 && (
+                    <div className="px-2 pt-1 pb-0.5 text-[10px] uppercase tracking-wide text-fg-subtle">
+                      Selected drivers
+                    </div>
+                  )}
+                  {preferred.map((g) => renderBulkOption(g, setOpen, onPick))}
+                  {preferred.length > 0 && others.length > 0 && (
+                    <div className="px-2 pt-1 pb-0.5 text-[10px] uppercase tracking-wide text-fg-subtle border-t border-border mt-1">
+                      Other groups
+                    </div>
+                  )}
+                  {others.map((g) => renderBulkOption(g, setOpen, onPick))}
+                </>
               )}
             </div>
           </div>
@@ -2237,6 +2430,7 @@ function ManageGroupsDialog({
   onChanged: () => Promise<void>;
 }) {
   const [editing, setEditing] = useState<ListingGroup | "new" | null>(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -2268,6 +2462,7 @@ function ManageGroupsDialog({
         description: g.description,
         target_price_cents: g.target_price_cents,
         archived: !g.archived,
+        driver_ids: g.drivers.map((d) => d.id),
       });
       await onChanged();
     } catch (e) {
@@ -2331,6 +2526,18 @@ function ManageGroupsDialog({
                         <> · target ≤ {formatCents(g.target_price_cents)}</>
                       )}
                     </div>
+                    {g.drivers.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {g.drivers.map((d) => (
+                          <span
+                            key={d.id}
+                            className="text-[10px] rounded border border-border bg-bg-elevated px-1.5 py-0.5 text-fg-muted"
+                          >
+                            {d.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     {g.description && (
                       <div className="text-xs text-fg-muted mt-0.5 whitespace-pre-wrap">
                         {g.description}
@@ -2370,14 +2577,27 @@ function ManageGroupsDialog({
         </div>
 
         <div className="flex items-center justify-between mt-3 pt-3 border-t border-border">
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => setEditing("new")}
-            disabled={busy}
-          >
-            New group
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setEditing("new")}
+              disabled={busy}
+            >
+              New group
+            </button>
+            {groups.length > 0 && (
+              <button
+                type="button"
+                className="text-xs text-fg-muted hover:text-fg underline decoration-dotted underline-offset-2"
+                onClick={() => setWizardOpen(true)}
+                disabled={busy}
+                title="Strip driver-name prefixes from group names and link the drivers automatically"
+              >
+                Clean up names…
+              </button>
+            )}
+          </div>
           <button type="button" className="btn-secondary" onClick={onClose}>
             Close
           </button>
@@ -2393,6 +2613,139 @@ function ManageGroupsDialog({
             }}
           />
         )}
+
+        {wizardOpen && (
+          <GroupMigrationWizard
+            groups={groups}
+            onClose={() => setWizardOpen(false)}
+            onApplied={async () => {
+              setWizardOpen(false);
+              await onChanged();
+            }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** A driver chip in the group editor. `id` is null when the name doesn't
+ *  match a local drivers row yet — the row is created via `ensure_driver`
+ *  when the group is saved, never before (so cancelling leaves no trace). */
+interface DriverChip {
+  id: number | null;
+  name: string;
+}
+
+/** Chip-style multi-select for a group's drivers. Autocompletes against the
+ *  local drivers table. The draft input is controlled by the parent so the
+ *  form can commit a typed-but-unconfirmed name on Save instead of silently
+ *  dropping it. */
+function DriverMultiSelect({
+  selected,
+  onChange,
+  draft,
+  onDraftChange,
+}: {
+  selected: DriverChip[];
+  onChange: (next: DriverChip[]) => void;
+  draft: string;
+  onDraftChange: (draft: string) => void;
+}) {
+  const [drivers, setDrivers] = useState<DriverOption[]>([]);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .listDrivers()
+      .then((d) => {
+        if (alive) setDrivers(d);
+      })
+      .catch(() => {
+        // Non-fatal: typing a new name still works — it resolves on save.
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const selectedNames = new Set(selected.map((d) => d.name.toLowerCase()));
+  const listId = "group-driver-options";
+
+  function add(rawName: string) {
+    const nm = rawName.trim();
+    if (!nm) return;
+    // Snap to the canonical local row when the name matches one, so the
+    // same person typed two ways collapses to a single chip.
+    const exact = drivers.find(
+      (d) => d.name.toLowerCase() === nm.toLowerCase(),
+    );
+    const chip: DriverChip = exact
+      ? { id: exact.id, name: exact.name }
+      : { id: null, name: nm };
+    if (!selectedNames.has(chip.name.toLowerCase()))
+      onChange([...selected, chip]);
+    onDraftChange("");
+  }
+
+  return (
+    <div>
+      {selected.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1 mb-1">
+          {selected.map((d) => (
+            <span
+              key={d.name.toLowerCase()}
+              className="inline-flex items-center gap-1 rounded border border-border bg-bg-elevated px-1.5 py-0.5 text-xs"
+            >
+              {d.name}
+              <button
+                type="button"
+                className="text-fg-subtle hover:text-red-300 leading-none"
+                onClick={() =>
+                  onChange(
+                    selected.filter(
+                      (x) => x.name.toLowerCase() !== d.name.toLowerCase(),
+                    ),
+                  )
+                }
+                title="Remove driver"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="flex items-center gap-1.5">
+        <input
+          list={listId}
+          type="text"
+          className="input !py-1 !text-xs flex-1"
+          value={draft}
+          onChange={(e) => onDraftChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              add(draft);
+            }
+          }}
+          placeholder="Add a driver…"
+        />
+        <datalist id={listId}>
+          {drivers
+            .filter((d) => !selectedNames.has(d.name.toLowerCase()))
+            .map((d) => (
+              <option key={d.id} value={d.name} />
+            ))}
+        </datalist>
+        <button
+          type="button"
+          className="text-xs text-accent hover:text-accent/80 disabled:opacity-50"
+          onClick={() => add(draft)}
+          disabled={draft.trim() === ""}
+        >
+          Add
+        </button>
       </div>
     </div>
   );
@@ -2400,10 +2753,14 @@ function ManageGroupsDialog({
 
 function GroupEditorDialog({
   initial,
+  prefillDrivers,
   onCancel,
   onSaved,
 }: {
   initial: ListingGroup | null;
+  /** Seed drivers for create mode — e.g. the listing's driver when the
+   *  editor is opened from a listing's "+ group" picker. Ignored on edit. */
+  prefillDrivers?: DriverChip[];
   onCancel: () => void;
   onSaved: (created: ListingGroup | null) => Promise<void>;
 }) {
@@ -2414,8 +2771,51 @@ function GroupEditorDialog({
       ? (initial.target_price_cents / 100).toFixed(2)
       : "",
   );
+  const [selectedDrivers, setSelectedDrivers] = useState<DriverChip[]>(
+    initial?.drivers ?? prefillDrivers ?? [],
+  );
+  const [driverDraft, setDriverDraft] = useState("");
+  const [existingGroups, setExistingGroups] = useState<ListingGroup[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .listListingGroups()
+      .then((gs) => {
+        if (alive) setExistingGroups(gs);
+      })
+      .catch(() => {
+        // Non-fatal: the duplicate-name hint just won't show.
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Soft advisory only: names may repeat across drivers, but reusing a name
+  // under a driver the new group already shares is usually a mistake.
+  const dupWarning = useMemo(() => {
+    const nm = name.trim().toLowerCase();
+    if (!nm) return null;
+    const selIds = new Set(
+      selectedDrivers.flatMap((d) => (d.id !== null ? [d.id] : [])),
+    );
+    const selNames = new Set(selectedDrivers.map((d) => d.name.toLowerCase()));
+    const clash = existingGroups.find((g) => {
+      if (g.id === initial?.id) return false;
+      if (g.name.trim().toLowerCase() !== nm) return false;
+      if (selectedDrivers.length === 0) return g.drivers.length === 0;
+      return g.drivers.some(
+        (d) => selIds.has(d.id) || selNames.has(d.name.toLowerCase()),
+      );
+    });
+    if (!clash) return null;
+    return selIds.size === 0
+      ? `Another driverless group is already named “${clash.name}”.`
+      : `“${clash.name}” already exists under that driver.`;
+  }, [name, selectedDrivers, existingGroups, initial?.id]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -2430,14 +2830,39 @@ function GroupEditorDialog({
       }
       targetCents = Math.round(parsed * 100);
     }
-    const input: ListingGroupInput = {
-      name: name.trim(),
-      description: description.trim() === "" ? null : description.trim(),
-      target_price_cents: targetCents,
-      archived: initial?.archived ?? false,
-    };
     setBusy(true);
     try {
+      // A name typed into the driver field but never confirmed with
+      // Enter/Add still counts — losing it silently is how groups end up
+      // driverless by accident.
+      const chips = [...selectedDrivers];
+      const pendingDraft = driverDraft.trim();
+      if (
+        pendingDraft &&
+        !chips.some(
+          (c) => c.name.toLowerCase() === pendingDraft.toLowerCase(),
+        )
+      ) {
+        chips.push({ id: null, name: pendingDraft });
+      }
+      // Resolve chips without a local row now — ensure_driver upserts by
+      // normalized name, so an existing driver typed by hand still lands
+      // on its canonical row.
+      const driverIds: number[] = [];
+      for (const c of chips) {
+        const id =
+          c.id ??
+          (await api.ensureDriver(c.name, normalizeDriverName(c.name)));
+        if (!driverIds.includes(id)) driverIds.push(id);
+      }
+
+      const input: ListingGroupInput = {
+        name: name.trim(),
+        description: description.trim() === "" ? null : description.trim(),
+        target_price_cents: targetCents,
+        archived: initial?.archived ?? false,
+        driver_ids: driverIds,
+      };
       if (initial === null) {
         const created = await api.createListingGroup(input);
         await onSaved(created);
@@ -2473,10 +2898,26 @@ function GroupEditorDialog({
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Hendrick #5 Mountain Dew"
+              placeholder="e.g. Mountain Dew throwback"
               autoFocus
               required
             />
+            {dupWarning && (
+              <p className="text-[11px] text-amber-400 mt-1">{dupWarning}</p>
+            )}
+          </div>
+          <div>
+            <label className="label">Drivers (optional)</label>
+            <DriverMultiSelect
+              selected={selectedDrivers}
+              onChange={setSelectedDrivers}
+              draft={driverDraft}
+              onDraftChange={setDriverDraft}
+            />
+            <p className="text-[11px] text-fg-subtle mt-1">
+              Groups the listing under these drivers in the filter and
+              by-group view. Leave empty for a driverless group (e.g. a lot).
+            </p>
           </div>
           <div>
             <label className="label">Notes (optional)</label>
@@ -2519,6 +2960,480 @@ function GroupEditorDialog({
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+// --- Group name-migration wizard ------------------------------------------
+
+/** A handle (driver-name prefix) and the driver it maps to. `driverId` is
+ *  null until resolved/created on apply. */
+interface MigrationRule {
+  handle: string;
+  driverName: string;
+  driverId: number | null;
+}
+
+function firstToken(s: string): string {
+  return s.trim().split(/\s+/)[0] ?? "";
+}
+
+/** Client-side mirror of the Rust `match_prefix` boundary check, used only
+ *  for live match counts in the rules editor. The authoritative match runs
+ *  server-side via `propose_group_migration`. */
+function clientPrefixMatches(name: string, handle: string): boolean {
+  const h = handle.trim();
+  if (!h) return false;
+  const ln = name.toLowerCase();
+  const lh = h.toLowerCase();
+  if (ln === lh) return true;
+  return ln.startsWith(lh) && /\s/.test(name.charAt(h.length));
+}
+
+function GroupMigrationWizard({
+  groups,
+  onClose,
+  onApplied,
+}: {
+  groups: ListingGroup[];
+  onClose: () => void;
+  onApplied: () => Promise<void>;
+}) {
+  const [drivers, setDrivers] = useState<DriverOption[]>([]);
+  const [rules, setRules] = useState<MigrationRule[]>([]);
+  const [proposals, setProposals] = useState<GroupMigrationProposal[] | null>(
+    null,
+  );
+  // Per-group name overrides in the preview, so the user can resolve
+  // collisions (two stripped names landing on the same value) before apply.
+  const [editedNames, setEditedNames] = useState<Record<number, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+
+  // Seed rules from the drivers table: each driver's last name becomes a
+  // candidate handle, but only when it actually prefixes some group (keeps
+  // the list relevant rather than dumping every known driver).
+  useEffect(() => {
+    let alive = true;
+    api
+      .listDrivers()
+      .then((ds) => {
+        if (!alive) return;
+        setDrivers(ds);
+        const seeded: MigrationRule[] = [];
+        const seen = new Set<string>();
+        for (const d of ds) {
+          const handle = d.name.trim().split(/\s+/).pop() ?? "";
+          const key = handle.toLowerCase();
+          if (!handle || seen.has(key)) continue;
+          const matches = groups.some((g) =>
+            clientPrefixMatches(g.name, handle),
+          );
+          if (!matches) continue;
+          seen.add(key);
+          seeded.push({ handle, driverName: d.name, driverId: d.id });
+        }
+        seeded.sort((a, b) => a.handle.localeCompare(b.handle));
+        setRules(seeded);
+      })
+      .catch((e) => {
+        if (alive) setError(String(e));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [groups]);
+
+  const activeRules = useMemo(
+    () => rules.filter((r) => r.handle.trim() && r.driverName.trim()),
+    [rules],
+  );
+
+  // Groups not matched by any active rule (client approximation) — surfaced
+  // so the user knows what still needs a rule.
+  const unmatchedNames = useMemo(() => {
+    return groups
+      .filter((g) => !activeRules.some((r) => clientPrefixMatches(g.name, r.handle)))
+      .map((g) => g.name);
+  }, [groups, activeRules]);
+
+  function updateRule(i: number, patch: Partial<MigrationRule>) {
+    setProposals(null);
+    setRules((prev) =>
+      prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)),
+    );
+  }
+  function removeRule(i: number) {
+    setProposals(null);
+    setRules((prev) => prev.filter((_, idx) => idx !== i));
+  }
+  function addRule(handle = "") {
+    setProposals(null);
+    setRules((prev) => [...prev, { handle, driverName: "", driverId: null }]);
+  }
+
+  // When a rule's driver name is edited, snap driverId to the matching
+  // existing driver (or null, meaning "create on apply").
+  function setRuleDriver(i: number, name: string) {
+    const exact = drivers.find(
+      (d) => d.name.toLowerCase() === name.trim().toLowerCase(),
+    );
+    updateRule(i, { driverName: name, driverId: exact?.id ?? null });
+  }
+
+  async function onPreview() {
+    setBusy(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const result = await api.proposeGroupMigration(
+        activeRules.map((r) => r.handle),
+      );
+      setEditedNames({});
+      setProposals(result);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onApply() {
+    if (!proposals) return;
+    setBusy(true);
+    setError(null);
+    setInfo(null);
+    try {
+      // Resolve a driver id for every active rule (create rows as needed),
+      // keyed by lower-cased handle for proposal lookup.
+      const ruleByHandle = new Map<string, MigrationRule>();
+      for (const r of activeRules) ruleByHandle.set(r.handle.toLowerCase(), r);
+      const resolvedId = new Map<string, number>();
+      for (const r of activeRules) {
+        let id = r.driverId;
+        if (id === null) {
+          id = await api.ensureDriver(
+            r.driverName.trim(),
+            normalizeDriverName(r.driverName),
+          );
+        }
+        resolvedId.set(r.handle.toLowerCase(), id);
+      }
+
+      const items = proposals
+        .filter((p) => p.matched_handle !== null)
+        .map((p) => {
+          const id = resolvedId.get((p.matched_handle ?? "").toLowerCase());
+          if (id === undefined) return null;
+          return {
+            group_id: p.group_id,
+            new_name: (editedNames[p.group_id] ?? p.new_name).trim(),
+            driver_ids: [id],
+          };
+        })
+        .filter((x): x is NonNullable<typeof x> => x !== null);
+
+      if (items.length === 0) {
+        setInfo("Nothing to apply — no groups matched a rule with a driver.");
+        return;
+      }
+      const count = await api.applyGroupMigration(items);
+      setInfo(`Updated ${count} group${count === 1 ? "" : "s"}.`);
+      await onApplied();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const matchedCount = proposals
+    ? proposals.filter((p) => p.matched_handle !== null).length
+    : 0;
+
+  // Resulting name for a proposal: the edited override, or the proposed new
+  // name (which for unmatched/empty rows is just the original).
+  const effectiveName = (p: GroupMigrationProposal) =>
+    (editedNames[p.group_id] ?? p.new_name).trim();
+
+  // Count every group's *final* name so we can flag duplicates. Duplicate
+  // names are allowed (group identity is `id`, and the UI disambiguates by
+  // driver), but worth a soft heads-up — only empty names actually block.
+  const nameCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    if (!proposals) return m;
+    for (const p of proposals) {
+      const nm =
+        p.matched_handle !== null
+          ? effectiveName(p)
+          : p.original_name.trim();
+      const key = nm.toLowerCase();
+      m.set(key, (m.get(key) ?? 0) + 1);
+    }
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proposals, editedNames]);
+
+  const collides = (p: GroupMigrationProposal) =>
+    (nameCounts.get(effectiveName(p).toLowerCase()) ?? 0) > 1;
+  // Only empty names block apply; duplicates are merely flagged.
+  const hasBlocker = proposals
+    ? proposals
+        .filter((p) => p.matched_handle !== null)
+        .some((p) => effectiveName(p) === "")
+    : false;
+
+  const driverListId = "migration-driver-options";
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-start justify-center pt-10 px-4 bg-black/60"
+      onClick={onClose}
+    >
+      <div
+        className="card w-full max-w-3xl max-h-[88vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between mb-3">
+          <div>
+            <h3 className="text-base font-medium">Clean up group names</h3>
+            <p className="text-xs text-fg-subtle mt-0.5 max-w-prose">
+              Map each driver-name prefix (a “handle”) to a driver. Preview
+              strips the handle from matching group names and links the
+              driver. Nothing is written until you click Apply.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="text-fg-muted hover:text-fg text-xl leading-none px-2"
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </div>
+
+        {error && <div className="text-xs text-red-400 mb-2">{error}</div>}
+        {info && <div className="text-xs text-emerald-400 mb-2">{info}</div>}
+
+        <datalist id={driverListId}>
+          {drivers.map((d) => (
+            <option key={d.id} value={d.name} />
+          ))}
+        </datalist>
+
+        <div className="flex-1 overflow-y-auto -mx-1 px-1 space-y-4 min-h-[8rem]">
+          {/* Rules editor */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-medium">
+                Handle → driver ({rules.length})
+              </h4>
+              <button
+                type="button"
+                className="text-xs text-accent hover:text-accent/80"
+                onClick={() => addRule()}
+              >
+                + Add handle
+              </button>
+            </div>
+            <div className="grid grid-cols-[1fr_1fr_auto_auto] gap-x-2 gap-y-1 items-center text-xs">
+              <div className="text-fg-subtle">Prefix</div>
+              <div className="text-fg-subtle">Driver</div>
+              <div className="text-fg-subtle text-right">Matches</div>
+              <div />
+              {rules.map((r, i) => {
+                const count = groups.filter((g) =>
+                  clientPrefixMatches(g.name, r.handle),
+                ).length;
+                const needsDriver = r.handle.trim() && !r.driverName.trim();
+                return (
+                  <Fragment key={i}>
+                    <input
+                      type="text"
+                      className="input !py-1 !text-xs"
+                      value={r.handle}
+                      onChange={(e) => updateRule(i, { handle: e.target.value })}
+                      placeholder="e.g. Zilisch"
+                    />
+                    <input
+                      type="text"
+                      list={driverListId}
+                      className={`input !py-1 !text-xs ${needsDriver ? "border-amber-500/50" : ""}`}
+                      value={r.driverName}
+                      onChange={(e) => setRuleDriver(i, e.target.value)}
+                      placeholder="driver name"
+                    />
+                    <div className="text-right tabular-nums text-fg-muted">
+                      {count}
+                    </div>
+                    <button
+                      type="button"
+                      className="text-fg-subtle hover:text-red-300 px-1"
+                      onClick={() => removeRule(i)}
+                      title="Remove handle"
+                    >
+                      ×
+                    </button>
+                  </Fragment>
+                );
+              })}
+            </div>
+            {rules.length === 0 && (
+              <div className="text-xs text-fg-subtle">
+                No handles yet. Add one above, or check the unmatched list.
+              </div>
+            )}
+          </div>
+
+          {/* Unmatched groups */}
+          {unmatchedNames.length > 0 && (
+            <div className="space-y-1">
+              <h4 className="text-sm font-medium">
+                Not matched by any handle ({unmatchedNames.length})
+              </h4>
+              <p className="text-[11px] text-fg-subtle">
+                These groups won’t change. Click one to seed a handle from its
+                first word, then assign a driver.
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {unmatchedNames.slice(0, 60).map((nm, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    className="text-[11px] rounded border border-border px-1.5 py-0.5 text-fg-muted hover:text-fg hover:border-fg-muted"
+                    onClick={() => addRule(firstToken(nm))}
+                    title={`Add handle "${firstToken(nm)}"`}
+                  >
+                    {nm}
+                  </button>
+                ))}
+                {unmatchedNames.length > 60 && (
+                  <span className="text-[11px] text-fg-subtle self-center">
+                    +{unmatchedNames.length - 60} more
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Preview */}
+          {proposals && (
+            <div className="space-y-1">
+              <h4 className="text-sm font-medium">
+                Preview — {matchedCount} of {proposals.length} groups change
+              </h4>
+              <div className="rounded border border-border divide-y divide-border">
+                {proposals
+                  .filter((p) => p.matched_handle !== null)
+                  .map((p) => {
+                    const rule = activeRules.find(
+                      (r) =>
+                        r.handle.toLowerCase() ===
+                        (p.matched_handle ?? "").toLowerCase(),
+                    );
+                    const name = effectiveName(p);
+                    const dup = collides(p);
+                    const empty = name === "";
+                    return (
+                      <div
+                        key={p.group_id}
+                        className="px-2 py-1 text-xs flex items-center gap-2"
+                      >
+                        <span className="text-fg-subtle line-through truncate max-w-[12rem] shrink-0">
+                          {p.original_name}
+                        </span>
+                        <span className="text-fg-subtle">→</span>
+                        <input
+                          type="text"
+                          className={`input !py-0.5 !text-xs flex-1 ${
+                            empty
+                              ? "border-red-500/60"
+                              : dup
+                                ? "border-amber-500/50"
+                                : ""
+                          }`}
+                          value={editedNames[p.group_id] ?? p.new_name}
+                          onChange={(e) =>
+                            setEditedNames((prev) => ({
+                              ...prev,
+                              [p.group_id]: e.target.value,
+                            }))
+                          }
+                        />
+                        {rule && (
+                          <span className="text-[10px] rounded border border-border bg-bg-elevated px-1.5 py-0.5 text-fg-muted shrink-0">
+                            {rule.driverName}
+                          </span>
+                        )}
+                        {dup && !empty && (
+                          <span
+                            className="text-[10px] text-amber-400 shrink-0"
+                            title="Another group will have this exact name. That's allowed — they're told apart by driver."
+                          >
+                            duplicate name
+                          </span>
+                        )}
+                        {empty && (
+                          <span className="text-[10px] text-red-400 shrink-0">
+                            empty
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                {matchedCount === 0 && (
+                  <div className="px-2 py-2 text-xs text-fg-subtle">
+                    No groups matched the current handles.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between mt-3 pt-3 border-t border-border">
+          <span className="text-xs text-fg-subtle">
+            {activeRules.length} active handle
+            {activeRules.length === 1 ? "" : "s"}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={onClose}
+              disabled={busy}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={onPreview}
+              disabled={busy || activeRules.length === 0}
+            >
+              {busy && !proposals ? "Previewing…" : "Preview changes"}
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={onApply}
+              disabled={
+                busy || proposals === null || matchedCount === 0 || hasBlocker
+              }
+              title={
+                proposals === null
+                  ? "Preview first"
+                  : hasBlocker
+                    ? "Resolve duplicate or empty names first"
+                    : "Apply the renames and driver links"
+              }
+            >
+              {busy && proposals ? "Applying…" : "Apply"}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

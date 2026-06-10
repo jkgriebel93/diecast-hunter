@@ -1560,3 +1560,56 @@ pub async fn remove_listings_from_group(
 ) -> AppResult<i64> {
     listing_groups::remove_listings(&state.db.pool, group_id, &listing_ids).await
 }
+
+/// Ensure a driver row exists for `name`/`normalized` and return its id.
+/// Used by the group editor and the name-migration wizard to attach a
+/// driver that may not yet be in the local `drivers` table. Mirrors the
+/// upsert in `set_listing_driver` but doesn't touch any listing.
+#[tauri::command]
+pub async fn ensure_driver(
+    state: State<'_, AppState>,
+    name: String,
+    normalized: String,
+) -> AppResult<i64> {
+    let pool = &state.db.pool;
+    let name = name.trim();
+    let normalized = normalized.trim();
+    if name.is_empty() || normalized.is_empty() {
+        return Err(AppError::Parse(
+            "name and normalized are required".into(),
+        ));
+    }
+    sqlx::query(
+        "INSERT INTO drivers (name, normalized_name) VALUES (?, ?)
+         ON CONFLICT(normalized_name) DO NOTHING",
+    )
+    .bind(name)
+    .bind(normalized)
+    .execute(pool)
+    .await?;
+    let (id,): (i64,) =
+        sqlx::query_as("SELECT id FROM drivers WHERE normalized_name = ?")
+            .bind(normalized)
+            .fetch_one(pool)
+            .await?;
+    Ok(id)
+}
+
+/// Preview the driver-prefix rename for every group given a list of
+/// handles. Writes nothing — see `listing_groups::propose_migration`.
+#[tauri::command]
+pub async fn propose_group_migration(
+    state: State<'_, AppState>,
+    handles: Vec<String>,
+) -> AppResult<Vec<listing_groups::GroupMigrationProposal>> {
+    listing_groups::propose_migration(&state.db.pool, handles).await
+}
+
+/// Apply the finalized renames + driver links from the migration wizard.
+#[tauri::command]
+pub async fn apply_group_migration(
+    state: State<'_, AppState>,
+    items: Vec<listing_groups::GroupMigrationItem>,
+) -> AppResult<i64> {
+    listing_groups::apply_migration(&state.db.pool, items).await
+}

@@ -155,6 +155,9 @@ pub fn run() {
             commands::remove_listing_from_group,
             commands::add_listings_to_group,
             commands::remove_listings_from_group,
+            commands::ensure_driver,
+            commands::propose_group_migration,
+            commands::apply_group_migration,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
