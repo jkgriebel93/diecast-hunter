@@ -192,6 +192,20 @@ impl EbayClient {
         let token = self.access_token().await?;
         let url = format!("{}{}", self.inner.env.api_host(), path);
 
+        // Buyer location for shipping quotes. Listings with calculated
+        // (destination-based) shipping come back with NO shippingOptions at
+        // all unless eBay knows where the buyer is; the zip makes those
+        // quotes possible. set_ebay_buyer_zip sanitizes to alphanumerics, so
+        // the value is header- and URL-safe. Inner `=` and `,` are
+        // percent-encoded per the X-EBAY-C-ENDUSERCTX format.
+        let zip = settings::get(&self.inner.pool, settings::KEY_EBAY_BUYER_ZIP)
+            .await?
+            .filter(|z| !z.trim().is_empty());
+        let enduserctx = match zip {
+            Some(z) => format!("contextualLocation=country%3DUS%2Czip%3D{}", z.trim()),
+            None => "contextualLocation=country%3DUS".to_string(),
+        };
+
         self.wait_for_slot().await;
 
         let resp = self
@@ -200,6 +214,7 @@ impl EbayClient {
             .get(&url)
             .bearer_auth(&token)
             .header("X-EBAY-C-MARKETPLACE-ID", "EBAY_US")
+            .header("X-EBAY-C-ENDUSERCTX", enduserctx)
             .send()
             .await
             .map_err(map_reqwest_err)?;

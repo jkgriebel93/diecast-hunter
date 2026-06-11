@@ -132,6 +132,12 @@ export function Listings() {
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [offerFilter, setOfferFilter] = useState<OfferFilter>("all");
   const [groupFilter, setGroupFilter] = useState<GroupFilter>("all");
+  // Listings belonging to any of these groups are hidden. Independent of
+  // `groupFilter` so you can e.g. show all listings except the "Purchased"
+  // group, or drill into one group while hiding an overlapping one.
+  const [excludedGroupIds, setExcludedGroupIds] = useState<Set<number>>(
+    new Set(),
+  );
   const [sortMode, setSortMode] = useState<SortMode>("newest");
   const [bucketSort, setBucketSort] = useState<BucketSort>("name");
 
@@ -505,6 +511,11 @@ export function Listings() {
           if (!row.group_ids.includes(wanted)) return false;
         }
       }
+      if (
+        excludedGroupIds.size > 0 &&
+        row.group_ids.some((id) => excludedGroupIds.has(id))
+      )
+        return false;
       if (offerFilter !== "all") {
         const offer = offersByItemId.get(
           legacyIdFromExternalId(row.external_id),
@@ -567,9 +578,21 @@ export function Listings() {
     sourceFilter,
     offerFilter,
     groupFilter,
+    excludedGroupIds,
     offersByItemId,
     sortMode,
   ]);
+
+  // Drop exclusions for groups that no longer exist (deleted via the
+  // Manage dialog) so the Exclude badge count never goes stale.
+  useEffect(() => {
+    setExcludedGroupIds((prev) => {
+      if (prev.size === 0) return prev;
+      const alive = new Set(groups.map((g) => g.id));
+      const next = new Set([...prev].filter((id) => alive.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [groups]);
 
   // Keep the selection in sync with what's on screen: any action that drops a
   // listing from view (a filter change, a group add/remove under an active
@@ -826,6 +849,19 @@ export function Listings() {
                   );
                 })()}
               </select>
+              <ExcludeGroupsMenu
+                groups={groups}
+                excluded={excludedGroupIds}
+                onToggle={(id) =>
+                  setExcludedGroupIds((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(id)) next.delete(id);
+                    else next.add(id);
+                    return next;
+                  })
+                }
+                onClear={() => setExcludedGroupIds(new Set())}
+              />
               <button
                 type="button"
                 className="text-fg-subtle hover:text-fg underline decoration-dotted underline-offset-2"
@@ -1316,16 +1352,12 @@ function ListingCard({
         </div>
       </div>
       <div className="text-right text-xs tabular-nums shrink-0 space-y-0.5">
-        <div className="text-base text-fg">
-          {formatCents(row.price_cents)}
-        </div>
+        <div className="text-base text-fg">{formatCents(total)}</div>
         {row.shipping_cents !== null && row.shipping_cents > 0 && (
           <div className="text-fg-subtle">
-            + {formatCents(row.shipping_cents)} ship
+            {formatCents(row.price_cents)} + {formatCents(row.shipping_cents)}{" "}
+            ship
           </div>
-        )}
-        {total !== null && row.shipping_cents !== null && row.shipping_cents > 0 && (
-          <div className="text-fg-muted">total {formatCents(total)}</div>
         )}
         {matched && (
           <div className="text-fg-subtle mt-1">
@@ -3960,6 +3992,137 @@ function RegistrySearchDialog({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Multi-select dropdown that hides listings belonging to any checked group.
+ *  Complements the include-style Group filter rather than replacing it —
+ *  e.g. keep Group on "All" but hide everything already in "Purchased".
+ *  Sections mirror the include dropdown (driver → other → archived), so a
+ *  group with several drivers shows under each; the checkboxes share state. */
+function ExcludeGroupsMenu({
+  groups,
+  excluded,
+  onToggle,
+  onClear,
+}: {
+  groups: ListingGroup[];
+  excluded: Set<number>;
+  onToggle: (groupId: number) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return groups;
+    return groups.filter((g) => g.name.toLowerCase().includes(q));
+  }, [groups, query]);
+  const { drivers, noDriver, archived } = useMemo(
+    () => clusterGroupsByDriver(filtered),
+    [filtered],
+  );
+  const sectionHeader = (text: string) => (
+    <div className="px-2 pt-1 pb-0.5 text-[10px] uppercase tracking-wide text-fg-subtle">
+      {text}
+    </div>
+  );
+  const renderOption = (g: ListingGroup, key: string) => (
+    <label
+      key={key}
+      className="flex items-center gap-2 px-2 py-1 text-xs cursor-pointer hover:bg-bg"
+    >
+      <input
+        type="checkbox"
+        className="accent-current"
+        checked={excluded.has(g.id)}
+        onChange={() => onToggle(g.id)}
+      />
+      <span className="truncate">
+        {g.name} <span className="text-fg-subtle">({g.member_count})</span>
+      </span>
+    </label>
+  );
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        className={`px-2 py-0.5 rounded border text-[11px] ${
+          excluded.size > 0
+            ? "border-accent text-accent bg-accent/10"
+            : "border-border text-fg-muted hover:text-fg"
+        }`}
+        onClick={() => {
+          setOpen((v) => !v);
+          setQuery("");
+        }}
+        title="Hide listings that belong to any of the checked groups"
+      >
+        Exclude{excluded.size > 0 ? ` (${excluded.size})` : ""} ▾
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute z-40 top-full mt-1 left-0 min-w-[14rem] rounded border border-border bg-bg-elevated shadow-lg py-1">
+            {groups.length > 0 && (
+              <div className="px-2 pb-1">
+                <input
+                  type="text"
+                  className="input !py-1 !text-xs"
+                  placeholder="Search groups…"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  autoFocus
+                />
+              </div>
+            )}
+            <div className="max-h-64 overflow-y-auto">
+              {groups.length === 0 ? (
+                <div className="px-2 py-1 text-xs text-fg-subtle">
+                  No groups yet.
+                </div>
+              ) : filtered.length === 0 ? (
+                <div className="px-2 py-1 text-xs text-fg-subtle">
+                  No groups match “{query.trim()}”.
+                </div>
+              ) : (
+                <>
+                  {drivers.map((d) => (
+                    <Fragment key={`d-${d.id}`}>
+                      {sectionHeader(d.name)}
+                      {d.groups.map((g) => renderOption(g, `${d.id}-${g.id}`))}
+                    </Fragment>
+                  ))}
+                  {noDriver.length > 0 && (
+                    <>
+                      {sectionHeader("Other (no driver)")}
+                      {noDriver.map((g) => renderOption(g, `n-${g.id}`))}
+                    </>
+                  )}
+                  {archived.length > 0 && (
+                    <>
+                      {sectionHeader("Archived")}
+                      {archived.map((g) => renderOption(g, `a-${g.id}`))}
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+            {excluded.size > 0 && (
+              <div className="border-t border-border mt-1 pt-1 px-2">
+                <button
+                  type="button"
+                  className="text-xs text-fg-subtle hover:text-fg underline decoration-dotted underline-offset-2"
+                  onClick={onClear}
+                >
+                  Clear exclusions
+                </button>
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

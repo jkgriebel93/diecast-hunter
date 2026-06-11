@@ -850,6 +850,31 @@ pub async fn set_ebay_filter_non_diecasts(
     .await
 }
 
+#[tauri::command]
+pub async fn get_ebay_buyer_zip(
+    state: State<'_, AppState>,
+) -> AppResult<Option<String>> {
+    settings::get(&state.db.pool, settings::KEY_EBAY_BUYER_ZIP).await
+}
+
+/// Empty input clears the setting. Sanitized to alphanumerics and dashes so
+/// the value is safe to embed in the X-EBAY-C-ENDUSERCTX header.
+#[tauri::command]
+pub async fn set_ebay_buyer_zip(
+    state: State<'_, AppState>,
+    zip: String,
+) -> AppResult<()> {
+    let cleaned: String = zip
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .collect();
+    if cleaned.is_empty() {
+        settings::delete(&state.db.pool, settings::KEY_EBAY_BUYER_ZIP).await
+    } else {
+        settings::set(&state.db.pool, settings::KEY_EBAY_BUYER_ZIP, &cleaned).await
+    }
+}
+
 #[derive(Serialize)]
 pub struct CleanupSummary {
     pub examined: u32,

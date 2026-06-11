@@ -42,6 +42,11 @@ export function Settings() {
   const [filterError, setFilterError] = useState<string | null>(null);
   const [cleanupRunning, setCleanupRunning] = useState(false);
 
+  const [buyerZip, setBuyerZip] = useState("");
+  const [buyerZipSaving, setBuyerZipSaving] = useState(false);
+  const [buyerZipMessage, setBuyerZipMessage] = useState<string | null>(null);
+  const [buyerZipError, setBuyerZipError] = useState<string | null>(null);
+
   const [drivers, setDrivers] = useState<FormOptionRow[]>([]);
   const [prewarmInput, setPrewarmInput] = useState("");
   const [prewarmDriverGuid, setPrewarmDriverGuid] = useState("");
@@ -105,6 +110,11 @@ export function Settings() {
       } catch {
         // not fatal — leave default
       }
+      try {
+        setBuyerZip((await api.getEbayBuyerZip()) ?? "");
+      } catch {
+        // not fatal — field starts empty
+      }
       // Drivers list is for the pre-warm picker; harmless if empty (the
       // form-options cache hasn't been populated yet).
       try {
@@ -139,6 +149,25 @@ export function Settings() {
       setFilterError(String(e));
     } finally {
       setFilterSaving(false);
+    }
+  }
+
+  async function onSaveBuyerZip(e: FormEvent) {
+    e.preventDefault();
+    setBuyerZipSaving(true);
+    setBuyerZipMessage(null);
+    setBuyerZipError(null);
+    try {
+      await api.setEbayBuyerZip(buyerZip.trim());
+      setBuyerZipMessage(
+        buyerZip.trim()
+          ? "Saved. Use “Refresh all” on the Listings page to fill in missing shipping costs."
+          : "Cleared — eBay will no longer quote location-based shipping.",
+      );
+    } catch (e) {
+      setBuyerZipError(String(e));
+    } finally {
+      setBuyerZipSaving(false);
     }
   }
 
@@ -994,6 +1023,44 @@ export function Settings() {
           )}
           {filterError && (
             <div className="text-xs text-red-400">{filterError}</div>
+          )}
+        </div>
+
+        <div className="border-t border-border pt-4 space-y-3">
+          <div>
+            <h4 className="text-sm font-medium">Shipping quote location</h4>
+            <p className="text-xs text-fg-subtle mt-1">
+              Your US zip code, sent to eBay so it can price shipping for
+              listings that calculate it from the buyer's location. Without
+              it, those listings come back with no shipping cost at all and
+              show price-only totals. After saving, run “Refresh all” on the
+              Listings page to backfill.
+            </p>
+          </div>
+
+          <form onSubmit={onSaveBuyerZip} className="flex items-center gap-2">
+            <input
+              className="input w-32"
+              type="text"
+              value={buyerZip}
+              onChange={(e) => setBuyerZip(e.target.value)}
+              placeholder="e.g. 28117"
+              autoComplete="postal-code"
+            />
+            <button
+              className="btn-secondary"
+              type="submit"
+              disabled={buyerZipSaving}
+            >
+              {buyerZipSaving ? "Saving…" : "Save"}
+            </button>
+          </form>
+
+          {buyerZipMessage && (
+            <div className="text-xs text-emerald-400">{buyerZipMessage}</div>
+          )}
+          {buyerZipError && (
+            <div className="text-xs text-red-400">{buyerZipError}</div>
           )}
         </div>
       </section>

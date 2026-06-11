@@ -187,6 +187,9 @@ export const api = {
     invoke<void>("set_ebay_filter_non_diecasts", { enabled }),
   removeNonDiecastListings: () =>
     invoke<CleanupSummary>("remove_non_diecast_listings"),
+  getEbayBuyerZip: () => invoke<string | null>("get_ebay_buyer_zip"),
+  setEbayBuyerZip: (zip: string) =>
+    invoke<void>("set_ebay_buyer_zip", { zip }),
   listSavedSearches: () => invoke<SavedSearch[]>("list_saved_searches"),
   createSavedSearch: (input: SavedSearchInput) =>
     invoke<SavedSearch>("create_saved_search", { input }),

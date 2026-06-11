@@ -117,7 +117,7 @@ pub(crate) async fn enrich_one(
     };
 
     let now = Utc::now().timestamp();
-    let raw_json = build_raw_json(&detail);
+    let raw_json = build_raw_json(&detail, detail_url);
 
     sqlx::query(
         "UPDATE registry_entries SET
@@ -171,9 +171,14 @@ fn extract_detail_url(raw_json: Option<&str>) -> Option<String> {
     v.get("detail_url")?.as_str().map(|s| s.to_string())
 }
 
-fn build_raw_json(detail: &RegistryDetail) -> String {
+/// `detail_url` is carried forward into the rebuilt raw_json: it is the only
+/// place we store the site-relative page path (the slugs aren't derivable
+/// from columns), and dropping it would break both re-enrichment and the
+/// "View on diecastregistry.com" link on matched listings.
+fn build_raw_json(detail: &RegistryDetail, detail_url: &str) -> String {
     serde_json::to_string(&serde_json::json!({
         "source": "registry_detail_page",
+        "detail_url": detail_url,
         "external_id": detail.external_id,
         "registration_number": detail.registration_number,
         "registry_int_id": detail.registry_int_id,
@@ -204,4 +209,16 @@ async fn upsert_driver(
             .fetch_one(pool)
             .await?;
     Ok(row.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_raw_json_preserves_detail_url() {
+        let url = "/diecast/jeff-gordon/action-lionel-elite-24/68acf030-a051-4e24-907f-abf2475e5315";
+        let raw_json = build_raw_json(&RegistryDetail::default(), url);
+        assert_eq!(extract_detail_url(Some(&raw_json)).as_deref(), Some(url));
+    }
 }

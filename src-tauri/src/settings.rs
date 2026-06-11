@@ -10,6 +10,11 @@ pub const KEY_EBAY_ENVIRONMENT: &str = "ebay.environment";
 /// "true" / "false". When unset or "true", non-diecast eBay listings are
 /// rejected at save time (see ebay::is_diecast).
 pub const KEY_EBAY_FILTER_NON_DIECASTS: &str = "ebay.filter_non_diecasts";
+/// US zip code sent to the Browse API as the buyer's location
+/// (X-EBAY-C-ENDUSERCTX contextualLocation). Without a destination, eBay
+/// omits shippingOptions entirely for calculated-shipping listings, leaving
+/// shipping_cents NULL.
+pub const KEY_EBAY_BUYER_ZIP: &str = "ebay.buyer_zip";
 
 pub const ENTRY_DCR_PASSWORD: &str = "diecastregistry.password";
 pub const ENTRY_EBAY_OAUTH: &str = "ebay.oauth_token";

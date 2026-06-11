@@ -131,6 +131,8 @@ pub fn run() {
             commands::cancel_active_operation,
             commands::get_ebay_filter_non_diecasts,
             commands::set_ebay_filter_non_diecasts,
+            commands::get_ebay_buyer_zip,
+            commands::set_ebay_buyer_zip,
             commands::remove_non_diecast_listings,
             commands::get_listing_receiver_status,
             commands::get_listing_receiver_secret,
