@@ -2,6 +2,7 @@
 
 pub mod client;
 pub mod collection;
+pub mod delete;
 pub mod detail;
 pub mod form_options;
 pub mod parse;
@@ -10,6 +11,7 @@ pub mod register;
 
 pub use client::DcrClient;
 pub use collection::{CollectionItem, CollectionPage};
+pub use delete::{delete_from_garage, DeleteOutcome};
 pub use detail::{parse_detail_page, RegistryDetail};
 pub use form_options::{refresh_form_options, RefreshOptionsSummary};
 pub use production_search::{

@@ -14,6 +14,10 @@ pub struct SyncSummary {
     pub drivers_upserted: u32,
     pub registry_entries_upserted: u32,
     pub collection_rows_upserted: u32,
+    /// Local DCR-sourced rows deleted because they're no longer in the user's
+    /// My Garage — diecastregistry.com is the source of truth. Only counted
+    /// when every garage page was fetched.
+    pub collection_rows_removed: u32,
     pub pages_fetched: u32,
     /// Set once the auto-enrichment pass that follows collection sync
     /// completes. None if it failed or hasn't run.
@@ -77,6 +81,8 @@ async fn run_collection_sync(
     progress: &ProgressEmitter,
 ) -> AppResult<SyncSummary> {
     let mut summary = SyncSummary::default();
+    let mut seen_asset_guids: Vec<String> = Vec::new();
+    let mut all_pages_fetched = false;
     let mut page_n = 1u32;
     loop {
         progress.check_cancelled()?;
@@ -97,15 +103,32 @@ async fn run_collection_sync(
 
         for item in &page.items {
             persist_item(pool, item, &mut summary).await?;
+            seen_asset_guids.push(item.asset_guid.clone());
         }
 
         if page.current_page >= page.total_pages {
+            all_pages_fetched = true;
             break;
         }
         page_n = page.current_page + 1;
         if page_n > 100 {
             tracing::warn!("aborting collection sync: page guard hit");
             break;
+        }
+    }
+
+    // diecastregistry.com is the source of truth: anything we have locally
+    // that My Garage no longer lists gets dropped. Skipped when the page
+    // guard aborted the walk — pruning on a partial listing would delete
+    // rows we simply never got to.
+    if all_pages_fetched {
+        summary.collection_rows_removed =
+            prune_missing_rows(pool, &seen_asset_guids).await?;
+        if summary.collection_rows_removed > 0 {
+            tracing::info!(
+                "pruned {} collection rows no longer in My Garage",
+                summary.collection_rows_removed
+            );
         }
     }
 
@@ -159,6 +182,28 @@ pub async fn enrich_only(
         summary.enriched, summary.considered, summary.failed, summary.skipped
     ));
     Ok(summary)
+}
+
+/// Delete DCR-sourced `my_collection` rows whose asset GUID wasn't seen on
+/// any My Garage page this sync. An empty `seen` list legitimately means an
+/// emptied garage, so everything DCR-sourced goes. Linked `registry_entries`
+/// and `drivers` rows are left alone — they're a cache of registry data, not
+/// part of the collection itself.
+async fn prune_missing_rows(pool: &SqlitePool, seen: &[String]) -> AppResult<u32> {
+    let mut sql = String::from(
+        "DELETE FROM my_collection WHERE source = 'diecastregistry'",
+    );
+    if !seen.is_empty() {
+        sql.push_str(" AND external_id NOT IN (");
+        sql.push_str(&vec!["?"; seen.len()].join(","));
+        sql.push(')');
+    }
+    let mut query = sqlx::query(&sql);
+    for guid in seen {
+        query = query.bind(guid);
+    }
+    let result = query.execute(pool).await?;
+    Ok(result.rows_affected() as u32)
 }
 
 async fn persist_item(

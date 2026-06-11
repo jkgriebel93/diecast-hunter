@@ -150,6 +150,24 @@ pub async fn register_diecast_in_garage(
     result
 }
 
+/// Remove one collection entry, deleting it from the user's DCR garage first
+/// (DCR is the source of truth). `found_on_dcr = false` in the result means
+/// the asset wasn't in the garage — the local row is removed regardless, and
+/// the UI should treat that case as a neutral notice, not an error.
+#[tauri::command]
+pub async fn remove_collection_entry(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    collection_id: i64,
+) -> AppResult<sync::RemoveEntrySummary> {
+    let progress = ProgressEmitter::new(app, "remove_entry");
+    set_active_cancel(&state, &progress).await;
+    let result = sync::remove_collection_entry(&state.db.pool, &progress, collection_id).await;
+    clear_active_cancel(&state).await;
+    finish_progress(&progress, &result, "Remove entry");
+    result
+}
+
 #[tauri::command]
 pub async fn refresh_registry_details(
     state: State<'_, AppState>,

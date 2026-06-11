@@ -240,7 +240,7 @@ impl DcrClient {
                 attempt + 1,
                 field_summary.join(", ")
             );
-            let resp = self
+            let mut req = self
                 .http
                 .post(&url)
                 .header(reqwest::header::REFERER, &referer)
@@ -253,9 +253,14 @@ impl DcrClient {
                 .header("Sec-Fetch-Site", "same-origin")
                 .header("Sec-Fetch-Mode", "cors")
                 .header("Sec-Fetch-Dest", "empty")
-                .form(form)
-                .send()
-                .await;
+                .form(form);
+            if form.is_empty() {
+                // IIS answers 411 Length Required when a bodyless POST omits
+                // Content-Length (e.g. /MyGarage/{id}/Delete). jQuery always
+                // sends Content-Length: 0 here; match it.
+                req = req.header(reqwest::header::CONTENT_LENGTH, "0");
+            }
+            let resp = req.send().await;
             match resp {
                 Ok(resp) => {
                     let status = resp.status();

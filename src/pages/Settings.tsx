@@ -551,6 +551,13 @@ export function Settings() {
                 {syncSummary.pages_fetched} page
                 {syncSummary.pages_fetched === 1 ? "" : "s"}.
               </div>
+              {syncSummary.collection_rows_removed > 0 && (
+                <div>
+                  Removed {syncSummary.collection_rows_removed} local entr
+                  {syncSummary.collection_rows_removed === 1 ? "y" : "ies"} no
+                  longer in your garage.
+                </div>
+              )}
               {syncSummary.enrichment && (
                 <div>
                   Enriched {syncSummary.enrichment.enriched} of{" "}

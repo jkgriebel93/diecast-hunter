@@ -36,6 +36,11 @@ export function Collection() {
   const [items, setItems] = useState<CollectionRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number | string>>(new Set());
+  const [syncing, setSyncing] = useState(false);
+  const [removingId, setRemovingId] = useState<number | null>(null);
+  /** Neutral informational banner (e.g. "wasn't on DCR") — not an error. */
+  const [notice, setNotice] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const [searchText, setSearchText] = useState("");
   const [scaleFilter, setScaleFilter] = useState<string>("");
@@ -56,6 +61,63 @@ export function Collection() {
   useEffect(() => {
     load();
   }, []);
+
+  async function onSync() {
+    setSyncing(true);
+    setError(null);
+    setNotice(null);
+    setSuccessMsg(null);
+    try {
+      const summary = await api.syncDcrCollection(false);
+      const parts = [
+        `Synced ${summary.items_seen} item${summary.items_seen === 1 ? "" : "s"} from diecastregistry.com.`,
+      ];
+      if (summary.collection_rows_removed > 0) {
+        parts.push(
+          `Removed ${summary.collection_rows_removed} entr${
+            summary.collection_rows_removed === 1 ? "y" : "ies"
+          } no longer in your garage.`,
+        );
+      }
+      setSuccessMsg(parts.join(" "));
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function onRemove(item: CollectionRow) {
+    const label = item.scheme_text ?? item.driver_name ?? "this diecast";
+    const ok = window.confirm(
+      `Remove "${label}" from your collection?\n\n` +
+        "This also deletes it from your diecastregistry.com garage, which " +
+        "cannot be undone.",
+    );
+    if (!ok) return;
+    setRemovingId(item.collection_id);
+    setError(null);
+    setNotice(null);
+    setSuccessMsg(null);
+    try {
+      const result = await api.removeCollectionEntry(item.collection_id);
+      if (result.found_on_dcr) {
+        setSuccessMsg(
+          `Removed "${label}" from your diecastregistry.com garage and local collection.`,
+        );
+      } else {
+        setNotice(
+          `"${label}" wasn't in your diecastregistry.com garage — removed the local entry.`,
+        );
+      }
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setRemovingId(null);
+    }
+  }
 
   // Distinct scales / OEMs for filter dropdowns. Scales are limited to the
   // standard model sizes we surface everywhere (1:18, 1:24, 1:32, 1:64).
@@ -175,19 +237,36 @@ export function Collection() {
             Imported from diecastregistry.com, grouped by driver.
           </p>
         </div>
-        {items && (
-          <div className="text-xs text-fg-subtle">
-            {filteredItems === totalItems
-              ? `${totalItems} items across ${groups?.length ?? 0} drivers`
-              : `${filteredItems} of ${totalItems} items shown`}
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          {items && (
+            <div className="text-xs text-fg-subtle">
+              {filteredItems === totalItems
+                ? `${totalItems} items across ${groups?.length ?? 0} drivers`
+                : `${filteredItems} of ${totalItems} items shown`}
+            </div>
+          )}
+          <button
+            className="btn-secondary"
+            type="button"
+            disabled={syncing || removingId !== null}
+            onClick={onSync}
+            title="Pull My Garage from diecastregistry.com. Local entries no longer in the garage are removed."
+          >
+            {syncing ? "Syncing…" : "Sync with DCR"}
+          </button>
+        </div>
       </header>
 
       {error && (
         <div className="card border-red-500/40 text-red-300 text-sm">
           {error}
         </div>
+      )}
+      {notice && (
+        <div className="card text-sm text-fg-muted">{notice}</div>
+      )}
+      {successMsg && (
+        <div className="card text-sm text-emerald-400">{successMsg}</div>
       )}
 
       {items && items.length > 0 && (
@@ -288,6 +367,8 @@ export function Collection() {
                 expanded={isOpen}
                 onToggle={() => toggleGroup(key)}
                 imgSizeClass={IMG_CLASS[imgSize]}
+                onRemove={onRemove}
+                removingId={removingId}
               />
             );
           })}
@@ -302,11 +383,15 @@ function DriverCard({
   expanded,
   onToggle,
   imgSizeClass,
+  onRemove,
+  removingId,
 }: {
   group: DriverGroupView;
   expanded: boolean;
   onToggle: () => void;
   imgSizeClass: string;
+  onRemove: (item: CollectionRow) => void;
+  removingId: number | null;
 }) {
   return (
     <div className="card !p-0 overflow-hidden">
@@ -392,7 +477,7 @@ function DriverCard({
                     )}
                   </div>
                 </div>
-                <div className="text-right text-xs tabular-nums shrink-0">
+                <div className="text-right text-xs tabular-nums shrink-0 flex flex-col items-end gap-1">
                   <div>
                     <span className="text-fg-subtle">retail</span>{" "}
                     {formatCents(item.retail_value_cents)}
@@ -401,6 +486,17 @@ function DriverCard({
                     <span className="text-fg-subtle">wholesale</span>{" "}
                     {formatCents(item.wholesale_value_cents)}
                   </div>
+                  <button
+                    type="button"
+                    className="text-fg-subtle hover:text-red-400 disabled:opacity-50 mt-1"
+                    disabled={removingId !== null}
+                    onClick={() => onRemove(item)}
+                    title="Remove from collection (also deletes from your DCR garage)"
+                  >
+                    {removingId === item.collection_id
+                      ? "Removing…"
+                      : "Remove"}
+                  </button>
                 </div>
               </li>
             ))}

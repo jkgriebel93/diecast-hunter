@@ -26,8 +26,16 @@ export interface SyncSummary {
   drivers_upserted: number;
   registry_entries_upserted: number;
   collection_rows_upserted: number;
+  /** Local entries deleted because they're no longer in the DCR garage. */
+  collection_rows_removed: number;
   pages_fetched: number;
   enrichment: EnrichSummary | null;
+}
+
+export interface RemoveEntrySummary {
+  /** False = the asset wasn't in the DCR garage; the local row was removed
+   *  anyway and the UI should show a neutral notice, not an error. */
+  found_on_dcr: boolean;
 }
 
 export interface DriverGroup {
@@ -86,6 +94,8 @@ export const api = {
     invoke<CollectionRow[]>("list_collection_for_driver", { driverId }),
   listAllCollectionItems: () =>
     invoke<CollectionRow[]>("list_all_collection_items"),
+  removeCollectionEntry: (collectionId: number) =>
+    invoke<RemoveEntrySummary>("remove_collection_entry", { collectionId }),
   getEbayCredentials: () =>
     invoke<EbayCredentialsState>("get_ebay_credentials"),
   saveEbayCredentials: (

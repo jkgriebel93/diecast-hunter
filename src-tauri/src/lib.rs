@@ -93,6 +93,7 @@ pub fn run() {
             commands::set_setting,
             commands::sync_dcr_collection,
             commands::register_diecast_in_garage,
+            commands::remove_collection_entry,
             commands::refresh_registry_details,
             commands::list_drivers_with_counts,
             commands::list_collection_for_driver,
