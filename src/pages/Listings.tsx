@@ -6,6 +6,7 @@ import {
   isPreferredOem,
   prepareScaleOptions,
   prepareYearOptions,
+  type AutoMatchSummary,
   type DriverOption,
   type FormOptionRow,
   type GroupMigrationProposal,
@@ -155,6 +156,17 @@ export function Listings() {
   const [syncingWatchlist, setSyncingWatchlist] = useState(false);
   const [watchlistSummary, setWatchlistSummary] =
     useState<WatchlistSyncSummary | null>(null);
+
+  // Registry auto-match. `autoMatchingId` is the listing whose per-card
+  // button is busy; `autoMatchNotes` holds per-listing "why no match"
+  // feedback from the last attempt.
+  const [autoMatchingAll, setAutoMatchingAll] = useState(false);
+  const [autoMatchSummary, setAutoMatchSummary] =
+    useState<AutoMatchSummary | null>(null);
+  const [autoMatchingId, setAutoMatchingId] = useState<number | null>(null);
+  const [autoMatchNotes, setAutoMatchNotes] = useState<Map<number, string>>(
+    new Map(),
+  );
 
   // Driver-picker (independent of registry match). `tagDriverId` holds
   // the listing currently in edit mode; null when no popover is open.
@@ -457,6 +469,54 @@ export function Listings() {
     }
   }
 
+  async function onAutoMatchAll() {
+    setAutoMatchingAll(true);
+    setAutoMatchSummary(null);
+    setError(null);
+    try {
+      const summary = await api.autoMatchAllListings();
+      setAutoMatchSummary(summary);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setAutoMatchingAll(false);
+    }
+  }
+
+  async function onAutoMatchOne(listingId: number) {
+    setAutoMatchingId(listingId);
+    setError(null);
+    try {
+      const outcome = await api.autoMatchListing(listingId);
+      setAutoMatchNotes((prev) => {
+        const next = new Map(prev);
+        if (outcome.matched) next.delete(listingId);
+        else
+          next.set(
+            listingId,
+            outcome.skipped_reason ?? "No registry match found.",
+          );
+        return next;
+      });
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setAutoMatchingId(null);
+    }
+  }
+
+  async function onConfirmMatch(listingId: number) {
+    setError(null);
+    try {
+      await api.confirmListingMatch(listingId);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   async function onClearMatch(listingId: number) {
     setError(null);
     try {
@@ -673,6 +733,17 @@ export function Listings() {
             <button
               className="btn-secondary"
               type="button"
+              onClick={onAutoMatchAll}
+              disabled={autoMatchingAll}
+              title="Search the registry for a best-effort match on every unconfirmed listing"
+            >
+              {autoMatchingAll ? "Matching…" : "Auto-match all"}
+            </button>
+          )}
+          {rows && rows.length > 0 && (
+            <button
+              className="btn-secondary"
+              type="button"
               onClick={onRefreshAll}
               disabled={bulkRefreshing}
             >
@@ -723,6 +794,20 @@ export function Listings() {
           {watchlistSummary.pages_fetched} page
           {watchlistSummary.pages_fetched === 1 ? "" : "s"} (
           {watchlistSummary.items_seen} items total).
+        </div>
+      )}
+      {autoMatchSummary && (
+        <div className="text-xs text-emerald-400">
+          Auto-match: {autoMatchSummary.matched} matched,{" "}
+          {autoMatchSummary.below_threshold} below confidence threshold,{" "}
+          {autoMatchSummary.no_driver} without a driver,{" "}
+          {autoMatchSummary.no_candidates} with no registry entries
+          {autoMatchSummary.prewarmed_drivers > 0
+            ? `, ${autoMatchSummary.prewarmed_drivers} driver${
+                autoMatchSummary.prewarmed_drivers === 1 ? "" : "s"
+              } pulled from diecastregistry.com`
+            : ""}{" "}
+          (of {autoMatchSummary.considered} considered).
         </div>
       )}
       {error && (
@@ -953,7 +1038,11 @@ export function Listings() {
               onUnwatch={() => onUnwatch(r)}
               onClearMatch={() => onClearMatch(r.listing_id)}
               onRejectMatch={() => onRejectMatch(r.listing_id)}
+              onConfirmMatch={() => onConfirmMatch(r.listing_id)}
               onChangeMatch={() => setRegistrySearchListing(r)}
+              autoMatching={autoMatchingId === r.listing_id}
+              autoMatchNote={autoMatchNotes.get(r.listing_id)}
+              onAutoMatch={() => onAutoMatchOne(r.listing_id)}
               onAddToGroup={(gid) => onAddListingToGroup(r.listing_id, gid)}
               onCreateGroup={() => setCreateGroupForListingId(r.listing_id)}
               onRemoveFromGroup={(gid) =>
@@ -987,7 +1076,11 @@ export function Listings() {
           onUnwatch={onUnwatch}
           onClearMatch={onClearMatch}
           onRejectMatch={onRejectMatch}
+          onConfirmMatch={onConfirmMatch}
           onChangeMatch={setRegistrySearchListing}
+          autoMatchingId={autoMatchingId}
+          autoMatchNotes={autoMatchNotes}
+          onAutoMatch={onAutoMatchOne}
           onAddToGroup={onAddListingToGroup}
           onCreateGroup={setCreateGroupForListingId}
           onRemoveFromGroup={onRemoveListingFromGroup}
@@ -1015,7 +1108,11 @@ export function Listings() {
           onUnwatch={onUnwatch}
           onClearMatch={onClearMatch}
           onRejectMatch={onRejectMatch}
+          onConfirmMatch={onConfirmMatch}
           onChangeMatch={setRegistrySearchListing}
+          autoMatchingId={autoMatchingId}
+          autoMatchNotes={autoMatchNotes}
+          onAutoMatch={onAutoMatchOne}
           onAddToGroup={onAddListingToGroup}
           onCreateGroup={setCreateGroupForListingId}
           onRemoveFromGroup={onRemoveListingFromGroup}
@@ -1112,7 +1209,11 @@ function ListingCard({
   onUnwatch,
   onClearMatch,
   onRejectMatch,
+  onConfirmMatch,
   onChangeMatch,
+  autoMatching,
+  autoMatchNote,
+  onAutoMatch,
   onAddToGroup,
   onCreateGroup,
   onRemoveFromGroup,
@@ -1137,7 +1238,11 @@ function ListingCard({
   onUnwatch: () => void;
   onClearMatch: () => void;
   onRejectMatch: () => void;
+  onConfirmMatch: () => void;
   onChangeMatch: () => void;
+  autoMatching: boolean;
+  autoMatchNote: string | undefined;
+  onAutoMatch: () => void;
   onAddToGroup: (groupId: number) => void;
   onCreateGroup: () => void;
   onRemoveFromGroup: (groupId: number) => void;
@@ -1220,7 +1325,22 @@ function ListingCard({
         {matched ? (
           <div className="mt-2 rounded-md border border-border bg-bg-elevated px-2 py-1.5 text-xs">
             <div className="flex items-center gap-2">
-              <span className="text-emerald-400">✓ matched</span>
+              {row.match_user_confirmed ? (
+                <span className="text-emerald-400">✓ matched</span>
+              ) : (
+                <span
+                  className="text-sky-400"
+                  title="Suggested automatically — confirm it or pick a different entry"
+                >
+                  ≈ auto-match
+                </span>
+              )}
+              {!row.match_user_confirmed && row.match_confidence !== null && (
+                <ConfidenceBadge
+                  value={row.match_confidence}
+                  reasons={row.match_reasons}
+                />
+              )}
               <span className="text-fg-muted truncate">
                 {row.matched_driver_name}
                 {row.matched_scheme_text
@@ -1238,20 +1358,42 @@ function ListingCard({
                 .filter(Boolean)
                 .join(" · ")}
             </div>
-            {row.matched_detail_url && (
-              <a
-                className="text-accent hover:underline mt-0.5 inline-block"
-                href={"https://www.diecastregistry.com" + row.matched_detail_url}
-                onClick={(e) => {
-                  e.preventDefault();
-                  void openExternal(
-                    "https://www.diecastregistry.com" + row.matched_detail_url,
-                  );
-                }}
-              >
-                View on diecastregistry.com →
-              </a>
-            )}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
+              {row.matched_detail_url && (
+                <a
+                  className="text-accent hover:underline inline-block"
+                  href={"https://www.diecastregistry.com" + row.matched_detail_url}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    void openExternal(
+                      "https://www.diecastregistry.com" + row.matched_detail_url,
+                    );
+                  }}
+                >
+                  View on diecastregistry.com →
+                </a>
+              )}
+              {!row.match_user_confirmed && (
+                <>
+                  <button
+                    className="text-emerald-400 hover:text-emerald-300"
+                    type="button"
+                    onClick={onConfirmMatch}
+                    title="Lock this in as the right registry entry"
+                  >
+                    Confirm
+                  </button>
+                  <button
+                    className="text-fg-subtle hover:text-red-300"
+                    type="button"
+                    onClick={onRejectMatch}
+                    title="Wrong entry — drop it and stop auto-matching this listing"
+                  >
+                    Not it
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         ) : row.match_user_confirmed ? (
           <div className="mt-2 text-xs text-fg-subtle">
@@ -1260,6 +1402,11 @@ function ListingCard({
         ) : (
           <div className="mt-2 text-xs text-amber-400/80">
             Unmatched — link a registry entry to enable retail comparison.
+          </div>
+        )}
+        {autoMatchNote && !matched && (
+          <div className="mt-1 text-xs text-fg-subtle">
+            Auto-match: {autoMatchNote}
           </div>
         )}
 
@@ -1309,6 +1456,17 @@ function ListingCard({
               title="Remove from your eBay watchlist and delete this local row"
             >
               {unwatching ? "Removing…" : "Remove from watchlist"}
+            </button>
+          )}
+          {!matched && !row.match_user_confirmed && (
+            <button
+              className="text-xs text-fg-muted hover:text-fg"
+              type="button"
+              onClick={onAutoMatch}
+              disabled={autoMatching}
+              title="Search the registry for a best-effort match (pulls the driver's entries from diecastregistry.com if needed)"
+            >
+              {autoMatching ? "Matching…" : "Auto-match"}
             </button>
           )}
           <button
@@ -1369,6 +1527,35 @@ function ListingCard({
         )}
       </div>
     </li>
+  );
+}
+
+/** Confidence pill for an auto-match. Hover shows the signals that drove
+ *  the score (e.g. "production run of 5004 in title"). */
+function ConfidenceBadge({
+  value,
+  reasons,
+}: {
+  value: number;
+  reasons: string[];
+}) {
+  let cls = "text-orange-400 border-orange-500/30 bg-orange-500/10";
+  if (value >= 80) {
+    cls = "text-emerald-400 border-emerald-500/30 bg-emerald-500/10";
+  } else if (value >= 65) {
+    cls = "text-yellow-400 border-yellow-500/30 bg-yellow-500/10";
+  }
+  const tooltip =
+    reasons.length > 0
+      ? `Why this match:\n• ${reasons.join("\n• ")}`
+      : "Auto-match confidence";
+  return (
+    <span
+      className={`px-1.5 py-0.5 rounded border tabular-nums shrink-0 ${cls}`}
+      title={tooltip}
+    >
+      {value.toFixed(0)}%
+    </span>
   );
 }
 
@@ -1592,7 +1779,11 @@ function GroupedByDriver({
   onUnwatch,
   onClearMatch,
   onRejectMatch,
+  onConfirmMatch,
   onChangeMatch,
+  autoMatchingId,
+  autoMatchNotes,
+  onAutoMatch,
   onAddToGroup,
   onCreateGroup,
   onRemoveFromGroup,
@@ -1618,7 +1809,11 @@ function GroupedByDriver({
   onUnwatch: (row: ListingRow) => void;
   onClearMatch: (id: number) => void;
   onRejectMatch: (id: number) => void;
+  onConfirmMatch: (id: number) => void;
   onChangeMatch: (row: ListingRow) => void;
+  autoMatchingId: number | null;
+  autoMatchNotes: Map<number, string>;
+  onAutoMatch: (id: number) => void;
   onAddToGroup: (listingId: number, groupId: number) => void;
   onCreateGroup: (listingId: number) => void;
   onRemoveFromGroup: (listingId: number, groupId: number) => void;
@@ -1716,7 +1911,11 @@ function GroupedByDriver({
                     onUnwatch={() => onUnwatch(r)}
                     onClearMatch={() => onClearMatch(r.listing_id)}
                     onRejectMatch={() => onRejectMatch(r.listing_id)}
+                    onConfirmMatch={() => onConfirmMatch(r.listing_id)}
                     onChangeMatch={() => onChangeMatch(r)}
+                    autoMatching={autoMatchingId === r.listing_id}
+                    autoMatchNote={autoMatchNotes.get(r.listing_id)}
+                    onAutoMatch={() => onAutoMatch(r.listing_id)}
                     onAddToGroup={(gid) => onAddToGroup(r.listing_id, gid)}
                     onCreateGroup={() => onCreateGroup(r.listing_id)}
                     onRemoveFromGroup={(gid) =>
@@ -1757,7 +1956,11 @@ function GroupedByGroup({
   onUnwatch,
   onClearMatch,
   onRejectMatch,
+  onConfirmMatch,
   onChangeMatch,
+  autoMatchingId,
+  autoMatchNotes,
+  onAutoMatch,
   onAddToGroup,
   onCreateGroup,
   onRemoveFromGroup,
@@ -1783,7 +1986,11 @@ function GroupedByGroup({
   onUnwatch: (row: ListingRow) => void;
   onClearMatch: (id: number) => void;
   onRejectMatch: (id: number) => void;
+  onConfirmMatch: (id: number) => void;
   onChangeMatch: (row: ListingRow) => void;
+  autoMatchingId: number | null;
+  autoMatchNotes: Map<number, string>;
+  onAutoMatch: (id: number) => void;
   onAddToGroup: (listingId: number, groupId: number) => void;
   onCreateGroup: (listingId: number) => void;
   onRemoveFromGroup: (listingId: number, groupId: number) => void;
@@ -1894,7 +2101,11 @@ function GroupedByGroup({
         onUnwatch={() => onUnwatch(r)}
         onClearMatch={() => onClearMatch(r.listing_id)}
         onRejectMatch={() => onRejectMatch(r.listing_id)}
+        onConfirmMatch={() => onConfirmMatch(r.listing_id)}
         onChangeMatch={() => onChangeMatch(r)}
+        autoMatching={autoMatchingId === r.listing_id}
+        autoMatchNote={autoMatchNotes.get(r.listing_id)}
+        onAutoMatch={() => onAutoMatch(r.listing_id)}
         onAddToGroup={(gid) => onAddToGroup(r.listing_id, gid)}
         onCreateGroup={() => onCreateGroup(r.listing_id)}
         onRemoveFromGroup={(gid) => onRemoveFromGroup(r.listing_id, gid)}

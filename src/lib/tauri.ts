@@ -139,6 +139,12 @@ export const api = {
     invoke<void>("clear_listing_match", { listingId }),
   rejectListingMatch: (listingId: number) =>
     invoke<void>("reject_listing_match", { listingId }),
+  confirmListingMatch: (listingId: number) =>
+    invoke<void>("confirm_listing_match", { listingId }),
+  autoMatchListing: (listingId: number) =>
+    invoke<AutoMatchOutcome>("auto_match_listing", { listingId }),
+  autoMatchAllListings: () =>
+    invoke<AutoMatchSummary>("auto_match_all_listings"),
   listDrivers: () => invoke<DriverOption[]>("list_drivers"),
   setListingDriver: (
     listingId: number,
@@ -484,6 +490,24 @@ export interface LinkResult {
   enriched: boolean;
 }
 
+export interface AutoMatchOutcome {
+  matched: boolean;
+  registry_entry_id: number | null;
+  confidence: number | null;
+  reasons: string[];
+  /** Why no match was written, when matched is false. */
+  skipped_reason: string | null;
+}
+
+export interface AutoMatchSummary {
+  considered: number;
+  matched: number;
+  no_driver: number;
+  no_candidates: number;
+  below_threshold: number;
+  prewarmed_drivers: number;
+}
+
 export type Condition =
   | "mint"
   | "excellent"
@@ -624,6 +648,12 @@ export interface ListingRow {
   registry_entry_id: number | null;
   match_confidence: number | null;
   match_user_confirmed: boolean;
+  /** 'manual' (registry-search dialog), 'auto' (auto-matcher), or null for
+   *  rows written before provenance tracking (all manual links). */
+  matched_by: string | null;
+  /** Human-readable signals behind an auto-match's confidence. Empty for
+   *  manual links. */
+  match_reasons: string[];
   matched_driver_name: string | null;
   matched_scheme_text: string | null;
   matched_year: number | null;

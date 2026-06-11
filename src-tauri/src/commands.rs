@@ -25,15 +25,9 @@ async fn clear_active_cancel(state: &State<'_, AppState>) {
 /// Emit the right closing progress event based on how the op finished.
 /// Successful runs emit their own `done` from inside the sync function;
 /// here we only handle errors and cancellations.
-fn finish_progress<T>(
-    progress: &ProgressEmitter,
-    result: &AppResult<T>,
-    op_label: &str,
-) {
+fn finish_progress<T>(progress: &ProgressEmitter, result: &AppResult<T>, op_label: &str) {
     match result {
-        Err(AppError::Cancelled) => {
-            progress.cancelled_event(format!("{op_label} cancelled."))
-        }
+        Err(AppError::Cancelled) => progress.cancelled_event(format!("{op_label} cancelled.")),
         Err(e) => progress.fail(format!("{op_label} failed: {e}")),
         Ok(_) => {}
     }
@@ -112,28 +106,19 @@ pub async fn save_diecastregistry_credentials(
 }
 
 #[tauri::command]
-pub async fn clear_diecastregistry_credentials(
-    state: State<'_, AppState>,
-) -> AppResult<()> {
+pub async fn clear_diecastregistry_credentials(state: State<'_, AppState>) -> AppResult<()> {
     settings::delete(&state.db.pool, settings::KEY_DCR_USERNAME).await?;
     settings::secret_delete(settings::ENTRY_DCR_PASSWORD)?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn get_setting(
-    state: State<'_, AppState>,
-    key: String,
-) -> AppResult<Option<String>> {
+pub async fn get_setting(state: State<'_, AppState>, key: String) -> AppResult<Option<String>> {
     settings::get(&state.db.pool, &key).await
 }
 
 #[tauri::command]
-pub async fn set_setting(
-    state: State<'_, AppState>,
-    key: String,
-    value: String,
-) -> AppResult<()> {
+pub async fn set_setting(state: State<'_, AppState>, key: String, value: String) -> AppResult<()> {
     settings::set(&state.db.pool, &key, &value).await
 }
 
@@ -145,8 +130,7 @@ pub async fn sync_dcr_collection(
 ) -> AppResult<sync::SyncSummary> {
     let progress = ProgressEmitter::new(app, "sync");
     set_active_cancel(&state, &progress).await;
-    let result =
-        sync::sync_dcr_collection_and_enrich(&state.db.pool, &progress, enrich).await;
+    let result = sync::sync_dcr_collection_and_enrich(&state.db.pool, &progress, enrich).await;
     clear_active_cancel(&state).await;
     finish_progress(&progress, &result, "Sync");
     result
@@ -190,9 +174,7 @@ pub struct EbayCredentialsState {
 }
 
 #[tauri::command]
-pub async fn get_ebay_credentials(
-    state: State<'_, AppState>,
-) -> AppResult<EbayCredentialsState> {
+pub async fn get_ebay_credentials(state: State<'_, AppState>) -> AppResult<EbayCredentialsState> {
     let environment = settings::get(&state.db.pool, settings::KEY_EBAY_ENVIRONMENT)
         .await?
         .unwrap_or_else(|| "sandbox".to_string());
@@ -228,9 +210,7 @@ pub async fn save_ebay_credentials(
 }
 
 #[tauri::command]
-pub async fn clear_ebay_credentials(
-    state: State<'_, AppState>,
-) -> AppResult<()> {
+pub async fn clear_ebay_credentials(state: State<'_, AppState>) -> AppResult<()> {
     settings::secret_delete(settings::ENTRY_EBAY_APP_ID)?;
     settings::secret_delete(settings::ENTRY_EBAY_CERT_ID)?;
     settings::delete(&state.db.pool, "ebay.sandbox.access_token").await?;
@@ -242,9 +222,7 @@ pub async fn clear_ebay_credentials(
 
 /// Ping the OAuth endpoint to confirm the saved credentials work.
 #[tauri::command]
-pub async fn test_ebay_connection(
-    state: State<'_, AppState>,
-) -> AppResult<String> {
+pub async fn test_ebay_connection(state: State<'_, AppState>) -> AppResult<String> {
     let client = crate::ebay::EbayClient::from_settings(state.db.pool.clone()).await?;
     let _ = client.access_token().await?;
     Ok(format!("connected ({})", client.environment().as_str()))
@@ -253,10 +231,7 @@ pub async fn test_ebay_connection(
 // ----- eBay user OAuth -----
 
 #[tauri::command]
-pub async fn save_ebay_ru_name(
-    state: State<'_, AppState>,
-    ru_name: String,
-) -> AppResult<()> {
+pub async fn save_ebay_ru_name(state: State<'_, AppState>, ru_name: String) -> AppResult<()> {
     let env = settings::get(&state.db.pool, settings::KEY_EBAY_ENVIRONMENT)
         .await?
         .unwrap_or_else(|| "sandbox".to_string());
@@ -298,9 +273,7 @@ pub async fn start_ebay_oauth(state: State<'_, AppState>) -> AppResult<String> {
     let ru_name = settings::get(&state.db.pool, &settings::ebay_ru_name_key(env.as_str()))
         .await?
         .ok_or_else(|| {
-            AppError::NotConfigured(
-                "eBay RuName not set — configure it in Settings first".into(),
-            )
+            AppError::NotConfigured("eBay RuName not set — configure it in Settings first".into())
         })?;
 
     // 32 random hex chars for CSRF state. Persisted so we can validate on
@@ -320,10 +293,7 @@ pub async fn start_ebay_oauth(state: State<'_, AppState>) -> AppResult<String> {
 }
 
 #[tauri::command]
-pub async fn complete_ebay_oauth(
-    state: State<'_, AppState>,
-    code: String,
-) -> AppResult<()> {
+pub async fn complete_ebay_oauth(state: State<'_, AppState>, code: String) -> AppResult<()> {
     let env_str = settings::get(&state.db.pool, settings::KEY_EBAY_ENVIRONMENT)
         .await?
         .unwrap_or_else(|| "sandbox".to_string());
@@ -388,10 +358,7 @@ pub async fn watch_ebay_listing(
 }
 
 #[tauri::command]
-pub async fn unwatch_ebay_listing(
-    state: State<'_, AppState>,
-    listing_id: i64,
-) -> AppResult<()> {
+pub async fn unwatch_ebay_listing(state: State<'_, AppState>, listing_id: i64) -> AppResult<()> {
     sync::unwatch_and_delete(&state.db.pool, listing_id).await
 }
 
@@ -404,10 +371,7 @@ pub async fn list_ebay_offers(
 }
 
 #[tauri::command]
-pub async fn refresh_ebay_listing(
-    state: State<'_, AppState>,
-    listing_id: i64,
-) -> AppResult<()> {
+pub async fn refresh_ebay_listing(state: State<'_, AppState>, listing_id: i64) -> AppResult<()> {
     sync::refresh_listing(&state.db.pool, listing_id).await
 }
 
@@ -485,6 +449,12 @@ pub struct ListingRow {
     pub registry_entry_id: Option<i64>,
     pub match_confidence: Option<f64>,
     pub match_user_confirmed: bool,
+    /// 'manual' (registry-search dialog), 'auto' (registry_auto_match), or
+    /// None for pre-provenance rows (all manual links historically).
+    pub matched_by: Option<String>,
+    /// Human-readable signals behind an auto-match's confidence. Empty for
+    /// manual links.
+    pub match_reasons: Vec<String>,
     pub matched_driver_name: Option<String>,
     pub matched_scheme_text: Option<String>,
     pub matched_year: Option<i32>,
@@ -536,6 +506,8 @@ struct ListingRowRaw {
     registry_entry_id: Option<i64>,
     match_confidence: Option<f64>,
     match_user_confirmed: Option<i64>,
+    matched_by: Option<String>,
+    match_reasons: Option<String>,
     matched_driver_name: Option<String>,
     matched_scheme_text: Option<String>,
     matched_year: Option<i32>,
@@ -552,9 +524,7 @@ struct ListingRowRaw {
 }
 
 #[tauri::command]
-pub async fn list_listings(
-    state: State<'_, AppState>,
-) -> AppResult<Vec<ListingRow>> {
+pub async fn list_listings(state: State<'_, AppState>) -> AppResult<Vec<ListingRow>> {
     let rows: Vec<ListingRowRaw> = sqlx::query_as(
         "SELECT l.id, s.code AS seller_code, l.external_id, l.url, l.title,
                 l.price_cents, l.shipping_cents, l.currency,
@@ -564,6 +534,8 @@ pub async fn list_listings(
                 lm.registry_entry_id,
                 lm.confidence AS match_confidence,
                 lm.user_confirmed AS match_user_confirmed,
+                lm.matched_by,
+                lm.match_reasons,
                 d.name AS matched_driver_name,
                 re.scheme_text AS matched_scheme_text,
                 re.year AS matched_year,
@@ -593,13 +565,9 @@ pub async fn list_listings(
     Ok(rows
         .into_iter()
         .map(|r| {
-            let total_cents = r
-                .price_cents
-                .map(|p| p + r.shipping_cents.unwrap_or(0));
+            let total_cents = r.price_cents.map(|p| p + r.shipping_cents.unwrap_or(0));
             let deal_score = match (total_cents, r.matched_retail_cents) {
-                (Some(t), Some(retail)) if retail > 0 => {
-                    Some((t as f64) / (retail as f64) * 100.0)
-                }
+                (Some(t), Some(retail)) if retail > 0 => Some((t as f64) / (retail as f64) * 100.0),
                 _ => None,
             };
             let matched_detail_url = r
@@ -632,6 +600,12 @@ pub async fn list_listings(
                 registry_entry_id: r.registry_entry_id,
                 match_confidence: r.match_confidence,
                 match_user_confirmed: r.match_user_confirmed.unwrap_or(0) != 0,
+                matched_by: r.matched_by,
+                match_reasons: r
+                    .match_reasons
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
+                    .unwrap_or_default(),
                 matched_driver_name: r.matched_driver_name,
                 matched_scheme_text: r.matched_scheme_text,
                 matched_year: r.matched_year,
@@ -661,10 +635,7 @@ pub async fn list_listings(
 
 /// Clear the manual link between this listing and its registry entry.
 #[tauri::command]
-pub async fn clear_listing_match(
-    state: State<'_, AppState>,
-    listing_id: i64,
-) -> AppResult<()> {
+pub async fn clear_listing_match(state: State<'_, AppState>, listing_id: i64) -> AppResult<()> {
     sqlx::query("DELETE FROM listing_matches WHERE listing_id = ?")
         .bind(listing_id)
         .execute(&state.db.pool)
@@ -675,26 +646,78 @@ pub async fn clear_listing_match(
 /// Lock the listing as explicitly unmatched (user has reviewed and found
 /// no registry entry).
 #[tauri::command]
-pub async fn reject_listing_match(
-    state: State<'_, AppState>,
-    listing_id: i64,
-) -> AppResult<()> {
+pub async fn reject_listing_match(state: State<'_, AppState>, listing_id: i64) -> AppResult<()> {
     let now = chrono::Utc::now().timestamp();
     sqlx::query(
         "INSERT INTO listing_matches
-            (listing_id, registry_entry_id, confidence, user_confirmed, matched_at)
-         VALUES (?, NULL, 0.0, 1, ?)
+            (listing_id, registry_entry_id, confidence, user_confirmed,
+             matched_at, matched_by, match_reasons)
+         VALUES (?, NULL, 0.0, 1, ?, NULL, NULL)
          ON CONFLICT(listing_id) DO UPDATE SET
             registry_entry_id = NULL,
             confidence = 0.0,
             user_confirmed = 1,
-            matched_at = excluded.matched_at",
+            matched_at = excluded.matched_at,
+            matched_by = NULL,
+            match_reasons = NULL",
     )
     .bind(listing_id)
     .bind(now)
     .execute(&state.db.pool)
     .await?;
     Ok(())
+}
+
+/// Promote an auto-match to a user-confirmed one. The confidence value is
+/// kept as-is so the row still records how sure the matcher was.
+#[tauri::command]
+pub async fn confirm_listing_match(state: State<'_, AppState>, listing_id: i64) -> AppResult<()> {
+    let result = sqlx::query(
+        "UPDATE listing_matches SET user_confirmed = 1
+         WHERE listing_id = ? AND registry_entry_id IS NOT NULL",
+    )
+    .bind(listing_id)
+    .execute(&state.db.pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::Parse(format!(
+            "listing {listing_id} has no match to confirm"
+        )));
+    }
+    Ok(())
+}
+
+/// Best-effort auto-match of one listing against the registry. Allowed to
+/// hit diecastregistry.com (with progress events) when the listing's driver
+/// has no locally cached registry entries yet.
+#[tauri::command]
+pub async fn auto_match_listing(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    listing_id: i64,
+) -> AppResult<sync::AutoMatchOutcome> {
+    let progress = ProgressEmitter::new(app, "auto_match");
+    set_active_cancel(&state, &progress).await;
+    let result =
+        sync::registry_auto_match::auto_match_listing(&state.db.pool, listing_id, Some(&progress))
+            .await;
+    clear_active_cancel(&state).await;
+    finish_progress(&progress, &result, "Auto-match");
+    result
+}
+
+/// Auto-match every listing the user hasn't already confirmed or rejected.
+#[tauri::command]
+pub async fn auto_match_all_listings(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> AppResult<sync::AutoMatchSummary> {
+    let progress = ProgressEmitter::new(app, "auto_match_all");
+    set_active_cancel(&state, &progress).await;
+    let result = sync::registry_auto_match::auto_match_all(&state.db.pool, &progress, true).await;
+    clear_active_cancel(&state).await;
+    finish_progress(&progress, &result, "Auto-match");
+    result
 }
 
 // ----- Listing driver tag (independent of registry match) -----
@@ -710,9 +733,7 @@ pub struct DriverOption {
 /// collection sync, registry pre-warm, and user driver-tag picks below.
 /// Returned alphabetically by name (case-insensitive).
 #[tauri::command]
-pub async fn list_drivers(
-    state: State<'_, AppState>,
-) -> AppResult<Vec<DriverOption>> {
+pub async fn list_drivers(state: State<'_, AppState>) -> AppResult<Vec<DriverOption>> {
     let rows: Vec<(i64, String, String)> = sqlx::query_as(
         "SELECT id, name, normalized_name FROM drivers ORDER BY name COLLATE NOCASE",
     )
@@ -761,11 +782,10 @@ pub async fn set_listing_driver(
     .bind(normalized)
     .execute(pool)
     .await?;
-    let (driver_id,): (i64,) =
-        sqlx::query_as("SELECT id FROM drivers WHERE normalized_name = ?")
-            .bind(normalized)
-            .fetch_one(pool)
-            .await?;
+    let (driver_id,): (i64,) = sqlx::query_as("SELECT id FROM drivers WHERE normalized_name = ?")
+        .bind(normalized)
+        .fetch_one(pool)
+        .await?;
 
     sqlx::query(
         "UPDATE listings
@@ -783,10 +803,7 @@ pub async fn set_listing_driver(
 /// driver" so auto-association won't try to fill it in. Different from
 /// `reset_listing_driver`, which drops the pin and re-runs detection.
 #[tauri::command]
-pub async fn clear_listing_driver(
-    state: State<'_, AppState>,
-    listing_id: i64,
-) -> AppResult<()> {
+pub async fn clear_listing_driver(state: State<'_, AppState>, listing_id: i64) -> AppResult<()> {
     sqlx::query(
         "UPDATE listings
          SET driver_id = NULL, driver_id_user_set = 1
@@ -816,21 +833,17 @@ pub async fn reset_listing_driver(
     .execute(pool)
     .await?;
     sync::driver_assoc::associate_listing_driver(pool, listing_id).await?;
-    let row: Option<(Option<i64>,)> = sqlx::query_as(
-        "SELECT driver_id FROM listings WHERE id = ?",
-    )
-    .bind(listing_id)
-    .fetch_optional(pool)
-    .await?;
+    let row: Option<(Option<i64>,)> = sqlx::query_as("SELECT driver_id FROM listings WHERE id = ?")
+        .bind(listing_id)
+        .fetch_optional(pool)
+        .await?;
     Ok(row.and_then(|(d,)| d))
 }
 
 // ----- eBay listing filter -----
 
 #[tauri::command]
-pub async fn get_ebay_filter_non_diecasts(
-    state: State<'_, AppState>,
-) -> AppResult<bool> {
+pub async fn get_ebay_filter_non_diecasts(state: State<'_, AppState>) -> AppResult<bool> {
     match settings::get(&state.db.pool, settings::KEY_EBAY_FILTER_NON_DIECASTS).await? {
         Some(s) => Ok(s != "false"),
         None => Ok(true),
@@ -851,19 +864,14 @@ pub async fn set_ebay_filter_non_diecasts(
 }
 
 #[tauri::command]
-pub async fn get_ebay_buyer_zip(
-    state: State<'_, AppState>,
-) -> AppResult<Option<String>> {
+pub async fn get_ebay_buyer_zip(state: State<'_, AppState>) -> AppResult<Option<String>> {
     settings::get(&state.db.pool, settings::KEY_EBAY_BUYER_ZIP).await
 }
 
 /// Empty input clears the setting. Sanitized to alphanumerics and dashes so
 /// the value is safe to embed in the X-EBAY-C-ENDUSERCTX header.
 #[tauri::command]
-pub async fn set_ebay_buyer_zip(
-    state: State<'_, AppState>,
-    zip: String,
-) -> AppResult<()> {
+pub async fn set_ebay_buyer_zip(state: State<'_, AppState>, zip: String) -> AppResult<()> {
     let cleaned: String = zip
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
@@ -887,9 +895,7 @@ pub struct CleanupSummary {
 /// the filter, and we can't safely classify them. Refresh those first if
 /// you want them considered.
 #[tauri::command]
-pub async fn remove_non_diecast_listings(
-    state: State<'_, AppState>,
-) -> AppResult<CleanupSummary> {
+pub async fn remove_non_diecast_listings(state: State<'_, AppState>) -> AppResult<CleanupSummary> {
     let pool = &state.db.pool;
     let rows: Vec<(i64, Option<String>)> = sqlx::query_as(
         "SELECT l.id, l.category_path
@@ -929,8 +935,7 @@ pub async fn get_listing_receiver_status(
     state: State<'_, AppState>,
 ) -> AppResult<ListingReceiverStatus> {
     let port = crate::listing_receiver::configured_port(&state.db.pool).await?;
-    let has_secret =
-        settings::secret_get(settings::ENTRY_LISTING_RECEIVER_SECRET)?.is_some();
+    let has_secret = settings::secret_get(settings::ENTRY_LISTING_RECEIVER_SECRET)?.is_some();
     Ok(ListingReceiverStatus {
         url: format!("http://localhost:{port}"),
         port,
@@ -939,16 +944,12 @@ pub async fn get_listing_receiver_status(
 }
 
 #[tauri::command]
-pub async fn get_listing_receiver_secret(
-    _state: State<'_, AppState>,
-) -> AppResult<String> {
+pub async fn get_listing_receiver_secret(_state: State<'_, AppState>) -> AppResult<String> {
     crate::listing_receiver::ensure_secret()
 }
 
 #[tauri::command]
-pub async fn regenerate_listing_receiver_secret(
-    _state: State<'_, AppState>,
-) -> AppResult<String> {
+pub async fn regenerate_listing_receiver_secret(_state: State<'_, AppState>) -> AppResult<String> {
     crate::listing_receiver::regenerate_secret()
 }
 
@@ -961,16 +962,11 @@ pub async fn refresh_registry_form_options(
     let username = settings::get(&state.db.pool, settings::KEY_DCR_USERNAME)
         .await?
         .ok_or_else(|| {
-            AppError::NotConfigured(
-                "diecastregistry.com username not set in Settings".into(),
-            )
+            AppError::NotConfigured("diecastregistry.com username not set in Settings".into())
         })?;
-    let password = settings::secret_get(settings::ENTRY_DCR_PASSWORD)?
-        .ok_or_else(|| {
-            AppError::NotConfigured(
-                "diecastregistry.com password not set in Settings".into(),
-            )
-        })?;
+    let password = settings::secret_get(settings::ENTRY_DCR_PASSWORD)?.ok_or_else(|| {
+        AppError::NotConfigured("diecastregistry.com password not set in Settings".into())
+    })?;
     let client = crate::dcr::DcrClient::new()?;
     client.login(&username, &password).await?;
     crate::dcr::refresh_form_options(&state.db.pool, &client).await
@@ -1037,27 +1033,18 @@ async fn run_dcr_production_search(
     let username = settings::get(pool, settings::KEY_DCR_USERNAME)
         .await?
         .ok_or_else(|| {
-            AppError::NotConfigured(
-                "diecastregistry.com username not set in Settings".into(),
-            )
+            AppError::NotConfigured("diecastregistry.com username not set in Settings".into())
         })?;
-    let password = settings::secret_get(settings::ENTRY_DCR_PASSWORD)?
-        .ok_or_else(|| {
-            AppError::NotConfigured(
-                "diecastregistry.com password not set in Settings".into(),
-            )
-        })?;
+    let password = settings::secret_get(settings::ENTRY_DCR_PASSWORD)?.ok_or_else(|| {
+        AppError::NotConfigured("diecastregistry.com password not set in Settings".into())
+    })?;
     let client = crate::dcr::DcrClient::new()?;
     client.login(&username, &password).await?;
 
     let subject = resolve_search_subject(pool, filter).await;
-    let (results, _pages) = crate::dcr::search_all_pages_with_progress(
-        &client,
-        filter,
-        progress,
-        subject.as_deref(),
-    )
-    .await?;
+    let (results, _pages) =
+        crate::dcr::search_all_pages_with_progress(&client, filter, progress, subject.as_deref())
+            .await?;
     progress.done(format!("Found {} results.", results.len()));
     Ok(results)
 }
@@ -1131,9 +1118,7 @@ pub struct PrewarmedDriver {
 /// entry count is joined through the shared `normalize_driver_name` key
 /// (`registry_form_options.normalized` = `drivers.normalized_name`).
 #[tauri::command]
-pub async fn list_prewarmed_drivers(
-    state: State<'_, AppState>,
-) -> AppResult<Vec<PrewarmedDriver>> {
+pub async fn list_prewarmed_drivers(state: State<'_, AppState>) -> AppResult<Vec<PrewarmedDriver>> {
     let rows: Vec<(String, String, i64, i64)> = sqlx::query_as(
         "SELECT
             substr(s.key, length('dcr.last_prewarm.') + 1) AS driver_guid,
@@ -1226,9 +1211,7 @@ struct CollectionRowRaw {
 }
 
 #[tauri::command]
-pub async fn list_drivers_with_counts(
-    state: State<'_, AppState>,
-) -> AppResult<Vec<DriverGroup>> {
+pub async fn list_drivers_with_counts(state: State<'_, AppState>) -> AppResult<Vec<DriverGroup>> {
     let rows: Vec<(i64, String, i64, Option<i64>, Option<i64>)> = sqlx::query_as(
         "SELECT d.id,
                 d.name,
@@ -1372,9 +1355,7 @@ async fn fetch_collection_rows(
 // --- Saved searches + saved sellers ---------------------------------------
 
 #[tauri::command]
-pub async fn list_saved_searches(
-    state: State<'_, AppState>,
-) -> AppResult<Vec<saved::SavedSearch>> {
+pub async fn list_saved_searches(state: State<'_, AppState>) -> AppResult<Vec<saved::SavedSearch>> {
     saved::list_searches(&state.db.pool).await
 }
 
@@ -1419,7 +1400,8 @@ pub async fn run_saved_search(
         sort: search.sort.clone(),
     };
     let client = crate::ebay::EbayClient::from_settings(state.db.pool.clone()).await?;
-    let page = crate::ebay::search_diecasts(&client, &search.query, &filters, limit, offset).await?;
+    let page =
+        crate::ebay::search_diecasts(&client, &search.query, &filters, limit, offset).await?;
     // Only record successful runs — failures don't change "when did I last
     // actually pull results."
     saved::mark_search_ran(&state.db.pool, id).await?;
@@ -1427,9 +1409,7 @@ pub async fn run_saved_search(
 }
 
 #[tauri::command]
-pub async fn list_saved_sellers(
-    state: State<'_, AppState>,
-) -> AppResult<Vec<saved::SavedSeller>> {
+pub async fn list_saved_sellers(state: State<'_, AppState>) -> AppResult<Vec<saved::SavedSeller>> {
     saved::list_sellers(&state.db.pool).await
 }
 
@@ -1484,10 +1464,8 @@ pub async fn saved_sellers_feed(
     let sellers = if filters.sellers.is_empty() {
         saved_sellers
     } else {
-        let saved_lower: std::collections::HashSet<String> = saved_sellers
-            .iter()
-            .map(|s| s.to_lowercase())
-            .collect();
+        let saved_lower: std::collections::HashSet<String> =
+            saved_sellers.iter().map(|s| s.to_lowercase()).collect();
         let filtered: Vec<String> = filters
             .sellers
             .iter()
@@ -1600,9 +1578,7 @@ pub async fn ensure_driver(
     let name = name.trim();
     let normalized = normalized.trim();
     if name.is_empty() || normalized.is_empty() {
-        return Err(AppError::Parse(
-            "name and normalized are required".into(),
-        ));
+        return Err(AppError::Parse("name and normalized are required".into()));
     }
     sqlx::query(
         "INSERT INTO drivers (name, normalized_name) VALUES (?, ?)
@@ -1612,11 +1588,10 @@ pub async fn ensure_driver(
     .bind(normalized)
     .execute(pool)
     .await?;
-    let (id,): (i64,) =
-        sqlx::query_as("SELECT id FROM drivers WHERE normalized_name = ?")
-            .bind(normalized)
-            .fetch_one(pool)
-            .await?;
+    let (id,): (i64,) = sqlx::query_as("SELECT id FROM drivers WHERE normalized_name = ?")
+        .bind(normalized)
+        .fetch_one(pool)
+        .await?;
     Ok(id)
 }
 

@@ -47,13 +47,12 @@ pub async fn upsert_from_payload(
     let now = Utc::now().timestamp();
     let seller_id = fb_seller_id(pool).await?;
 
-    let existing: Option<(i64,)> = sqlx::query_as(
-        "SELECT id FROM listings WHERE seller_id = ? AND external_id = ?",
-    )
-    .bind(seller_id)
-    .bind(&payload.external_id)
-    .fetch_optional(pool)
-    .await?;
+    let existing: Option<(i64,)> =
+        sqlx::query_as("SELECT id FROM listings WHERE seller_id = ? AND external_id = ?")
+            .bind(seller_id)
+            .bind(&payload.external_id)
+            .fetch_optional(pool)
+            .await?;
 
     let raw_json = serde_json::to_string(&serde_json::json!({
         "description": payload.description,
@@ -101,13 +100,12 @@ pub async fn upsert_from_payload(
     .execute(pool)
     .await?;
 
-    let id_row: (i64,) = sqlx::query_as(
-        "SELECT id FROM listings WHERE seller_id = ? AND external_id = ?",
-    )
-    .bind(seller_id)
-    .bind(&payload.external_id)
-    .fetch_one(pool)
-    .await?;
+    let id_row: (i64,) =
+        sqlx::query_as("SELECT id FROM listings WHERE seller_id = ? AND external_id = ?")
+            .bind(seller_id)
+            .bind(&payload.external_id)
+            .fetch_one(pool)
+            .await?;
     let listing_id = id_row.0;
 
     sqlx::query(
@@ -124,13 +122,21 @@ pub async fn upsert_from_payload(
     if let Err(e) = crate::sync::driver_assoc::associate_listing_driver(pool, listing_id).await {
         tracing::warn!("driver auto-assoc for fb listing {listing_id} failed: {e}");
     }
+    if existing.is_none() {
+        // Local-only registry auto-match for brand-new listings; see
+        // sync::registry_auto_match.
+        if let Err(e) =
+            crate::sync::registry_auto_match::auto_match_listing(pool, listing_id, None).await
+        {
+            tracing::warn!("registry auto-match for fb listing {listing_id} failed: {e}");
+        }
+    }
 
-    let matched_registry_entry_id: Option<(Option<i64>,)> = sqlx::query_as(
-        "SELECT registry_entry_id FROM listing_matches WHERE listing_id = ?",
-    )
-    .bind(listing_id)
-    .fetch_optional(pool)
-    .await?;
+    let matched_registry_entry_id: Option<(Option<i64>,)> =
+        sqlx::query_as("SELECT registry_entry_id FROM listing_matches WHERE listing_id = ?")
+            .bind(listing_id)
+            .fetch_optional(pool)
+            .await?;
 
     Ok(FbSaveResult {
         listing_id,

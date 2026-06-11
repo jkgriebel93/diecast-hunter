@@ -3,8 +3,8 @@ use serde::Serialize;
 use sqlx::SqlitePool;
 
 use crate::ebay::{
-    extract_legacy_item_id, fetch_item_by_legacy_id, is_diecast, legacy_id_from_v1,
-    EbayClient, EbayItem,
+    extract_legacy_item_id, fetch_item_by_legacy_id, is_diecast, legacy_id_from_v1, EbayClient,
+    EbayItem,
 };
 use crate::error::{AppError, AppResult};
 use crate::settings;
@@ -30,10 +30,7 @@ pub struct RefreshSummary {
 
 /// Add an eBay listing by URL or bare item id. Idempotent: if we've already
 /// saved this item, refresh it instead of duplicating.
-pub async fn add_listing_from_input(
-    pool: &SqlitePool,
-    input: &str,
-) -> AppResult<AddListingResult> {
+pub async fn add_listing_from_input(pool: &SqlitePool, input: &str) -> AppResult<AddListingResult> {
     let legacy_id = extract_legacy_item_id(input).ok_or_else(|| {
         AppError::Parse(
             "couldn't pull an eBay item id out of that — paste a full \
@@ -73,6 +70,17 @@ pub async fn add_listing_from_input(
         // listing from being saved.
         tracing::warn!("driver auto-assoc for listing {listing_id} failed: {e}");
     }
+    if created {
+        // Local-only registry auto-match (no network) — new listings get a
+        // best-effort suggestion immediately when the driver's registry
+        // entries are already cached. Existing rows are left alone so a
+        // user's cleared match doesn't silently come back.
+        if let Err(e) =
+            crate::sync::registry_auto_match::auto_match_listing(pool, listing_id, None).await
+        {
+            tracing::warn!("registry auto-match for listing {listing_id} failed: {e}");
+        }
+    }
 
     Ok(AddListingResult {
         listing_id: Some(listing_id),
@@ -102,7 +110,9 @@ pub async fn refresh_listing(pool: &SqlitePool, listing_id: i64) -> AppResult<()
     .await?;
 
     let (external_id, _seller_id) = row.ok_or_else(|| {
-        AppError::Parse(format!("listing {listing_id} not found or not an eBay listing"))
+        AppError::Parse(format!(
+            "listing {listing_id} not found or not an eBay listing"
+        ))
     })?;
 
     // listings.external_id is the eBay v1 id ("v1|123|0"). Pull the legacy id
@@ -167,13 +177,12 @@ async fn upsert_listing(pool: &SqlitePool, item: &EbayItem) -> AppResult<(i64, b
     let seller_id = ebay_seller_id(pool).await?;
 
     // Did we already have this row?
-    let existing: Option<(i64,)> = sqlx::query_as(
-        "SELECT id FROM listings WHERE seller_id = ? AND external_id = ?",
-    )
-    .bind(seller_id)
-    .bind(&item.item_id)
-    .fetch_optional(pool)
-    .await?;
+    let existing: Option<(i64,)> =
+        sqlx::query_as("SELECT id FROM listings WHERE seller_id = ? AND external_id = ?")
+            .bind(seller_id)
+            .bind(&item.item_id)
+            .fetch_optional(pool)
+            .await?;
 
     sqlx::query(
         "INSERT INTO listings (
@@ -224,22 +233,17 @@ async fn upsert_listing(pool: &SqlitePool, item: &EbayItem) -> AppResult<(i64, b
     .execute(pool)
     .await?;
 
-    let id_row: (i64,) = sqlx::query_as(
-        "SELECT id FROM listings WHERE seller_id = ? AND external_id = ?",
-    )
-    .bind(seller_id)
-    .bind(&item.item_id)
-    .fetch_one(pool)
-    .await?;
+    let id_row: (i64,) =
+        sqlx::query_as("SELECT id FROM listings WHERE seller_id = ? AND external_id = ?")
+            .bind(seller_id)
+            .bind(&item.item_id)
+            .fetch_one(pool)
+            .await?;
 
     Ok((id_row.0, existing.is_none()))
 }
 
-async fn insert_history(
-    pool: &SqlitePool,
-    listing_id: i64,
-    item: &EbayItem,
-) -> AppResult<()> {
+async fn insert_history(pool: &SqlitePool, listing_id: i64, item: &EbayItem) -> AppResult<()> {
     let now = Utc::now().timestamp();
     sqlx::query(
         "INSERT INTO listing_history
@@ -262,4 +266,3 @@ async fn ebay_seller_id(pool: &SqlitePool) -> AppResult<i64> {
         .await?;
     Ok(row.0)
 }
-

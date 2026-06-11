@@ -118,6 +118,9 @@ pub fn run() {
             commands::list_listings,
             commands::clear_listing_match,
             commands::reject_listing_match,
+            commands::confirm_listing_match,
+            commands::auto_match_listing,
+            commands::auto_match_all_listings,
             commands::list_drivers,
             commands::set_listing_driver,
             commands::clear_listing_driver,
@@ -177,15 +180,13 @@ fn init_tracing() {
         fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer,
     };
 
-    let stderr_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let stderr_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     // html5ever/selectors emit a DEBUG event for every HTML character token
     // during scraping — leaving them at default fills the log file with
     // multi-MB of parser noise per registry search. Pin them at WARN.
     let file_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        EnvFilter::new(
-            "debug,sqlx=warn,hyper=info,reqwest=info,html5ever=warn,selectors=warn",
-        )
+        EnvFilter::new("debug,sqlx=warn,hyper=info,reqwest=info,html5ever=warn,selectors=warn")
     });
 
     // Resolve the log directory; fall back to stderr-only if we can't.
@@ -205,7 +206,9 @@ fn init_tracing() {
         )
     });
 
-    let stderr_layer = fmt::layer().with_writer(std::io::stderr).with_filter(stderr_filter);
+    let stderr_layer = fmt::layer()
+        .with_writer(std::io::stderr)
+        .with_filter(stderr_filter);
 
     let registry = tracing_subscriber::registry().with(stderr_layer);
     if let Some(file_layer) = file_layer {

@@ -29,12 +29,11 @@ pub async fn link_listing_to_registry(
     //    seen it before, insert a near-empty stub with just the detail_url
     //    in raw_json so the enrichment step can find the page.
     let now = Utc::now().timestamp();
-    let existing: Option<(i64,)> = sqlx::query_as(
-        "SELECT id FROM registry_entries WHERE external_id = ?",
-    )
-    .bind(registry_guid)
-    .fetch_optional(pool)
-    .await?;
+    let existing: Option<(i64,)> =
+        sqlx::query_as("SELECT id FROM registry_entries WHERE external_id = ?")
+            .bind(registry_guid)
+            .fetch_optional(pool)
+            .await?;
 
     let entry_id = if let Some((id,)) = existing {
         // If the row exists but raw_json doesn't carry a detail_url and the
@@ -69,12 +68,10 @@ pub async fn link_listing_to_registry(
         .bind(now)
         .execute(pool)
         .await?;
-        let row: (i64,) = sqlx::query_as(
-            "SELECT id FROM registry_entries WHERE external_id = ?",
-        )
-        .bind(registry_guid)
-        .fetch_one(pool)
-        .await?;
+        let row: (i64,) = sqlx::query_as("SELECT id FROM registry_entries WHERE external_id = ?")
+            .bind(registry_guid)
+            .fetch_one(pool)
+            .await?;
         row.0
     };
 
@@ -92,13 +89,16 @@ pub async fn link_listing_to_registry(
     // 3. Lock in the manual match.
     sqlx::query(
         "INSERT INTO listing_matches
-            (listing_id, registry_entry_id, confidence, user_confirmed, matched_at)
-         VALUES (?, ?, 100.0, 1, ?)
+            (listing_id, registry_entry_id, confidence, user_confirmed,
+             matched_at, matched_by, match_reasons)
+         VALUES (?, ?, 100.0, 1, ?, 'manual', NULL)
          ON CONFLICT(listing_id) DO UPDATE SET
             registry_entry_id = excluded.registry_entry_id,
             confidence = excluded.confidence,
             user_confirmed = 1,
-            matched_at = excluded.matched_at",
+            matched_at = excluded.matched_at,
+            matched_by = 'manual',
+            match_reasons = NULL",
     )
     .bind(listing_id)
     .bind(entry_id)
@@ -162,15 +162,10 @@ async fn load_dcr_credentials(pool: &SqlitePool) -> AppResult<(String, String)> 
     let username = settings::get(pool, settings::KEY_DCR_USERNAME)
         .await?
         .ok_or_else(|| {
-            AppError::NotConfigured(
-                "diecastregistry.com username not set in Settings".into(),
-            )
+            AppError::NotConfigured("diecastregistry.com username not set in Settings".into())
         })?;
-    let password = settings::secret_get(settings::ENTRY_DCR_PASSWORD)?
-        .ok_or_else(|| {
-            AppError::NotConfigured(
-                "diecastregistry.com password not set in Settings".into(),
-            )
-        })?;
+    let password = settings::secret_get(settings::ENTRY_DCR_PASSWORD)?.ok_or_else(|| {
+        AppError::NotConfigured("diecastregistry.com password not set in Settings".into())
+    })?;
     Ok((username, password))
 }
