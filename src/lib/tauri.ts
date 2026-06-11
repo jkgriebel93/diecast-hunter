@@ -119,8 +119,6 @@ export const api = {
   completeEbayOauth: (code: string) =>
     invoke<void>("complete_ebay_oauth", { code }),
   disconnectEbayOauth: () => invoke<void>("disconnect_ebay_oauth"),
-  addEbayListing: (input: string) =>
-    invoke<AddListingResult>("add_ebay_listing", { input }),
   searchEbayListings: (
     query: string,
     filters: EbaySearchFilters,

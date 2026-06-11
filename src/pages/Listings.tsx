@@ -1,4 +1,11 @@
-import { Fragment, FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  Fragment,
+  FormEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
   api,
@@ -6,7 +13,6 @@ import {
   isPreferredOem,
   prepareScaleOptions,
   prepareYearOptions,
-  type AutoMatchSummary,
   type DriverOption,
   type FormOptionRow,
   type GroupMigrationProposal,
@@ -15,8 +21,6 @@ import {
   type ListingRow,
   type ProductionSearchResult,
   type ReceivedOffer,
-  type RefreshSummary,
-  type WatchlistSyncSummary,
 } from "@/lib/tauri";
 import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
@@ -99,6 +103,82 @@ function partitionGroupsByDrivers(
   return { preferred, others };
 }
 
+interface ListingFilterState {
+  /** Lower-cased, trimmed search text; empty = no text filter. */
+  q: string;
+  status: StatusFilter;
+  match: MatchFilter;
+  source: SourceFilter;
+  offer: OfferFilter;
+  group: GroupFilter;
+  excluded: Set<number>;
+  /** "all", "none", or `d:<lowercased driver name>`. */
+  driver: string;
+  offersByItemId: Map<string, ReceivedOffer>;
+}
+
+/** Single predicate behind both the visible listing list and the sidebar
+ *  facet counts. The driver filter matches the registry-match driver first,
+ *  then the auto/manual tag — the same precedence the by-driver view uses. */
+function listingPassesFilters(row: ListingRow, f: ListingFilterState): boolean {
+  if (f.q) {
+    const hay = [
+      row.title,
+      row.matched_driver_name,
+      row.matched_scheme_text,
+      row.seller_username,
+      row.matched_oem,
+      row.matched_brand,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    if (!hay.includes(f.q)) return false;
+  }
+  if (f.status === "active" && row.status !== "active") return false;
+  if (f.status === "ended" && row.status !== "ended") return false;
+  if (f.match === "matched" && row.registry_entry_id === null) return false;
+  if (f.match === "unmatched" && row.registry_entry_id !== null) return false;
+  if (f.source !== "all" && row.seller_code !== f.source) return false;
+  if (f.driver !== "all") {
+    const name = row.matched_driver_name ?? row.auto_driver_name;
+    if (f.driver === "none") {
+      if (name !== null) return false;
+    } else if (!name || `d:${name.toLowerCase()}` !== f.driver) {
+      return false;
+    }
+  }
+  if (f.group !== "all") {
+    if (f.group === "none") {
+      if (row.group_ids.length > 0) return false;
+    } else {
+      const wanted = Number(f.group);
+      if (!row.group_ids.includes(wanted)) return false;
+    }
+  }
+  if (f.excluded.size > 0 && row.group_ids.some((id) => f.excluded.has(id)))
+    return false;
+  if (f.offer !== "all") {
+    const offer = f.offersByItemId.get(legacyIdFromExternalId(row.external_id));
+    const hasOffer = offer !== undefined;
+    if (f.offer === "with" && !hasOffer) return false;
+    if (f.offer === "without" && hasOffer) return false;
+    if (f.offer === "unresponded") {
+      if (!hasOffer) return false;
+      // Heuristic for "user already responded": either the notification
+      // was opened (eBay flips <Read> on the inbox UI when you open the
+      // message — which the web accept/decline flow does), or the
+      // underlying listing has ended (signal that the offer was accepted
+      // and the item sold). Conservative: a missing listing is treated as
+      // "still active" so users who haven't run watchlist sync still see
+      // their offers.
+      const responded = offer.is_read || row.status === "ended";
+      if (responded) return false;
+    }
+  }
+  return true;
+}
+
 export function Listings() {
   const [rows, setRows] = useState<ListingRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -139,30 +219,36 @@ export function Listings() {
   const [excludedGroupIds, setExcludedGroupIds] = useState<Set<number>>(
     new Set(),
   );
+  // "all", "none", or `d:<lowercased driver name>` — see listingPassesFilters.
+  const [driverFilter, setDriverFilter] = useState<string>("all");
   const [sortMode, setSortMode] = useState<SortMode>("newest");
   const [bucketSort, setBucketSort] = useState<BucketSort>("name");
 
-  const [input, setInput] = useState("");
-  const [adding, setAdding] = useState(false);
-  const [addMessage, setAddMessage] = useState<string | null>(null);
-  const [addError, setAddError] = useState<string | null>(null);
+  // Collapse/expand-all plumbing for the grouped views. The per-section
+  // collapse state lives inside GroupedByDriver/GroupedByGroup (they own
+  // the bucket keys and per-section defaults); the toolbar sends one-shot
+  // commands down via a sequence number and the active view reports its
+  // aggregate state back up so the flip label stays correct.
+  const [collapseCmd, setCollapseCmd] = useState<{
+    seq: number;
+    collapse: boolean;
+  }>({ seq: 0, collapse: false });
+  const [allCollapsed, setAllCollapsed] = useState(false);
 
   const [refreshingId, setRefreshingId] = useState<number | null>(null);
   const [unwatchingId, setUnwatchingId] = useState<number | null>(null);
   const [bulkRefreshing, setBulkRefreshing] = useState(false);
-  const [bulkSummary, setBulkSummary] =
-    useState<RefreshSummary | null>(null);
 
   const [syncingWatchlist, setSyncingWatchlist] = useState(false);
-  const [watchlistSummary, setWatchlistSummary] =
-    useState<WatchlistSyncSummary | null>(null);
+
+  // One-line outcome of the most recent header action (sync watchlist,
+  // auto-match all, refresh all) — each new action overwrites the last.
+  const [actionSummary, setActionSummary] = useState<string | null>(null);
 
   // Registry auto-match. `autoMatchingId` is the listing whose per-card
   // button is busy; `autoMatchNotes` holds per-listing "why no match"
   // feedback from the last attempt.
   const [autoMatchingAll, setAutoMatchingAll] = useState(false);
-  const [autoMatchSummary, setAutoMatchSummary] =
-    useState<AutoMatchSummary | null>(null);
   const [autoMatchingId, setAutoMatchingId] = useState<number | null>(null);
   const [autoMatchNotes, setAutoMatchNotes] = useState<Map<number, string>>(
     new Map(),
@@ -386,31 +472,6 @@ export function Listings() {
     }
   }
 
-  async function onAdd(e: FormEvent) {
-    e.preventDefault();
-    setAdding(true);
-    setAddMessage(null);
-    setAddError(null);
-    try {
-      const result = await api.addEbayListing(input.trim());
-      if (result.filtered_reason) {
-        setAddError(
-          `${result.filtered_reason}. To save anyway, turn off the diecast filter in Settings.`,
-        );
-      } else {
-        setAddMessage(
-          `${result.created ? "Added" : "Updated"}: ${result.title}`,
-        );
-        setInput("");
-      }
-      await load();
-    } catch (e) {
-      setAddError(String(e));
-    } finally {
-      setAdding(false);
-    }
-  }
-
   async function onRefreshOne(id: number) {
     setRefreshingId(id);
     try {
@@ -442,10 +503,12 @@ export function Listings() {
 
   async function onRefreshAll() {
     setBulkRefreshing(true);
-    setBulkSummary(null);
+    setActionSummary(null);
     try {
-      const summary = await api.refreshAllEbayListings();
-      setBulkSummary(summary);
+      const s = await api.refreshAllEbayListings();
+      setActionSummary(
+        `Refreshed ${s.refreshed} of ${s.considered} (${s.failed} failed).`,
+      );
       await load();
     } catch (e) {
       setError(String(e));
@@ -456,11 +519,16 @@ export function Listings() {
 
   async function onSyncWatchlist() {
     setSyncingWatchlist(true);
-    setWatchlistSummary(null);
+    setActionSummary(null);
     setError(null);
     try {
-      const summary = await api.syncEbayWatchlist();
-      setWatchlistSummary(summary);
+      const s = await api.syncEbayWatchlist();
+      setActionSummary(
+        `Watchlist: ${s.created} new, ${s.updated} updated, ` +
+          `${s.filtered} filtered (non-diecasts), ${s.failed} failed, ` +
+          `${s.pruned} pruned (no longer watched) across ${s.pages_fetched} ` +
+          `page${s.pages_fetched === 1 ? "" : "s"} (${s.items_seen} items total).`,
+      );
       await load();
     } catch (e) {
       setError(String(e));
@@ -471,11 +539,21 @@ export function Listings() {
 
   async function onAutoMatchAll() {
     setAutoMatchingAll(true);
-    setAutoMatchSummary(null);
+    setActionSummary(null);
     setError(null);
     try {
-      const summary = await api.autoMatchAllListings();
-      setAutoMatchSummary(summary);
+      const s = await api.autoMatchAllListings();
+      setActionSummary(
+        `Auto-match: ${s.matched} matched, ${s.below_threshold} below ` +
+          `confidence threshold, ${s.no_driver} without a driver, ` +
+          `${s.no_candidates} with no registry entries` +
+          (s.prewarmed_drivers > 0
+            ? `, ${s.prewarmed_drivers} driver${
+                s.prewarmed_drivers === 1 ? "" : "s"
+              } pulled from diecastregistry.com`
+            : "") +
+          ` (of ${s.considered} considered).`,
+      );
       await load();
     } catch (e) {
       setError(String(e));
@@ -537,70 +615,37 @@ export function Listings() {
     }
   }
 
+  // Current filter state in the shape listingPassesFilters consumes. The
+  // facet-count memos override single fields of this to answer "what would
+  // I see if I picked that option instead?".
+  const filterState = useMemo<ListingFilterState>(
+    () => ({
+      q: searchText.trim().toLowerCase(),
+      status: statusFilter,
+      match: matchFilter,
+      source: sourceFilter,
+      offer: offerFilter,
+      group: groupFilter,
+      excluded: excludedGroupIds,
+      driver: driverFilter,
+      offersByItemId,
+    }),
+    [
+      searchText,
+      statusFilter,
+      matchFilter,
+      sourceFilter,
+      offerFilter,
+      groupFilter,
+      excludedGroupIds,
+      driverFilter,
+      offersByItemId,
+    ],
+  );
+
   const filteredRows = useMemo(() => {
     if (!rows) return null;
-    const q = searchText.trim().toLowerCase();
-    let r = rows.filter((row) => {
-      if (q) {
-        const hay = [
-          row.title,
-          row.matched_driver_name,
-          row.matched_scheme_text,
-          row.seller_username,
-          row.matched_oem,
-          row.matched_brand,
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      if (statusFilter === "active" && row.status !== "active") return false;
-      if (statusFilter === "ended" && row.status !== "ended") return false;
-      if (matchFilter === "matched" && row.registry_entry_id === null)
-        return false;
-      if (matchFilter === "unmatched" && row.registry_entry_id !== null)
-        return false;
-      if (sourceFilter !== "all" && row.seller_code !== sourceFilter)
-        return false;
-      if (groupFilter !== "all") {
-        if (groupFilter === "none") {
-          if (row.group_ids.length > 0) return false;
-        } else {
-          const wanted = Number(groupFilter);
-          if (!row.group_ids.includes(wanted)) return false;
-        }
-      }
-      if (
-        excludedGroupIds.size > 0 &&
-        row.group_ids.some((id) => excludedGroupIds.has(id))
-      )
-        return false;
-      if (offerFilter !== "all") {
-        const offer = offersByItemId.get(
-          legacyIdFromExternalId(row.external_id),
-        );
-        const hasOffer = offer !== undefined;
-        if (offerFilter === "with" && !hasOffer) return false;
-        if (offerFilter === "without" && hasOffer) return false;
-        if (offerFilter === "unresponded") {
-          if (!hasOffer) return false;
-          // Heuristic for "user already responded": either the
-          // notification was opened (eBay flips <Read> on the inbox UI
-          // when you open the message — which the web accept/decline
-          // flow does), or the underlying listing has ended (signal
-          // that the offer was accepted and the item sold). Conservative:
-          // a missing listing is treated as "still active" so users who
-          // haven't run watchlist sync still see their offers.
-          const responded =
-            offer.is_read || row.status === "ended";
-          if (responded) return false;
-        }
-      }
-      return true;
-    });
-
-    const sorted = [...r];
+    const sorted = rows.filter((row) => listingPassesFilters(row, filterState));
     sorted.sort((a, b) => {
       const totalA =
         a.price_cents !== null ? a.price_cents + (a.shipping_cents ?? 0) : null;
@@ -630,18 +675,92 @@ export function Listings() {
       }
     });
     return sorted;
-  }, [
-    rows,
-    searchText,
-    statusFilter,
-    matchFilter,
-    sourceFilter,
-    offerFilter,
-    groupFilter,
-    excludedGroupIds,
-    offersByItemId,
-    sortMode,
-  ]);
+  }, [rows, filterState, sortMode]);
+
+  // Per-option result counts for the sidebar facets. Each count answers
+  // "how many listings would I see if I picked this option?" — i.e. it is
+  // computed with the search text and every OTHER filter still applied.
+  const facetCounts = useMemo(() => {
+    const all = rows ?? [];
+    const count = (ov: Partial<ListingFilterState>) => {
+      const f = { ...filterState, ...ov };
+      let n = 0;
+      for (const r of all) if (listingPassesFilters(r, f)) n++;
+      return n;
+    };
+    return {
+      status: {
+        active: count({ status: "active" }),
+        ended: count({ status: "ended" }),
+        all: count({ status: "all" }),
+      },
+      match: {
+        all: count({ match: "all" }),
+        matched: count({ match: "matched" }),
+        unmatched: count({ match: "unmatched" }),
+      },
+      offer: {
+        all: count({ offer: "all" }),
+        unresponded: count({ offer: "unresponded" }),
+        with: count({ offer: "with" }),
+        without: count({ offer: "without" }),
+      },
+      source: {
+        all: count({ source: "all" }),
+        ebay: count({ source: "ebay" }),
+        fb: count({ source: "fb" }),
+      },
+    };
+  }, [rows, filterState]);
+
+  // Driver options for the sidebar combobox, derived from the loaded rows
+  // with the same precedence the by-driver view uses (registry-match driver
+  // first, then the auto/manual tag). Counts are faceted: they apply every
+  // filter except the driver filter itself.
+  const driverOptions = useMemo(() => {
+    const f: ListingFilterState = { ...filterState, driver: "all" };
+    const byKey = new Map<string, { name: string; count: number }>();
+    let noneCount = 0;
+    let allCount = 0;
+    for (const r of rows ?? []) {
+      if (!listingPassesFilters(r, f)) continue;
+      allCount++;
+      const name = r.matched_driver_name ?? r.auto_driver_name;
+      if (!name) {
+        noneCount++;
+        continue;
+      }
+      const key = name.toLowerCase();
+      const entry = byKey.get(key);
+      if (entry) entry.count++;
+      else byKey.set(key, { name, count: 1 });
+    }
+    const options = Array.from(byKey.entries())
+      .map(([key, v]) => ({ value: `d:${key}`, name: v.name, count: v.count }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return { options, noneCount, allCount };
+  }, [rows, filterState]);
+
+  const driverFilterLabel = useMemo(() => {
+    if (driverFilter === "all") return "All drivers";
+    if (driverFilter === "none") return "No driver";
+    const key = driverFilter.slice(2);
+    for (const r of rows ?? []) {
+      const name = r.matched_driver_name ?? r.auto_driver_name;
+      if (name && name.toLowerCase() === key) return name;
+    }
+    return key;
+  }, [driverFilter, rows]);
+
+  function clearAllFilters() {
+    setStatusFilter("active");
+    setMatchFilter("all");
+    setOfferFilter("all");
+    setSourceFilter("all");
+    setGroupFilter("all");
+    setExcludedGroupIds(new Set());
+    setDriverFilter("all");
+  }
 
   // Drop exclusions for groups that no longer exist (deleted via the
   // Manage dialog) so the Exclude badge count never goes stale.
@@ -708,20 +827,26 @@ export function Listings() {
     return { ids, names };
   }, [filteredRows, selectedIds]);
 
+  const unmatchedCount = useMemo(
+    () => (rows ? rows.filter((r) => r.registry_entry_id === null).length : 0),
+    [rows],
+  );
+
   return (
     <div className="p-6 space-y-4">
-      <header className="flex items-end justify-between">
-        <div>
+      <header className="flex items-center justify-between gap-3">
+        <div className="flex items-baseline gap-3 min-w-0">
           <h2 className="text-2xl font-semibold">Saved Listings</h2>
-          <p className="text-sm text-fg-subtle">
-            Track eBay listings you're watching. Paste a URL or pull your eBay
-            watchlist directly. Facebook Marketplace integration ships later
-            via a browser extension.
-          </p>
+          {rows && rows.length > 0 && (
+            <span className="text-sm text-fg-subtle whitespace-nowrap">
+              {rows.length} listing{rows.length === 1 ? "" : "s"}
+              {unmatchedCount > 0 ? ` · ${unmatchedCount} unmatched` : ""}
+            </span>
+          )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <button
-            className="btn-primary"
+            className="btn-secondary !px-2.5 !py-1 !text-xs"
             type="button"
             onClick={onSyncWatchlist}
             disabled={syncingWatchlist}
@@ -729,86 +854,19 @@ export function Listings() {
           >
             {syncingWatchlist ? "Syncing…" : "Sync watchlist"}
           </button>
-          {rows && rows.length > 0 && (
-            <button
-              className="btn-secondary"
-              type="button"
-              onClick={onAutoMatchAll}
-              disabled={autoMatchingAll}
-              title="Search the registry for a best-effort match on every unconfirmed listing"
-            >
-              {autoMatchingAll ? "Matching…" : "Auto-match all"}
-            </button>
-          )}
-          {rows && rows.length > 0 && (
-            <button
-              className="btn-secondary"
-              type="button"
-              onClick={onRefreshAll}
-              disabled={bulkRefreshing}
-            >
-              {bulkRefreshing ? "Refreshing…" : "Refresh all"}
-            </button>
-          )}
+          <ListingActionsMenu
+            hasListings={!!rows && rows.length > 0}
+            autoMatching={autoMatchingAll}
+            refreshing={bulkRefreshing}
+            onAutoMatchAll={onAutoMatchAll}
+            onRefreshAll={onRefreshAll}
+            onManageGroups={() => setManageGroupsOpen(true)}
+          />
         </div>
       </header>
 
-      <section className="card space-y-3">
-        <h3 className="text-sm font-medium">Add eBay listing</h3>
-        <form onSubmit={onAdd} className="flex items-center gap-2">
-          <input
-            className="input flex-1"
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="https://www.ebay.com/itm/123456789012  or just 123456789012"
-            autoComplete="off"
-          />
-          <button
-            className="btn-primary shrink-0"
-            type="submit"
-            disabled={adding || !input.trim()}
-          >
-            {adding ? "Adding…" : "Add"}
-          </button>
-        </form>
-        {addMessage && (
-          <div className="text-xs text-emerald-400">{addMessage}</div>
-        )}
-        {addError && <div className="text-xs text-red-400">{addError}</div>}
-      </section>
-
-      {bulkSummary && (
-        <div className="text-xs text-emerald-400">
-          Refreshed {bulkSummary.refreshed} of {bulkSummary.considered} (
-          {bulkSummary.failed} failed).
-        </div>
-      )}
-      {watchlistSummary && (
-        <div className="text-xs text-emerald-400">
-          Watchlist: {watchlistSummary.created} new,{" "}
-          {watchlistSummary.updated} updated,{" "}
-          {watchlistSummary.filtered} filtered (non-diecasts),{" "}
-          {watchlistSummary.failed} failed,{" "}
-          {watchlistSummary.pruned} pruned (no longer watched) across{" "}
-          {watchlistSummary.pages_fetched} page
-          {watchlistSummary.pages_fetched === 1 ? "" : "s"} (
-          {watchlistSummary.items_seen} items total).
-        </div>
-      )}
-      {autoMatchSummary && (
-        <div className="text-xs text-emerald-400">
-          Auto-match: {autoMatchSummary.matched} matched,{" "}
-          {autoMatchSummary.below_threshold} below confidence threshold,{" "}
-          {autoMatchSummary.no_driver} without a driver,{" "}
-          {autoMatchSummary.no_candidates} with no registry entries
-          {autoMatchSummary.prewarmed_drivers > 0
-            ? `, ${autoMatchSummary.prewarmed_drivers} driver${
-                autoMatchSummary.prewarmed_drivers === 1 ? "" : "s"
-              } pulled from diecastregistry.com`
-            : ""}{" "}
-          (of {autoMatchSummary.considered} considered).
-        </div>
+      {actionSummary && (
+        <div className="text-xs text-emerald-400">{actionSummary}</div>
       )}
       {error && (
         <div className="card border-red-500/40 text-red-300 text-sm">
@@ -816,215 +874,322 @@ export function Listings() {
         </div>
       )}
 
-      {rows && rows.length > 0 && (
-        <div className="card !p-3 space-y-2">
-          {/* Search + per-listing display actions */}
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              className="input flex-1"
-              placeholder="Search title, driver, scheme, seller…"
-              value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
-            />
-            <button
-              type="button"
-              className={`shrink-0 px-2 py-1 rounded border text-xs ${
-                selectMode
-                  ? "border-accent text-accent bg-accent/10"
-                  : "border-border text-fg-muted hover:text-fg"
-              }`}
-              onClick={() => {
-                if (selectMode) exitSelectMode();
-                else setSelectMode(true);
-              }}
-              title="Pick multiple listings to bulk-add to a group"
-            >
-              {selectMode ? "Done selecting" : "Select"}
-            </button>
-            <ImageSizeToggle size={imgSize} onChange={setImgSize} />
-          </div>
-
-          {/* Filters */}
-          <div className="flex items-center gap-x-4 gap-y-2 text-xs flex-wrap">
-            <FilterChips
-              label="Status"
-              value={statusFilter}
-              options={[
-                { value: "active", label: "Active" },
-                { value: "ended", label: "Ended" },
-                { value: "all", label: "All" },
-              ]}
-              onChange={(v) => setStatusFilter(v as StatusFilter)}
-            />
-            <FilterChips
-              label="Match"
-              value={matchFilter}
-              options={[
-                { value: "all", label: "All" },
-                { value: "matched", label: "Matched" },
-                { value: "unmatched", label: "Unmatched" },
-              ]}
-              onChange={(v) => setMatchFilter(v as MatchFilter)}
-            />
-            <FilterChips
-              label="Offer"
-              value={offerFilter}
-              options={[
-                { value: "all", label: "All" },
-                { value: "unresponded", label: "Unresponded" },
-                { value: "with", label: "Any offer" },
-                { value: "without", label: "No offer" },
-              ]}
-              onChange={(v) => setOfferFilter(v as OfferFilter)}
-            />
-            <FilterChips
-              label="Source"
-              value={sourceFilter}
-              options={[
-                { value: "all", label: "All" },
-                { value: "ebay", label: "eBay" },
-                { value: "fb", label: "Facebook" },
-              ]}
-              onChange={(v) => setSourceFilter(v as SourceFilter)}
-            />
-            <div className="flex items-center gap-1.5">
-              <span className="text-fg-subtle">Group:</span>
-              <select
-                className="input !w-auto !py-0.5 !text-[11px]"
-                value={groupFilter}
-                onChange={(e) => setGroupFilter(e.target.value)}
-                title="Filter listings by group membership"
-              >
-                <option value="all">All</option>
-                <option value="none">Ungrouped</option>
-                {(() => {
-                  const { drivers, noDriver, archived } =
-                    clusterGroupsByDriver(groups);
-                  return (
-                    <>
-                      {drivers.map((d) => (
-                        <optgroup key={`d-${d.id}`} label={d.name}>
-                          {d.groups.map((g) => (
-                            <option key={`${d.id}-${g.id}`} value={String(g.id)}>
-                              {g.name} ({g.member_count})
-                            </option>
-                          ))}
-                        </optgroup>
-                      ))}
-                      {noDriver.length > 0 && (
-                        <optgroup label="Other (no driver)">
-                          {noDriver.map((g) => (
-                            <option key={g.id} value={String(g.id)}>
-                              {g.name} ({g.member_count})
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
-                      {archived.length > 0 && (
-                        <optgroup label="Archived">
-                          {archived.map((g) => (
-                            <option key={g.id} value={String(g.id)}>
-                              {g.name} ({g.member_count})
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
-                    </>
-                  );
-                })()}
-              </select>
-              <ExcludeGroupsMenu
-                groups={groups}
-                excluded={excludedGroupIds}
-                onToggle={(id) =>
-                  setExcludedGroupIds((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(id)) next.delete(id);
-                    else next.add(id);
-                    return next;
-                  })
-                }
-                onClear={() => setExcludedGroupIds(new Set())}
-              />
-              <button
-                type="button"
-                className="text-fg-subtle hover:text-fg underline decoration-dotted underline-offset-2"
-                onClick={() => setManageGroupsOpen(true)}
-                title="Create, rename, archive, or delete listing groups"
-              >
-                Manage…
-              </button>
-            </div>
-          </div>
-
-          {/* View + sort */}
-          <div className="flex items-center gap-x-4 gap-y-2 text-xs flex-wrap">
-            <FilterChips
-              label="View"
-              value={viewMode}
-              options={[
-                { value: "flat", label: "Flat" },
-                { value: "byDriver", label: "By driver" },
-                { value: "byGroup", label: "By group" },
-              ]}
-              onChange={(v) => setViewMode(v as ViewMode)}
-            />
-            <div className="flex items-center gap-1.5">
-              <span className="text-fg-subtle">Sort:</span>
-              <select
-                className="input !w-auto !py-0.5 !text-[11px]"
-                value={sortMode}
-                onChange={(e) => setSortMode(e.target.value as SortMode)}
-                title="Sort listings"
-              >
-                <option value="newest">Newest first</option>
-                <option value="price-asc">Price low → high</option>
-                <option value="price-desc">Price high → low</option>
-                <option value="total-asc">Total (price + ship) low → high</option>
-                <option value="deal-asc">Best deal first</option>
-                <option value="ending-soon">Ending soonest</option>
-                <option value="title">Title A → Z</option>
-              </select>
-            </div>
-            {viewMode !== "flat" && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-fg-subtle">
-                  {viewMode === "byGroup" ? "Groups" : "Drivers"}:
-                </span>
-                <select
-                  className="input !w-auto !py-0.5 !text-[11px]"
-                  value={bucketSort}
-                  onChange={(e) => setBucketSort(e.target.value as BucketSort)}
-                  title={`Order ${viewMode === "byGroup" ? "groups" : "drivers"} by`}
-                >
-                  <option value="name">Name (A→Z)</option>
-                  <option value="count-desc">Most listings first</option>
-                  <option value="count-asc">Fewest listings first</option>
-                </select>
-              </div>
-            )}
-          </div>
-
-          {filteredRows && filteredRows.length !== rows.length && (
-            <div className="text-xs text-fg-subtle">
-              Showing {filteredRows.length} of {rows.length} listings.
-            </div>
-          )}
-        </div>
-      )}
-
       {rows === null ? (
         <div className="card text-sm text-fg-muted">Loading…</div>
       ) : rows.length === 0 ? (
         <div className="card text-sm text-fg-muted">
-          No listings tracked yet. Add an eBay URL above.
+          No listings tracked yet. Sync your eBay watchlist to pull in
+          listings.
         </div>
-      ) : filteredRows && filteredRows.length === 0 ? (
-        <div className="card text-sm text-fg-muted">
-          No listings match the current filters.
-        </div>
-      ) : viewMode === "flat" ? (
+      ) : (
+        <>
+          <input
+            type="text"
+            className="input"
+            placeholder="Search title, driver, scheme, seller…"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+          />
+
+          <div className="flex items-start gap-4">
+            <aside className="w-52 shrink-0 card !p-3 space-y-4 sticky top-4">
+              <FacetList
+                label="Status"
+                value={statusFilter}
+                options={[
+                  {
+                    value: "active",
+                    label: "Active",
+                    count: facetCounts.status.active,
+                  },
+                  {
+                    value: "ended",
+                    label: "Ended",
+                    count: facetCounts.status.ended,
+                  },
+                  { value: "all", label: "All", count: facetCounts.status.all },
+                ]}
+                onChange={(v) => setStatusFilter(v as StatusFilter)}
+              />
+              <FacetList
+                label="Match"
+                value={matchFilter}
+                options={[
+                  { value: "all", label: "All", count: facetCounts.match.all },
+                  {
+                    value: "matched",
+                    label: "Matched",
+                    count: facetCounts.match.matched,
+                  },
+                  {
+                    value: "unmatched",
+                    label: "Unmatched",
+                    count: facetCounts.match.unmatched,
+                  },
+                ]}
+                onChange={(v) => setMatchFilter(v as MatchFilter)}
+              />
+              <FacetList
+                label="Offer"
+                value={offerFilter}
+                options={[
+                  { value: "all", label: "All", count: facetCounts.offer.all },
+                  {
+                    value: "unresponded",
+                    label: "Unresponded",
+                    count: facetCounts.offer.unresponded,
+                  },
+                  {
+                    value: "with",
+                    label: "Any offer",
+                    count: facetCounts.offer.with,
+                  },
+                  {
+                    value: "without",
+                    label: "No offer",
+                    count: facetCounts.offer.without,
+                  },
+                ]}
+                onChange={(v) => setOfferFilter(v as OfferFilter)}
+              />
+              <FacetList
+                label="Source"
+                value={sourceFilter}
+                options={[
+                  { value: "all", label: "All", count: facetCounts.source.all },
+                  {
+                    value: "ebay",
+                    label: "eBay",
+                    count: facetCounts.source.ebay,
+                  },
+                  {
+                    value: "fb",
+                    label: "Facebook",
+                    count: facetCounts.source.fb,
+                  },
+                ]}
+                onChange={(v) => setSourceFilter(v as SourceFilter)}
+              />
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
+                  Driver
+                </div>
+                <DriverFilterSelect
+                  value={driverFilter}
+                  label={driverFilterLabel}
+                  options={driverOptions.options}
+                  allCount={driverOptions.allCount}
+                  noneCount={driverOptions.noneCount}
+                  onChange={setDriverFilter}
+                />
+              </div>
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
+                  Group
+                </div>
+                <select
+                  className="input !py-1 !text-xs"
+                  value={groupFilter}
+                  onChange={(e) => setGroupFilter(e.target.value)}
+                  title="Filter listings by group membership"
+                >
+                  <option value="all">All</option>
+                  <option value="none">Ungrouped</option>
+                  {(() => {
+                    const { drivers, noDriver, archived } =
+                      clusterGroupsByDriver(groups);
+                    return (
+                      <>
+                        {drivers.map((d) => (
+                          <optgroup key={`d-${d.id}`} label={d.name}>
+                            {d.groups.map((g) => (
+                              <option
+                                key={`${d.id}-${g.id}`}
+                                value={String(g.id)}
+                              >
+                                {g.name} ({g.member_count})
+                              </option>
+                            ))}
+                          </optgroup>
+                        ))}
+                        {noDriver.length > 0 && (
+                          <optgroup label="Other (no driver)">
+                            {noDriver.map((g) => (
+                              <option key={g.id} value={String(g.id)}>
+                                {g.name} ({g.member_count})
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {archived.length > 0 && (
+                          <optgroup label="Archived">
+                            {archived.map((g) => (
+                              <option key={g.id} value={String(g.id)}>
+                                {g.name} ({g.member_count})
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </>
+                    );
+                  })()}
+                </select>
+                <div className="mt-1.5">
+                  <ExcludeGroupsMenu
+                    groups={groups}
+                    excluded={excludedGroupIds}
+                    onToggle={(id) =>
+                      setExcludedGroupIds((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(id)) next.delete(id);
+                        else next.add(id);
+                        return next;
+                      })
+                    }
+                    onClear={() => setExcludedGroupIds(new Set())}
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                className="text-xs text-fg-subtle hover:text-fg underline decoration-dotted underline-offset-2"
+                onClick={clearAllFilters}
+              >
+                Clear all filters
+              </button>
+            </aside>
+
+            <div className="flex-1 min-w-0 space-y-2">
+              {/* View + sort */}
+              <div className="flex items-center justify-between gap-3 flex-wrap text-xs">
+                <div className="inline-flex rounded-md border border-border overflow-hidden">
+                  {(
+                    [
+                      { value: "flat", label: "Flat" },
+                      { value: "byDriver", label: "By driver" },
+                      { value: "byGroup", label: "By group" },
+                    ] as { value: ViewMode; label: string }[]
+                  ).map((opt, i) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      className={`px-3 py-1 ${
+                        i > 0 ? "border-l border-border" : ""
+                      } ${
+                        viewMode === opt.value
+                          ? "bg-accent/15 text-accent"
+                          : "text-fg-muted hover:text-fg hover:bg-bg-elevated"
+                      }`}
+                      onClick={() => setViewMode(opt.value)}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-fg-subtle">Sort:</span>
+                    <select
+                      className="input !w-auto !py-0.5 !text-[11px]"
+                      value={sortMode}
+                      onChange={(e) => setSortMode(e.target.value as SortMode)}
+                      title="Sort listings"
+                    >
+                      <option value="newest">Newest first</option>
+                      <option value="price-asc">Price low → high</option>
+                      <option value="price-desc">Price high → low</option>
+                      <option value="total-asc">
+                        Total (price + ship) low → high
+                      </option>
+                      <option value="deal-asc">Best deal first</option>
+                      <option value="ending-soon">Ending soonest</option>
+                      <option value="title">Title A → Z</option>
+                    </select>
+                  </div>
+                  {viewMode !== "flat" && (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-fg-subtle">
+                        {viewMode === "byGroup" ? "Groups" : "Drivers"}:
+                      </span>
+                      <select
+                        className="input !w-auto !py-0.5 !text-[11px]"
+                        value={bucketSort}
+                        onChange={(e) =>
+                          setBucketSort(e.target.value as BucketSort)
+                        }
+                        title={`Order ${viewMode === "byGroup" ? "groups" : "drivers"} by`}
+                      >
+                        <option value="name">Name (A→Z)</option>
+                        <option value="count-desc">Most listings first</option>
+                        <option value="count-asc">Fewest listings first</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Display utilities */}
+              <div className="flex items-center justify-between gap-3 border-b border-border pb-2 text-xs">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={selectMode}
+                  className="flex items-center gap-2"
+                  onClick={() => {
+                    if (selectMode) exitSelectMode();
+                    else setSelectMode(true);
+                  }}
+                  title="Pick multiple listings to bulk-add to a group"
+                >
+                  <span
+                    className={`relative inline-block h-4 w-8 rounded-full transition-colors ${
+                      selectMode ? "bg-accent" : "bg-border"
+                    }`}
+                  >
+                    <span
+                      className={`absolute left-0 top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${
+                        selectMode ? "translate-x-[18px]" : "translate-x-0.5"
+                      }`}
+                    />
+                  </span>
+                  <span className={selectMode ? "text-accent" : "text-fg-muted"}>
+                    Select mode
+                  </span>
+                </button>
+                <ImageSizeToggle size={imgSize} onChange={setImgSize} />
+                <button
+                  type="button"
+                  className="text-fg-muted hover:text-fg underline decoration-dotted underline-offset-2 disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                  disabled={viewMode === "flat"}
+                  onClick={() =>
+                    setCollapseCmd((c) => ({
+                      seq: c.seq + 1,
+                      collapse: !allCollapsed,
+                    }))
+                  }
+                  title={
+                    viewMode === "flat"
+                      ? "Sections only exist in the grouped views"
+                      : allCollapsed
+                        ? "Expand every section"
+                        : "Collapse every section"
+                  }
+                >
+                  {allCollapsed ? "Expand all" : "Collapse all"}
+                </button>
+              </div>
+
+              {filteredRows && filteredRows.length !== rows.length && (
+                <div className="text-xs text-fg-subtle">
+                  Showing {filteredRows.length} of {rows.length} listings.
+                </div>
+              )}
+
+              {filteredRows && filteredRows.length === 0 ? (
+                <div className="card text-sm text-fg-muted">
+                  No listings match the current filters.
+                </div>
+              ) : viewMode === "flat" ? (
         <ul className="space-y-2">
           {(filteredRows ?? []).map((r) => (
             <ListingCard
@@ -1069,6 +1234,8 @@ export function Listings() {
           rows={filteredRows ?? []}
           groups={groups}
           bucketSort={bucketSort}
+          collapseCommand={collapseCmd}
+          onAllCollapsedChange={setAllCollapsed}
           offersByItemId={offersByItemId}
           refreshingId={refreshingId}
           unwatchingId={unwatchingId}
@@ -1101,6 +1268,8 @@ export function Listings() {
           rows={filteredRows ?? []}
           groups={groups}
           bucketSort={bucketSort}
+          collapseCommand={collapseCmd}
+          onAllCollapsedChange={setAllCollapsed}
           offersByItemId={offersByItemId}
           refreshingId={refreshingId}
           unwatchingId={unwatchingId}
@@ -1128,6 +1297,10 @@ export function Listings() {
           onToggleSelect={toggleSelected}
           imgSizeClass={IMG_CLASS[imgSize]}
         />
+      )}
+            </div>
+          </div>
+        </>
       )}
 
       {selectMode && (
@@ -1743,35 +1916,12 @@ function DriverTagSection({
   );
 }
 
-/** A right-aligned "Collapse all / Expand all" toggle shown above the
- *  grouped (by-driver / by-group) listing sections. The label flips based on
- *  whether every section is currently collapsed. */
-function CollapseAllBar({
-  allCollapsed,
-  onCollapseAll,
-  onExpandAll,
-}: {
-  allCollapsed: boolean;
-  onCollapseAll: () => void;
-  onExpandAll: () => void;
-}) {
-  return (
-    <div className="flex justify-end">
-      <button
-        type="button"
-        className="text-xs text-fg-muted hover:text-fg underline decoration-dotted underline-offset-2"
-        onClick={allCollapsed ? onExpandAll : onCollapseAll}
-      >
-        {allCollapsed ? "Expand all" : "Collapse all"}
-      </button>
-    </div>
-  );
-}
-
 function GroupedByDriver({
   rows,
   groups,
   bucketSort,
+  collapseCommand,
+  onAllCollapsedChange,
   offersByItemId,
   refreshingId,
   unwatchingId,
@@ -1802,6 +1952,8 @@ function GroupedByDriver({
   rows: ListingRow[];
   groups: ListingGroup[];
   bucketSort: BucketSort;
+  collapseCommand: { seq: number; collapse: boolean };
+  onAllCollapsedChange: (allCollapsed: boolean) => void;
   offersByItemId: Map<string, ReceivedOffer>;
   refreshingId: number | null;
   unwatchingId: number | null;
@@ -1866,15 +2018,27 @@ function GroupedByDriver({
     driverBuckets.length > 0 &&
     driverBuckets.every(([driver]) => collapsed.has(driver));
 
+  // Apply collapse/expand-all commands from the toolbar. The ref swallows
+  // commands issued before this view mounted, so switching views doesn't
+  // replay the previous view's last command.
+  const lastCmdSeq = useRef(collapseCommand.seq);
+  useEffect(() => {
+    if (collapseCommand.seq === lastCmdSeq.current) return;
+    lastCmdSeq.current = collapseCommand.seq;
+    setCollapsed(
+      collapseCommand.collapse
+        ? new Set(driverBuckets.map(([driver]) => driver))
+        : new Set(),
+    );
+  }, [collapseCommand, driverBuckets]);
+
+  // Report the aggregate state up so the toolbar's flip label is correct.
+  useEffect(() => {
+    onAllCollapsedChange(allCollapsed);
+  }, [allCollapsed, onAllCollapsedChange]);
+
   return (
     <div className="space-y-3">
-      <CollapseAllBar
-        allCollapsed={allCollapsed}
-        onCollapseAll={() =>
-          setCollapsed(new Set(driverBuckets.map(([driver]) => driver)))
-        }
-        onExpandAll={() => setCollapsed(new Set())}
-      />
       {driverBuckets.map(([driver, items]) => {
         const totalCents = items.reduce(
           (s, r) => s + (r.price_cents ?? 0) + (r.shipping_cents ?? 0),
@@ -1949,6 +2113,8 @@ function GroupedByGroup({
   rows,
   groups,
   bucketSort,
+  collapseCommand,
+  onAllCollapsedChange,
   offersByItemId,
   refreshingId,
   unwatchingId,
@@ -1979,6 +2145,8 @@ function GroupedByGroup({
   rows: ListingRow[];
   groups: ListingGroup[];
   bucketSort: BucketSort;
+  collapseCommand: { seq: number; collapse: boolean };
+  onAllCollapsedChange: (allCollapsed: boolean) => void;
   offersByItemId: Map<string, ReceivedOffer>;
   refreshingId: number | null;
   unwatchingId: number | null;
@@ -2089,6 +2257,22 @@ function GroupedByGroup({
   const allCollapsed =
     allKeys.length > 0 && allKeys.every((k) => collapsed.has(k));
 
+  // Apply collapse/expand-all commands from the toolbar; the ref swallows
+  // commands issued before this view mounted. "Collapse all" only fills in
+  // the section-level keys (matching the old behavior — collapsing a
+  // section hides its groups, so per-group keys don't need to be added).
+  const lastCmdSeq = useRef(collapseCommand.seq);
+  useEffect(() => {
+    if (collapseCommand.seq === lastCmdSeq.current) return;
+    lastCmdSeq.current = collapseCommand.seq;
+    setCollapsed(collapseCommand.collapse ? new Set(allKeys) : new Set());
+  }, [collapseCommand, allKeys]);
+
+  // Report the aggregate state up so the toolbar's flip label is correct.
+  useEffect(() => {
+    onAllCollapsedChange(allCollapsed);
+  }, [allCollapsed, onAllCollapsedChange]);
+
   const renderListing = (r: ListingRow) => (
     <li key={r.listing_id} className="px-4 py-2">
       <ListingCard
@@ -2129,18 +2313,14 @@ function GroupedByGroup({
   if (groups.length === 0) {
     return (
       <div className="card text-sm text-fg-muted">
-        No groups yet. Use “Manage…” next to the Group filter to create one.
+        No groups yet. Use “Manage groups…” in the header’s ⋯ menu to create
+        one.
       </div>
     );
   }
 
   return (
     <div className="space-y-3">
-      <CollapseAllBar
-        allCollapsed={allCollapsed}
-        onCollapseAll={() => setCollapsed(new Set(allKeys))}
-        onExpandAll={() => setCollapsed(new Set())}
-      />
       {sections.map((section) => (
         <details
           key={section.key}
@@ -4212,6 +4392,86 @@ function RegistrySearchDialog({
  *  e.g. keep Group on "All" but hide everything already in "Purchased".
  *  Sections mirror the include dropdown (driver → other → archived), so a
  *  group with several drivers shows under each; the checkboxes share state. */
+/** Header overflow menu for occasional batch actions, so they don't take
+ *  up permanent button space next to the title. */
+function ListingActionsMenu({
+  hasListings,
+  autoMatching,
+  refreshing,
+  onAutoMatchAll,
+  onRefreshAll,
+  onManageGroups,
+}: {
+  hasListings: boolean;
+  autoMatching: boolean;
+  refreshing: boolean;
+  onAutoMatchAll: () => void;
+  onRefreshAll: () => void;
+  onManageGroups: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const itemClass =
+    "w-full text-left px-3 py-1.5 text-xs text-fg-muted hover:text-fg hover:bg-bg disabled:opacity-50 disabled:cursor-not-allowed";
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        className="btn-secondary !px-2.5 !py-1 !text-xs"
+        onClick={() => setOpen((v) => !v)}
+        title="More actions"
+        aria-label="More actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        ⋯
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute z-40 top-full mt-1 right-0 w-44 rounded border border-border bg-bg-elevated shadow-lg py-1">
+            <button
+              type="button"
+              className={itemClass}
+              disabled={!hasListings || autoMatching}
+              onClick={() => {
+                setOpen(false);
+                onAutoMatchAll();
+              }}
+              title="Search the registry for a best-effort match on every unconfirmed listing"
+            >
+              {autoMatching ? "Matching…" : "Auto-match all"}
+            </button>
+            <button
+              type="button"
+              className={itemClass}
+              disabled={!hasListings || refreshing}
+              onClick={() => {
+                setOpen(false);
+                onRefreshAll();
+              }}
+              title="Re-fetch price and status for every saved listing"
+            >
+              {refreshing ? "Refreshing…" : "Refresh all"}
+            </button>
+            <div className="border-t border-border my-1" />
+            <button
+              type="button"
+              className={itemClass}
+              onClick={() => {
+                setOpen(false);
+                onManageGroups();
+              }}
+              title="Create, rename, archive, or delete listing groups"
+            >
+              Manage groups…
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function ExcludeGroupsMenu({
   groups,
   excluded,
@@ -4338,7 +4598,10 @@ function ExcludeGroupsMenu({
   );
 }
 
-function FilterChips({
+/** One sidebar facet: a vertical list of mutually exclusive options with a
+ *  live result count per option (computed by the caller against every other
+ *  active filter — "what would I see if I picked this?"). */
+function FacetList({
   label,
   value,
   options,
@@ -4346,26 +4609,137 @@ function FilterChips({
 }: {
   label: string;
   value: string;
-  options: { value: string; label: string }[];
+  options: { value: string; label: string; count: number }[];
   onChange: (v: string) => void;
 }) {
   return (
-    <div className="flex items-center gap-1.5">
-      <span className="text-fg-subtle">{label}:</span>
-      {options.map((opt) => (
-        <button
-          key={opt.value}
-          type="button"
-          className={`px-2 py-0.5 rounded border text-[11px] ${
-            value === opt.value
-              ? "border-accent text-accent bg-accent/10"
-              : "border-border text-fg-muted hover:text-fg"
-          }`}
-          onClick={() => onChange(opt.value)}
-        >
-          {opt.label}
-        </button>
-      ))}
+    <div>
+      <div className="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
+        {label}
+      </div>
+      <div className="space-y-0.5">
+        {options.map((opt) => {
+          const active = value === opt.value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              className={`w-full flex items-center gap-2 px-1 py-0.5 rounded text-left text-xs ${
+                active
+                  ? "text-fg font-medium"
+                  : "text-fg-muted hover:text-fg hover:bg-bg-elevated"
+              }`}
+              onClick={() => onChange(opt.value)}
+            >
+              <span
+                className={`w-2.5 h-2.5 rounded-full border shrink-0 ${
+                  active ? "border-accent bg-accent" : "border-border"
+                }`}
+              />
+              <span className="truncate">{opt.label}</span>
+              <span className="ml-auto text-fg-subtle tabular-nums">
+                {opt.count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Searchable driver dropdown for the filter sidebar. Options come from the
+ *  loaded listings; counts are faceted against the other active filters. */
+function DriverFilterSelect({
+  value,
+  label,
+  options,
+  allCount,
+  noneCount,
+  onChange,
+}: {
+  value: string;
+  label: string;
+  options: { value: string; name: string; count: number }[];
+  allCount: number;
+  noneCount: number;
+  onChange: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter((o) => o.name.toLowerCase().includes(q));
+  }, [options, query]);
+
+  const optionRow = (
+    optValue: string,
+    optLabel: string,
+    count: number | null,
+  ) => {
+    const active = value === optValue;
+    return (
+      <button
+        key={optValue}
+        type="button"
+        className={`w-full flex items-center gap-2 px-2 py-1 text-left text-xs hover:bg-bg ${
+          active ? "text-accent" : "text-fg-muted"
+        }`}
+        onClick={() => {
+          onChange(optValue);
+          setOpen(false);
+        }}
+      >
+        <span className="truncate">{optLabel}</span>
+        {count !== null && (
+          <span className="ml-auto text-fg-subtle tabular-nums">{count}</span>
+        )}
+      </button>
+    );
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        className="input !py-1 !text-xs flex items-center justify-between gap-2 text-left"
+        onClick={() => {
+          setOpen((v) => !v);
+          setQuery("");
+        }}
+        title="Filter listings by driver"
+      >
+        <span className="truncate">{label}</span>
+        <span className="text-fg-subtle shrink-0">▾</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute z-40 top-full mt-1 left-0 right-0 min-w-[12rem] rounded border border-border bg-bg-elevated shadow-lg py-1">
+            <div className="px-2 pb-1">
+              <input
+                type="text"
+                className="input !py-1 !text-xs"
+                placeholder="Search drivers…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="max-h-64 overflow-y-auto">
+              {!query.trim() && optionRow("all", "All drivers", allCount)}
+              {!query.trim() && optionRow("none", "No driver", noneCount)}
+              {filtered.map((o) => optionRow(o.value, o.name, o.count))}
+              {filtered.length === 0 && query.trim() && (
+                <div className="px-2 py-1 text-xs text-fg-subtle">
+                  No drivers match “{query.trim()}”.
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
