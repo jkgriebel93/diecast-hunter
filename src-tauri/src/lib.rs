@@ -82,6 +82,16 @@ pub fn run() {
                     Err(e) => tracing::warn!("driver auto-assoc backfill failed: {e}"),
                 }
             });
+
+            // Periodic background sync of My Garage (DCR) + eBay. The loop is
+            // always spawned but no-ops while the `auto_sync.enabled` setting
+            // is off; the user toggles it on the Settings page. See
+            // sync::auto_sync.
+            let auto_sync_handle = app.handle().clone();
+            let auto_sync_pool = pool.clone();
+            tauri::async_runtime::spawn(async move {
+                sync::auto_sync::run_loop(auto_sync_handle, auto_sync_pool).await;
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -91,6 +101,8 @@ pub fn run() {
             commands::clear_diecastregistry_credentials,
             commands::get_setting,
             commands::set_setting,
+            commands::get_auto_sync_settings,
+            commands::set_auto_sync_settings,
             commands::sync_dcr_collection,
             commands::register_diecast_in_garage,
             commands::remove_collection_entry,

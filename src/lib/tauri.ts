@@ -32,6 +32,13 @@ export interface SyncSummary {
   enrichment: EnrichSummary | null;
 }
 
+export interface AutoSyncSettings {
+  enabled: boolean;
+  interval_minutes: number;
+  /** Unix timestamp of the last background-sync attempt, or null if never run. */
+  last_run: number | null;
+}
+
 export interface RemoveEntrySummary {
   /** False = the asset wasn't in the DCR garage; the local row was removed
    *  anyway and the UI should show a neutral notice, not an error. */
@@ -82,6 +89,10 @@ export const api = {
     invoke<string | null>("get_setting", { key }),
   setSetting: (key: string, value: string) =>
     invoke<void>("set_setting", { key, value }),
+  getAutoSyncSettings: () =>
+    invoke<AutoSyncSettings>("get_auto_sync_settings"),
+  setAutoSyncSettings: (enabled: boolean, intervalMinutes: number) =>
+    invoke<void>("set_auto_sync_settings", { enabled, intervalMinutes }),
   syncDcrCollection: (enrich: boolean) =>
     invoke<SyncSummary>("sync_dcr_collection", { enrich }),
   registerDiecastInGarage: (input: RegisterDiecastInput) =>

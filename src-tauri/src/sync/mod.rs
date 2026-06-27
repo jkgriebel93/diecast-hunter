@@ -1,5 +1,6 @@
 //! Orchestration layer: pulls remote data and persists it locally.
 
+pub mod auto_sync;
 pub mod dcr_collection;
 pub mod dcr_register;
 pub mod dcr_registry;

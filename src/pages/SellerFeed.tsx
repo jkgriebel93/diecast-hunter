@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { ViewLink } from "@/components/ViewLink";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
   api,
@@ -330,7 +330,7 @@ export function SellerFeed() {
 
   return (
     <div className="p-6 space-y-4">
-      <header className="flex items-end justify-between gap-4">
+      <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 className="text-2xl font-semibold">Seller feed</h2>
           <p className="text-sm text-fg-subtle">
@@ -366,7 +366,7 @@ export function SellerFeed() {
             {loading ? "Searching…" : "Search"}
           </button>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,15rem),1fr))] gap-3">
           <FilterChips
             label="Condition"
             values={conditions}
@@ -503,9 +503,9 @@ export function SellerFeed() {
         <div className="card text-sm text-fg-muted">
           No saved sellers yet — add a few in the management panel above, or
           save them from a listing on the{" "}
-          <Link to="/browse" className="text-accent hover:underline">
+          <ViewLink to="/browse" className="text-accent hover:underline">
             Browse eBay
-          </Link>{" "}
+          </ViewLink>{" "}
           page.
         </div>
       ) : page === null ? (
@@ -542,7 +542,7 @@ export function SellerFeed() {
             </div>
           </div>
 
-          <ul className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          <ul className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,19rem),1fr))] gap-3">
             {page.items.map((item) => (
               <FeedCard
                 key={item.item_id}

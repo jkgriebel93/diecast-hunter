@@ -834,7 +834,7 @@ export function Listings() {
 
   return (
     <div className="p-6 space-y-4">
-      <header className="flex items-center justify-between gap-3">
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-baseline gap-3 min-w-0">
           <h2 className="text-2xl font-semibold">Saved Listings</h2>
           {rows && rows.length > 0 && (
@@ -4109,7 +4109,7 @@ function RegistrySearchDialog({
               Search criteria
             </button>
             {criteriaOpen && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-2">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),1fr))] gap-3 mt-2">
               <div>
                 <label className="label">Driver</label>
                 <input

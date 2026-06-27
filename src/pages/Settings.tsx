@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
   api,
+  type AutoSyncSettings,
   type CredentialState,
   type EbayCredentialsState,
   type EbayOauthStatus,
@@ -23,6 +24,14 @@ export function Settings() {
 
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
+  const [autoSyncInterval, setAutoSyncInterval] = useState("60");
+  const [autoSyncLastRun, setAutoSyncLastRun] = useState<number | null>(null);
+  const [autoSyncSaving, setAutoSyncSaving] = useState(false);
+  const [autoSyncMessage, setAutoSyncMessage] = useState<string | null>(null);
+  const [autoSyncError, setAutoSyncError] = useState<string | null>(null);
+
   const [syncSummary, setSyncSummary] = useState<SyncSummary | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncEnrich, setSyncEnrich] = useState(true);
@@ -95,6 +104,14 @@ export function Settings() {
       setUsername(c.diecastregistry_username ?? "");
       const ts = await api.getSetting("dcr.last_collection_sync");
       setLastSync(ts);
+      try {
+        const autoSync: AutoSyncSettings = await api.getAutoSyncSettings();
+        setAutoSyncEnabled(autoSync.enabled);
+        setAutoSyncInterval(String(autoSync.interval_minutes));
+        setAutoSyncLastRun(autoSync.last_run);
+      } catch {
+        // not fatal — leave defaults
+      }
       const e = await api.getEbayCredentials();
       setEbayCreds(e);
       setEbayEnv(e.environment === "production" ? "production" : "sandbox");
@@ -413,6 +430,27 @@ export function Settings() {
     }
   }
 
+  async function onSaveAutoSync(e: FormEvent) {
+    e.preventDefault();
+    setAutoSyncSaving(true);
+    setAutoSyncMessage(null);
+    setAutoSyncError(null);
+    try {
+      const minutes = Math.max(15, parseInt(autoSyncInterval, 10) || 60);
+      await api.setAutoSyncSettings(autoSyncEnabled, minutes);
+      setAutoSyncInterval(String(minutes));
+      setAutoSyncMessage(
+        autoSyncEnabled
+          ? `Automatic sync on — every ${minutes} minutes.`
+          : "Automatic sync off.",
+      );
+    } catch (e) {
+      setAutoSyncError(String(e));
+    } finally {
+      setAutoSyncSaving(false);
+    }
+  }
+
   async function onRefresh(force: boolean) {
     setRefreshing(true);
     setRefreshError(null);
@@ -451,6 +489,67 @@ export function Settings() {
           Account credentials and sync sources.
         </p>
       </header>
+
+      <section className="card space-y-4">
+        <div>
+          <h3 className="text-base font-medium">Automatic background sync</h3>
+          <p className="text-xs text-fg-subtle mt-1">
+            Periodically sync your collection (My Garage) and eBay (watchlist +
+            saved searches/sellers) in the background while the app is running.
+            Whichever source isn't configured — diecastregistry.com credentials
+            or a connected eBay account — is skipped. The minimum interval is 15
+            minutes, and a run is skipped if a manual sync is already in
+            progress.
+          </p>
+        </div>
+
+        <form onSubmit={onSaveAutoSync} className="space-y-3">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={autoSyncEnabled}
+              onChange={(e) => setAutoSyncEnabled(e.target.checked)}
+            />
+            <span>Enable automatic sync</span>
+          </label>
+
+          <div className="flex items-end gap-2">
+            <div>
+              <label className="label">Interval (minutes)</label>
+              <input
+                className="input w-32"
+                type="number"
+                min={15}
+                step={5}
+                value={autoSyncInterval}
+                onChange={(e) => setAutoSyncInterval(e.target.value)}
+              />
+            </div>
+            <button
+              className="btn-primary"
+              type="submit"
+              disabled={autoSyncSaving}
+            >
+              {autoSyncSaving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </form>
+
+        <div className="text-xs text-fg-subtle">
+          {autoSyncLastRun
+            ? `Last background sync ${new Date(
+                autoSyncLastRun * 1000,
+              ).toLocaleString()}`
+            : "Background sync hasn't run yet."}
+        </div>
+
+        {autoSyncMessage && (
+          <div className="text-xs text-emerald-400">{autoSyncMessage}</div>
+        )}
+        {autoSyncError && (
+          <div className="text-xs text-red-400">{autoSyncError}</div>
+        )}
+      </section>
 
       <section className="card space-y-4">
         <div>

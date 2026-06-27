@@ -7,7 +7,7 @@ import {
   type EbaySearchItem,
   type EbaySearchPage,
 } from "@/lib/tauri";
-import { Link } from "react-router-dom";
+import { ViewLink } from "@/components/ViewLink";
 import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 
@@ -272,9 +272,9 @@ export function Browse() {
       </header>
 
       <form onSubmit={onSubmit} className="card space-y-3">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <input
-            className="input flex-1"
+            className="input flex-1 min-w-[12rem]"
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -301,13 +301,13 @@ export function Browse() {
         {savedSearchMsg && (
           <div className="text-xs text-emerald-400">
             {savedSearchMsg}{" "}
-            <Link to="/ebay/searches" className="underline">
+            <ViewLink to="/ebay/searches" className="underline">
               Manage saved searches
-            </Link>
+            </ViewLink>
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,15rem),1fr))] gap-3">
           <FilterChips
             label="Condition"
             values={conditions}
@@ -412,7 +412,7 @@ export function Browse() {
           No results for the current search.
         </div>
       ) : (
-        <ul className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+        <ul className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,19rem),1fr))] gap-3">
           {page.items.map((item) => {
             const username = item.seller_username ?? "";
             const sellerSaved =

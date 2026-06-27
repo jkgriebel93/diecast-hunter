@@ -206,7 +206,7 @@ export function Registry() {
         </div>
       ) : (
         <section className="card space-y-3">
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),1fr))]">
             <div>
               <label className="label">Driver</label>
               <input

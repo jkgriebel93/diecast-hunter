@@ -36,6 +36,9 @@ export function Collection() {
   const [items, setItems] = useState<CollectionRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number | string>>(new Set());
+  // Flat-view rows default to expanded; this tracks the ones the user has
+  // collapsed (keyed by collection_id).
+  const [collapsedItems, setCollapsedItems] = useState<Set<number>>(new Set());
   const [syncing, setSyncing] = useState(false);
   const [removingId, setRemovingId] = useState<number | null>(null);
   /** Neutral informational banner (e.g. "wasn't on DCR") — not an error. */
@@ -46,6 +49,7 @@ export function Collection() {
   const [scaleFilter, setScaleFilter] = useState<string>("");
   const [oemFilter, setOemFilter] = useState<string>("");
   const [sortMode, setSortMode] = useState<SortMode>("driver-asc");
+  const [groupByDriver, setGroupByDriver] = useGroupByDriver();
   const [imgSize, setImgSize] = useImageSize("collection");
 
   async function load() {
@@ -135,11 +139,12 @@ export function Collection() {
     return Array.from(set).sort();
   }, [items]);
 
-  // Filter items, then group by driver, then sort groups.
-  const groups: DriverGroupView[] | null = useMemo(() => {
+  // Apply the search + scale/OEM filters once; both the grouped and flat
+  // views derive from this.
+  const filtered: CollectionRow[] | null = useMemo(() => {
     if (!items) return null;
     const q = searchText.trim().toLowerCase();
-    const filtered = items.filter((it) => {
+    return items.filter((it) => {
       if (q) {
         const hay = [
           it.driver_name,
@@ -160,6 +165,11 @@ export function Collection() {
       if (oemFilter && it.oem !== oemFilter) return false;
       return true;
     });
+  }, [items, searchText, scaleFilter, oemFilter]);
+
+  // Group filtered items by driver, then sort groups.
+  const groups: DriverGroupView[] | null = useMemo(() => {
+    if (!filtered) return null;
 
     const map = new Map<string, DriverGroupView>();
     for (const it of filtered) {
@@ -211,7 +221,35 @@ export function Collection() {
       }
     });
     return list;
-  }, [items, searchText, scaleFilter, oemFilter, sortMode]);
+  }, [filtered, sortMode]);
+
+  // Flat (ungrouped) view of the filtered items, sorted to mirror the
+  // group sort where it makes sense at the item level.
+  const flatItems: CollectionRow[] | null = useMemo(() => {
+    if (!filtered) return null;
+    const list = [...filtered];
+    list.sort((a, b) => {
+      switch (sortMode) {
+        case "value-desc":
+          return (b.retail_value_cents ?? 0) - (a.retail_value_cents ?? 0);
+        case "year-desc":
+          return (b.year ?? 0) - (a.year ?? 0);
+        case "year-asc":
+          return (a.year ?? 9999) - (b.year ?? 9999);
+        case "driver-asc":
+        case "count-desc":
+        default: {
+          // Fall back to driver name, then newest year within a driver.
+          const byName = (a.driver_name ?? "").localeCompare(
+            b.driver_name ?? "",
+          );
+          if (byName !== 0) return byName;
+          return (b.year ?? 0) - (a.year ?? 0);
+        }
+      }
+    });
+    return list;
+  }, [filtered, sortMode]);
 
   function toggleGroup(key: number | string) {
     setExpanded((prev) => {
@@ -222,26 +260,57 @@ export function Collection() {
     });
   }
 
+  function toggleItem(id: number) {
+    setCollapsedItems((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  // Whether every entry in the active view is currently expanded — drives the
+  // Expand all / Collapse all button's label and action.
+  const allExpanded = groupByDriver
+    ? (groups?.length ?? 0) > 0 &&
+      (groups ?? []).every((g) => expanded.has(groupKey(g)))
+    : (flatItems?.length ?? 0) > 0 &&
+      (flatItems ?? []).every((i) => !collapsedItems.has(i.collection_id));
+
+  function toggleAll() {
+    if (groupByDriver) {
+      setExpanded(
+        allExpanded ? new Set() : new Set((groups ?? []).map(groupKey)),
+      );
+    } else {
+      setCollapsedItems(
+        allExpanded
+          ? new Set((flatItems ?? []).map((i) => i.collection_id))
+          : new Set(),
+      );
+    }
+  }
+
   const totalItems = items?.length ?? 0;
-  const filteredItems = (groups ?? []).reduce(
-    (s, g) => s + g.items.length,
-    0,
-  );
+  const filteredItems = filtered?.length ?? 0;
 
   return (
     <div className="p-6 space-y-4">
-      <header className="flex items-end justify-between">
+      <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
         <div>
           <h2 className="text-2xl font-semibold">My Collection</h2>
           <p className="text-sm text-fg-subtle">
-            Imported from diecastregistry.com, grouped by driver.
+            Imported from diecastregistry.com
+            {groupByDriver ? ", grouped by driver." : "."}
           </p>
         </div>
         <div className="flex items-center gap-3">
           {items && (
             <div className="text-xs text-fg-subtle">
               {filteredItems === totalItems
-                ? `${totalItems} items across ${groups?.length ?? 0} drivers`
+                ? groupByDriver
+                  ? `${totalItems} items across ${groups?.length ?? 0} drivers`
+                  : `${totalItems} items`
                 : `${filteredItems} of ${totalItems} items shown`}
             </div>
           )}
@@ -283,15 +352,27 @@ export function Collection() {
               className="input !w-auto"
               value={sortMode}
               onChange={(e) => setSortMode(e.target.value as SortMode)}
-              title="Sort drivers"
+              title={groupByDriver ? "Sort drivers" : "Sort items"}
             >
               <option value="driver-asc">Driver A → Z</option>
-              <option value="value-desc">Total value high → low</option>
-              <option value="count-desc">Item count high → low</option>
+              <option value="value-desc">
+                {groupByDriver ? "Total value high → low" : "Value high → low"}
+              </option>
+              {groupByDriver && (
+                <option value="count-desc">Item count high → low</option>
+              )}
               <option value="year-desc">Newest year first</option>
               <option value="year-asc">Oldest year first</option>
             </select>
           </div>
+          <label className="flex items-center gap-2 text-xs text-fg-subtle select-none w-fit">
+            <input
+              type="checkbox"
+              checked={groupByDriver}
+              onChange={(e) => setGroupByDriver(e.target.checked)}
+            />
+            Group by driver
+          </label>
           <div className="flex items-center gap-3 text-xs flex-wrap">
             <label className="flex items-center gap-1">
               <span className="text-fg-subtle">Scale:</span>
@@ -347,31 +428,55 @@ export function Collection() {
           Empty. Configure your diecastregistry.com credentials in Settings,
           then run a sync.
         </div>
-      ) : groups && groups.length === 0 ? (
+      ) : filtered && filtered.length === 0 ? (
         <div className="card text-sm text-fg-muted">
           No items match the current filters.
         </div>
       ) : (
         <div className="space-y-2">
-          <div className="flex justify-end">
+          <div className="flex justify-between items-center">
+            <button
+              type="button"
+              className="text-xs text-fg-subtle hover:text-fg"
+              onClick={toggleAll}
+            >
+              {allExpanded ? "Collapse all" : "Expand all"}
+            </button>
             <ImageSizeToggle size={imgSize} onChange={setImgSize} />
           </div>
-          {(groups ?? []).map((g) => {
-            const key =
-              g.driver_id != null ? g.driver_id : `name:${g.driver_name}`;
-            const isOpen = expanded.has(key);
-            return (
-              <DriverCard
-                key={key}
-                group={g}
-                expanded={isOpen}
-                onToggle={() => toggleGroup(key)}
-                imgSizeClass={IMG_CLASS[imgSize]}
-                onRemove={onRemove}
-                removingId={removingId}
-              />
-            );
-          })}
+          {groupByDriver ? (
+            (groups ?? []).map((g) => {
+              const key = groupKey(g);
+              const isOpen = expanded.has(key);
+              return (
+                <DriverCard
+                  key={key}
+                  group={g}
+                  expanded={isOpen}
+                  onToggle={() => toggleGroup(key)}
+                  imgSizeClass={IMG_CLASS[imgSize]}
+                  onRemove={onRemove}
+                  removingId={removingId}
+                />
+              );
+            })
+          ) : (
+            <ul className="card !p-0 divide-y divide-border overflow-hidden">
+              {(flatItems ?? []).map((item) => (
+                <CollectionItemRow
+                  key={item.collection_id}
+                  item={item}
+                  imgSizeClass={IMG_CLASS[imgSize]}
+                  onRemove={onRemove}
+                  removingId={removingId}
+                  showDriver
+                  collapsible
+                  collapsed={collapsedItems.has(item.collection_id)}
+                  onToggle={() => toggleItem(item.collection_id)}
+                />
+              ))}
+            </ul>
+          )}
         </div>
       )}
     </div>
@@ -420,85 +525,13 @@ function DriverCard({
         <div className="border-t border-border">
           <ul className="divide-y divide-border">
             {group.items.map((item) => (
-              <li key={item.collection_id} className="p-4 flex gap-4">
-                {item.image_url && (
-                  <img
-                    src={resolveImage(item.image_url)}
-                    alt=""
-                    className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
-                  />
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium truncate">
-                    {item.scheme_text ?? "(no scheme)"}
-                  </div>
-                  <div className="text-xs text-fg-subtle mt-0.5">
-                    {[
-                      item.year,
-                      item.oem,
-                      item.brand,
-                      item.scale,
-                      item.make,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </div>
-                  {item.enriched && (
-                    <div className="text-xs text-fg-subtle mt-0.5">
-                      {[
-                        item.diecast_type,
-                        item.finish && `finish: ${item.finish}`,
-                        item.production_qty &&
-                          `qty: ${item.production_qty.toLocaleString()}`,
-                        item.registration_number &&
-                          `reg ${item.registration_number}`,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </div>
-                  )}
-                  <div className="flex items-center gap-3 mt-1">
-                    {item.detail_url && (
-                      <a
-                        className="text-xs text-accent hover:underline"
-                        href={DCR_BASE + item.detail_url}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          void openExternal(DCR_BASE + item.detail_url!);
-                        }}
-                      >
-                        View on diecastregistry.com →
-                      </a>
-                    )}
-                    {!item.enriched && (
-                      <span className="text-xs text-amber-400/80">
-                        stub — needs registry sync
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="text-right text-xs tabular-nums shrink-0 flex flex-col items-end gap-1">
-                  <div>
-                    <span className="text-fg-subtle">retail</span>{" "}
-                    {formatCents(item.retail_value_cents)}
-                  </div>
-                  <div>
-                    <span className="text-fg-subtle">wholesale</span>{" "}
-                    {formatCents(item.wholesale_value_cents)}
-                  </div>
-                  <button
-                    type="button"
-                    className="text-fg-subtle hover:text-red-400 disabled:opacity-50 mt-1"
-                    disabled={removingId !== null}
-                    onClick={() => onRemove(item)}
-                    title="Remove from collection (also deletes from your DCR garage)"
-                  >
-                    {removingId === item.collection_id
-                      ? "Removing…"
-                      : "Remove"}
-                  </button>
-                </div>
-              </li>
+              <CollectionItemRow
+                key={item.collection_id}
+                item={item}
+                imgSizeClass={imgSizeClass}
+                onRemove={onRemove}
+                removingId={removingId}
+              />
             ))}
           </ul>
         </div>
@@ -507,7 +540,169 @@ function DriverCard({
   );
 }
 
+function CollectionItemRow({
+  item,
+  imgSizeClass,
+  onRemove,
+  removingId,
+  showDriver = false,
+  collapsible = false,
+  collapsed = false,
+  onToggle,
+}: {
+  item: CollectionRow;
+  imgSizeClass: string;
+  onRemove: (item: CollectionRow) => void;
+  removingId: number | null;
+  /** Show the driver name (used by the flat, ungrouped view). */
+  showDriver?: boolean;
+  /** Render the title as a click-to-collapse toggle. */
+  collapsible?: boolean;
+  collapsed?: boolean;
+  onToggle?: () => void;
+}) {
+  const isCollapsed = collapsible && collapsed;
+
+  const title = (
+    <div className="text-sm font-medium truncate">
+      {item.scheme_text ?? "(no scheme)"}
+    </div>
+  );
+  const driverLine = showDriver && (
+    <div className="text-xs text-fg-subtle mb-0.5">
+      {item.driver_name ?? "(unknown)"}
+    </div>
+  );
+
+  return (
+    <li className="p-4 flex gap-4">
+      {!isCollapsed && item.image_url && (
+        <img
+          src={resolveImage(item.image_url)}
+          alt=""
+          className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
+        />
+      )}
+      <div className="flex-1 min-w-0">
+        {collapsible ? (
+          <button
+            type="button"
+            className="w-full text-left flex items-start gap-2 hover:opacity-80"
+            onClick={onToggle}
+          >
+            <span
+              className={`inline-block mt-0.5 text-xs transition-transform ${
+                isCollapsed ? "" : "rotate-90"
+              }`}
+            >
+              ▶
+            </span>
+            <div className="min-w-0">
+              {driverLine}
+              {title}
+            </div>
+          </button>
+        ) : (
+          <>
+            {driverLine}
+            {title}
+          </>
+        )}
+        {!isCollapsed && (
+          <>
+            <div className="text-xs text-fg-subtle mt-0.5">
+              {[item.year, item.oem, item.brand, item.scale, item.make]
+                .filter(Boolean)
+                .join(" · ")}
+            </div>
+            {item.enriched && (
+              <div className="text-xs text-fg-subtle mt-0.5">
+                {[
+                  item.diecast_type,
+                  item.finish && `finish: ${item.finish}`,
+                  item.production_qty &&
+                    `qty: ${item.production_qty.toLocaleString()}`,
+                  item.registration_number &&
+                    `reg ${item.registration_number}`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </div>
+            )}
+            <div className="flex items-center gap-3 mt-1">
+              {item.detail_url && (
+                <a
+                  className="text-xs text-accent hover:underline"
+                  href={DCR_BASE + item.detail_url}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    void openExternal(DCR_BASE + item.detail_url!);
+                  }}
+                >
+                  View on diecastregistry.com →
+                </a>
+              )}
+              {!item.enriched && (
+                <span className="text-xs text-amber-400/80">
+                  stub — needs registry sync
+                </span>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+      <div className="text-right text-xs tabular-nums shrink-0 flex flex-col items-end gap-1">
+        <div>
+          <span className="text-fg-subtle">retail</span>{" "}
+          {formatCents(item.retail_value_cents)}
+        </div>
+        {!isCollapsed && (
+          <div>
+            <span className="text-fg-subtle">wholesale</span>{" "}
+            {formatCents(item.wholesale_value_cents)}
+          </div>
+        )}
+        <button
+          type="button"
+          className="text-fg-subtle hover:text-red-400 disabled:opacity-50 mt-1"
+          disabled={removingId !== null}
+          onClick={() => onRemove(item)}
+          title="Remove from collection (also deletes from your DCR garage)"
+        >
+          {removingId === item.collection_id ? "Removing…" : "Remove"}
+        </button>
+      </div>
+    </li>
+  );
+}
+
+/** Stable expand/collapse key for a driver group. */
+function groupKey(g: DriverGroupView): number | string {
+  return g.driver_id != null ? g.driver_id : `name:${g.driver_name}`;
+}
+
 function resolveImage(src: string): string {
   if (src.startsWith("http")) return src;
   return DCR_BASE + src;
+}
+
+const GROUP_BY_DRIVER_KEY = "collection:group-by-driver";
+
+/** Persisted toggle for grouping the collection by driver (defaults on). */
+function useGroupByDriver(): [boolean, (v: boolean) => void] {
+  const [value, setValue] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(GROUP_BY_DRIVER_KEY) !== "0";
+    } catch {
+      return true;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(GROUP_BY_DRIVER_KEY, value ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }, [value]);
+  return [value, setValue];
 }

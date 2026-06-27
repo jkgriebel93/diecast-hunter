@@ -130,7 +130,7 @@ export function SavedSearches() {
 
   return (
     <div className="p-6 space-y-4">
-      <header className="flex items-end justify-between">
+      <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
         <div>
           <h2 className="text-2xl font-semibold">Saved Searches</h2>
           <p className="text-sm text-fg-subtle">
@@ -505,7 +505,7 @@ function SearchEditor({
             />
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,16rem),1fr))] gap-3">
             <div>
               <label className="label">Conditions</label>
               <div className="flex flex-wrap gap-1.5">
@@ -554,7 +554,7 @@ function SearchEditor({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))] gap-3">
             <div>
               <label className="label">Min price (USD)</label>
               <input

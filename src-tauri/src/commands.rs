@@ -122,6 +122,59 @@ pub async fn set_setting(state: State<'_, AppState>, key: String, value: String)
     settings::set(&state.db.pool, &key, &value).await
 }
 
+#[derive(Serialize)]
+pub struct AutoSyncSettings {
+    pub enabled: bool,
+    pub interval_minutes: u32,
+    /// Unix timestamp of the last background-sync attempt, or null if it has
+    /// never run.
+    pub last_run: Option<i64>,
+}
+
+#[tauri::command]
+pub async fn get_auto_sync_settings(state: State<'_, AppState>) -> AppResult<AutoSyncSettings> {
+    let pool = &state.db.pool;
+    let enabled = settings::get(pool, settings::KEY_AUTO_SYNC_ENABLED)
+        .await?
+        .map(|v| v == "true")
+        .unwrap_or(false);
+    let interval_minutes = settings::get(pool, settings::KEY_AUTO_SYNC_INTERVAL_MINUTES)
+        .await?
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(settings::DEFAULT_AUTO_SYNC_INTERVAL_MINUTES);
+    let last_run = settings::get(pool, settings::KEY_AUTO_SYNC_LAST_RUN)
+        .await?
+        .and_then(|v| v.parse::<i64>().ok());
+    Ok(AutoSyncSettings {
+        enabled,
+        interval_minutes,
+        last_run,
+    })
+}
+
+#[tauri::command]
+pub async fn set_auto_sync_settings(
+    state: State<'_, AppState>,
+    enabled: bool,
+    interval_minutes: u32,
+) -> AppResult<()> {
+    let pool = &state.db.pool;
+    let clamped = interval_minutes.max(settings::MIN_AUTO_SYNC_INTERVAL_MINUTES);
+    settings::set(
+        pool,
+        settings::KEY_AUTO_SYNC_ENABLED,
+        if enabled { "true" } else { "false" },
+    )
+    .await?;
+    settings::set(
+        pool,
+        settings::KEY_AUTO_SYNC_INTERVAL_MINUTES,
+        &clamped.to_string(),
+    )
+    .await?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn sync_dcr_collection(
     state: State<'_, AppState>,

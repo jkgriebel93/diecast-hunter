@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { useTheme } from "@/lib/theme";
+import { useFontScale } from "@/lib/fontScale";
+import { useWorkspace } from "@/lib/workspace";
+import type { ViewId } from "@/lib/views";
 
 type IconProps = { className?: string };
 type IconFn = (props: IconProps) => JSX.Element;
 
 interface NavItem {
-  to: string;
+  to: ViewId;
   label: string;
   icon: IconFn;
   children?: NavItem[];
@@ -91,28 +93,43 @@ function NavRow({
   collapsed: boolean;
   indented?: boolean;
 }) {
+  const { activeView, open, openInNewPane } = useWorkspace();
   const Icon = item.icon;
+  const isActive = activeView === item.to;
+
   return (
-    <NavLink
-      to={item.to}
-      title={collapsed ? item.label : undefined}
-      className={({ isActive }) =>
-        `flex items-center gap-3 ${
+    <div className="group/navrow relative flex items-stretch flex-1 min-w-0">
+      <button
+        type="button"
+        onClick={() => open(item.to)}
+        title={collapsed ? item.label : undefined}
+        className={`flex-1 min-w-0 flex items-center gap-3 ${
           collapsed
             ? "justify-center px-0"
             : indented
               ? "pl-10 pr-4"
               : "px-4"
-        } py-2 text-sm transition-colors ${
+        } py-2 text-sm transition-colors text-left ${
           isActive
             ? "bg-bg-elevated text-fg border-l-2 border-accent"
             : "text-fg-muted hover:text-fg hover:bg-bg-elevated"
-        }`
-      }
-    >
-      <Icon className="w-4 h-4 shrink-0" />
-      {!collapsed && <span className="truncate">{item.label}</span>}
-    </NavLink>
+        }`}
+      >
+        <Icon className="w-4 h-4 shrink-0" />
+        {!collapsed && <span className="truncate">{item.label}</span>}
+      </button>
+      {!collapsed && (
+        <button
+          type="button"
+          onClick={() => openInNewPane(item.to)}
+          aria-label={`Open ${item.label} to the side`}
+          title={`Open ${item.label} to the side`}
+          className="opacity-0 group-hover/navrow:opacity-100 focus:opacity-100 px-2 text-fg-subtle hover:text-fg transition-opacity shrink-0"
+        >
+          <SplitIcon />
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -123,12 +140,8 @@ function NavGroup({
   item: NavItem;
   collapsed: boolean;
 }) {
-  const location = useLocation();
-  const childPaths = useMemo(
-    () => (item.children ?? []).map((c) => c.to),
-    [item.children],
-  );
-  const childActive = childPaths.some((p) => location.pathname === p);
+  const { activeView } = useWorkspace();
+  const childActive = (item.children ?? []).some((c) => c.to === activeView);
   const groupKey = GROUP_STORAGE_PREFIX + item.to;
 
   const [open, setOpen] = useState<boolean>(() => {
@@ -141,7 +154,8 @@ function NavGroup({
     window.localStorage.setItem(groupKey, open ? "1" : "0");
   }, [open, groupKey]);
 
-  // Auto-expand when a child route is active so the user sees where they are.
+  // Auto-expand when one of the group's views is the focused tab so the user
+  // sees where they are.
   useEffect(() => {
     if (childActive) setOpen(true);
   }, [childActive]);
@@ -159,30 +173,10 @@ function NavGroup({
     );
   }
 
-  const Icon = item.icon;
-  const parentActive = location.pathname === item.to;
-
   return (
     <div>
-      <div
-        className={`group flex items-stretch text-sm transition-colors ${
-          parentActive
-            ? "bg-bg-elevated text-fg border-l-2 border-accent"
-            : "text-fg-muted hover:text-fg hover:bg-bg-elevated"
-        }`}
-      >
-        <NavLink
-          to={item.to}
-          className={({ isActive }) =>
-            `flex-1 min-w-0 flex items-center gap-3 px-4 py-2 ${
-              isActive ? "text-fg" : "text-inherit"
-            }`
-          }
-          end
-        >
-          <Icon className="w-4 h-4 shrink-0" />
-          <span className="truncate">{item.label}</span>
-        </NavLink>
+      <div className="flex items-stretch text-sm">
+        <NavRow item={item} collapsed={collapsed} />
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
@@ -212,25 +206,112 @@ function NavGroup({
 
 function ThemeToggle({ collapsed }: { collapsed: boolean }) {
   const { resolved, toggle } = useTheme();
-  const nextLabel = resolved === "dark" ? "Light mode" : "Dark mode";
+  const { scale, increase, decrease } = useFontScale();
+  const nextLabel = resolved === "dark" ? "light mode" : "dark mode";
+  const canZoomOut = scale > 0.7;
+  const canZoomIn = scale < 1.6;
+
+  const iconBtn =
+    "rounded-md p-1.5 text-fg-muted hover:text-fg hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:hover:text-fg-muted disabled:hover:bg-transparent disabled:cursor-not-allowed";
+
   return (
-    <div className="border-t border-border px-3 py-3">
+    <div
+      className={`border-t border-border px-3 py-3 flex ${
+        collapsed ? "flex-col items-center" : "items-center justify-between"
+      } gap-1`}
+    >
       <button
         type="button"
         onClick={toggle}
-        className={`w-full flex items-center ${
-          collapsed ? "justify-center" : "justify-between"
-        } gap-2 rounded-md px-2 py-1.5 text-xs text-fg-muted hover:text-fg hover:bg-bg-elevated transition-colors`}
-        title={`Switch to ${nextLabel.toLowerCase()}`}
-        aria-label={`Switch to ${nextLabel.toLowerCase()}`}
+        className={iconBtn}
+        title={`Switch to ${nextLabel}`}
+        aria-label={`Switch to ${nextLabel}`}
       >
-        <span className="flex items-center gap-2">
-          <ThemeIcon resolved={resolved} />
-          {!collapsed && <span>{resolved === "dark" ? "Dark" : "Light"}</span>}
-        </span>
-        {!collapsed && <span className="text-fg-subtle">→ {nextLabel}</span>}
+        <ThemeIcon resolved={resolved} />
       </button>
+      <div className={`flex ${collapsed ? "flex-col" : ""} items-center gap-1`}>
+        <button
+          type="button"
+          onClick={decrease}
+          disabled={!canZoomOut}
+          className={iconBtn}
+          title="Decrease text size"
+          aria-label="Decrease text size"
+        >
+          <ZoomOutIcon />
+        </button>
+        <button
+          type="button"
+          onClick={increase}
+          disabled={!canZoomIn}
+          className={iconBtn}
+          title="Increase text size"
+          aria-label="Increase text size"
+        >
+          <ZoomInIcon />
+        </button>
+      </div>
     </div>
+  );
+}
+
+function ZoomInIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="11" cy="11" r="8" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+      <line x1="11" y1="8" x2="11" y2="14" />
+      <line x1="8" y1="11" x2="14" y2="11" />
+    </svg>
+  );
+}
+
+function ZoomOutIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="11" cy="11" r="8" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+      <line x1="8" y1="11" x2="14" y2="11" />
+    </svg>
+  );
+}
+
+function SplitIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <line x1="12" y1="3" x2="12" y2="21" />
+    </svg>
   );
 }
 

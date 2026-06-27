@@ -48,7 +48,7 @@ Tauri 2 app: **Rust backend ↔ React/TS frontend** communicating exclusively th
 ### Frontend (`src/`)
 
 - All backend calls go through `src/lib/tauri.ts`, which exports a single `api` object wrapping `invoke<T>()` calls. Add new commands here with their TS types — keep these in sync with the Rust `Serialize` structs in `commands.rs`.
-- Routing: `react-router-dom` v6. Pages: `Dashboard`, `Collection`, `Browse` (eBay search), `Listings` (saved listings + matches), `Offers` (eBay offers driven by watchlist), `Settings`. The `@/` import alias maps to `src/`.
+- Navigation is a split-view **workspace**, not a router (react-router was removed). `src/lib/views.tsx` is the registry of pages (`ViewId` → component); `src/lib/workspace.tsx` is the context+reducer holding the editor-group state: an array of panes (max 3, side by side), each with its own open tabs and active tab, plus one focused pane. State persists to `localStorage` (`workspace.v1`). `Workspace.tsx` lays out panes with draggable dividers; `EditorPane.tsx` is one group's tab strip + stacked tab content (inactive tabs stay mounted, hidden, to preserve state). The `Sidebar` opens a view into the focused pane (or a new pane via the hover "open to the side" button); cross-page links inside pages use `<ViewLink to=…>` (`src/components/ViewLink.tsx`) instead of `<Link>`. To add a page: add it to `VIEWS` in `views.tsx` and to the `links` nav tree in `Sidebar.tsx`. Pages must stay zero-prop and router-free. The `@/` import alias maps to `src/`.
 - Styling: Tailwind. `clearScreen: false` in `vite.config.ts` and `watch.ignored: ["**/src-tauri/**"]` are intentional — don't remove.
 
 ### Adding a backend command

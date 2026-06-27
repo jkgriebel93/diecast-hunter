@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { ViewLink } from "@/components/ViewLink";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
   api,
@@ -107,7 +107,7 @@ export function Ebay() {
 
   return (
     <div className="p-6 space-y-6">
-      <header className="flex items-end justify-between gap-4">
+      <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 className="text-2xl font-semibold">eBay</h2>
           <p className="text-sm text-fg-subtle">
@@ -168,14 +168,14 @@ export function Ebay() {
               <h3 className="text-sm font-medium uppercase tracking-wide text-fg-muted">
                 Saved Listings
               </h3>
-              <Link
+              <ViewLink
                 to="/listings"
                 className="text-xs text-accent hover:underline"
               >
                 Open Saved Listings →
-              </Link>
+              </ViewLink>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-3">
               <Stat label="Total" value={summary.total} />
               <Stat label="Active" value={summary.active} />
               <Stat label="Ended" value={summary.ended} />
@@ -228,8 +228,8 @@ export function Ebay() {
             </section>
           )}
 
-          <section className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <Link
+          <section className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-3">
+            <ViewLink
               to="/ebay/feed"
               className="card hover:border-accent transition-colors"
             >
@@ -241,8 +241,8 @@ export function Ebay() {
                     }`
                   : "Add saved sellers to populate this feed"}
               </p>
-            </Link>
-            <Link
+            </ViewLink>
+            <ViewLink
               to="/ebay/searches"
               className="card hover:border-accent transition-colors"
             >
@@ -254,7 +254,7 @@ export function Ebay() {
                     }`
                   : "—"}
               </p>
-            </Link>
+            </ViewLink>
           </section>
 
           <section className="card flex items-center justify-between">
@@ -264,9 +264,9 @@ export function Ebay() {
                 Search eBay directly and pull listings into your watchlist.
               </p>
             </div>
-            <Link to="/browse" className="btn-secondary text-xs">
+            <ViewLink to="/browse" className="btn-secondary text-xs">
               Open Browse →
-            </Link>
+            </ViewLink>
           </section>
 
           <section className="card border-dashed text-sm text-fg-subtle italic">

@@ -27,6 +27,20 @@ pub const KEY_LISTING_RECEIVER_PORT: &str = "listing_receiver.port";
 /// random in the user-port range; configurable via settings if it conflicts.
 pub const DEFAULT_LISTING_RECEIVER_PORT: u16 = 17381;
 
+/// Periodic background sync (see `sync::auto_sync`). When enabled, a startup
+/// task syncs My Garage (DCR) and eBay on the configured interval.
+/// "true" / "false"; unset = disabled.
+pub const KEY_AUTO_SYNC_ENABLED: &str = "auto_sync.enabled";
+/// Minutes between background syncs. Unset = `DEFAULT_AUTO_SYNC_INTERVAL_MINUTES`.
+pub const KEY_AUTO_SYNC_INTERVAL_MINUTES: &str = "auto_sync.interval_minutes";
+/// Unix timestamp of the last background-sync attempt (success or failure).
+/// The loop uses this to decide when the interval has elapsed.
+pub const KEY_AUTO_SYNC_LAST_RUN: &str = "auto_sync.last_run";
+pub const DEFAULT_AUTO_SYNC_INTERVAL_MINUTES: u32 = 60;
+/// Floor on the interval so a typo can't turn the background task into a
+/// tight network loop against DCR / eBay.
+pub const MIN_AUTO_SYNC_INTERVAL_MINUTES: u32 = 15;
+
 pub fn ebay_ru_name_key(env: &str) -> String {
     format!("ebay.{env}.ru_name")
 }
