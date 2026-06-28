@@ -7,6 +7,7 @@ mod listing_groups;
 mod listing_receiver;
 mod progress;
 mod saved;
+mod scheduler;
 mod settings;
 mod sync;
 
@@ -81,16 +82,6 @@ pub fn run() {
                     Ok(_) => {}
                     Err(e) => tracing::warn!("driver auto-assoc backfill failed: {e}"),
                 }
-            });
-
-            // Periodic background sync of My Garage (DCR) + eBay. The loop is
-            // always spawned but no-ops while the `auto_sync.enabled` setting
-            // is off; the user toggles it on the Settings page. See
-            // sync::auto_sync.
-            let auto_sync_handle = app.handle().clone();
-            let auto_sync_pool = pool.clone();
-            tauri::async_runtime::spawn(async move {
-                sync::auto_sync::run_loop(auto_sync_handle, auto_sync_pool).await;
             });
             Ok(())
         })
@@ -179,6 +170,39 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Headless one-shot sync used by the OS scheduled task
+/// (`diecast-hunter.exe --sync`). Opens the DB, runs the collection + eBay
+/// syncs once, and exits the process — without starting the GUI/webview.
+/// Exit code: 0 = both phases succeeded, 1 = setup error or a phase failed
+/// (so Task Scheduler's "Last Run Result" reflects trouble).
+pub fn run_headless_sync() {
+    init_tracing();
+
+    let code = tauri::async_runtime::block_on(async {
+        let data_dir = match db::default_data_dir() {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::error!("headless sync: resolve data dir: {e}");
+                return 1;
+            }
+        };
+        let database = match db::Db::open(&data_dir).await {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::error!("headless sync: open db: {e}");
+                return 1;
+            }
+        };
+        if sync::auto_sync::run_once(&database.pool).await {
+            0
+        } else {
+            1
+        }
+    });
+
+    std::process::exit(code);
 }
 
 /// Initialize tracing with two sinks:

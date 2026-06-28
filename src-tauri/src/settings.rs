@@ -40,6 +40,9 @@ pub const DEFAULT_AUTO_SYNC_INTERVAL_MINUTES: u32 = 60;
 /// Floor on the interval so a typo can't turn the background task into a
 /// tight network loop against DCR / eBay.
 pub const MIN_AUTO_SYNC_INTERVAL_MINUTES: u32 = 15;
+/// Ceiling on the interval. `schtasks /SC MINUTE /MO` accepts at most 1439
+/// (one minute short of a day); a longer cadence would need a DAILY schedule.
+pub const MAX_AUTO_SYNC_INTERVAL_MINUTES: u32 = 1439;
 
 pub fn ebay_ru_name_key(env: &str) -> String {
     format!("ebay.{env}.ru_name")

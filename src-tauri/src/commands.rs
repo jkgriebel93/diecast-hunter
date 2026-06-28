@@ -129,6 +129,10 @@ pub struct AutoSyncSettings {
     /// Unix timestamp of the last background-sync attempt, or null if it has
     /// never run.
     pub last_run: Option<i64>,
+    /// Whether the OS scheduled task is actually registered. Lets the UI flag
+    /// drift (settings say enabled but the task is gone, e.g. after a manual
+    /// deletion in Task Scheduler).
+    pub scheduled: bool,
 }
 
 #[tauri::command]
@@ -149,6 +153,7 @@ pub async fn get_auto_sync_settings(state: State<'_, AppState>) -> AppResult<Aut
         enabled,
         interval_minutes,
         last_run,
+        scheduled: crate::scheduler::exists(),
     })
 }
 
@@ -159,7 +164,16 @@ pub async fn set_auto_sync_settings(
     interval_minutes: u32,
 ) -> AppResult<()> {
     let pool = &state.db.pool;
-    let clamped = interval_minutes.max(settings::MIN_AUTO_SYNC_INTERVAL_MINUTES);
+    let clamped = interval_minutes.clamp(
+        settings::MIN_AUTO_SYNC_INTERVAL_MINUTES,
+        settings::MAX_AUTO_SYNC_INTERVAL_MINUTES,
+    );
+
+    // Register/update (or remove) the OS scheduled task first. If that fails
+    // — e.g. group policy blocks Task Scheduler — surface the error and leave
+    // the persisted settings untouched so the UI keeps reflecting reality.
+    crate::scheduler::apply(enabled, clamped)?;
+
     settings::set(
         pool,
         settings::KEY_AUTO_SYNC_ENABLED,

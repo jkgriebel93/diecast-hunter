@@ -37,6 +37,8 @@ export interface AutoSyncSettings {
   interval_minutes: number;
   /** Unix timestamp of the last background-sync attempt, or null if never run. */
   last_run: number | null;
+  /** Whether the Windows scheduled task is actually registered. */
+  scheduled: boolean;
 }
 
 export interface RemoveEntrySummary {

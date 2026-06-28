@@ -28,6 +28,7 @@ export function Settings() {
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
   const [autoSyncInterval, setAutoSyncInterval] = useState("60");
   const [autoSyncLastRun, setAutoSyncLastRun] = useState<number | null>(null);
+  const [autoSyncScheduled, setAutoSyncScheduled] = useState(false);
   const [autoSyncSaving, setAutoSyncSaving] = useState(false);
   const [autoSyncMessage, setAutoSyncMessage] = useState<string | null>(null);
   const [autoSyncError, setAutoSyncError] = useState<string | null>(null);
@@ -109,6 +110,7 @@ export function Settings() {
         setAutoSyncEnabled(autoSync.enabled);
         setAutoSyncInterval(String(autoSync.interval_minutes));
         setAutoSyncLastRun(autoSync.last_run);
+        setAutoSyncScheduled(autoSync.scheduled);
       } catch {
         // not fatal — leave defaults
       }
@@ -436,14 +438,25 @@ export function Settings() {
     setAutoSyncMessage(null);
     setAutoSyncError(null);
     try {
-      const minutes = Math.max(15, parseInt(autoSyncInterval, 10) || 60);
+      const minutes = Math.min(
+        1439,
+        Math.max(15, parseInt(autoSyncInterval, 10) || 60),
+      );
       await api.setAutoSyncSettings(autoSyncEnabled, minutes);
       setAutoSyncInterval(String(minutes));
       setAutoSyncMessage(
         autoSyncEnabled
-          ? `Automatic sync on — every ${minutes} minutes.`
-          : "Automatic sync off.",
+          ? `Automatic sync on — Windows will run it every ${minutes} minutes, even when the app is closed.`
+          : "Automatic sync off — scheduled task removed.",
       );
+      // Re-read so the registered/last-run status reflects what just happened.
+      try {
+        const autoSync = await api.getAutoSyncSettings();
+        setAutoSyncScheduled(autoSync.scheduled);
+        setAutoSyncLastRun(autoSync.last_run);
+      } catch {
+        // not fatal — status badge may lag until next page load
+      }
     } catch (e) {
       setAutoSyncError(String(e));
     } finally {
@@ -494,12 +507,12 @@ export function Settings() {
         <div>
           <h3 className="text-base font-medium">Automatic background sync</h3>
           <p className="text-xs text-fg-subtle mt-1">
-            Periodically sync your collection (My Garage) and eBay (watchlist +
-            saved searches/sellers) in the background while the app is running.
-            Whichever source isn't configured — diecastregistry.com credentials
-            or a connected eBay account — is skipped. The minimum interval is 15
-            minutes, and a run is skipped if a manual sync is already in
-            progress.
+            Registers a Windows scheduled task that syncs your collection (My
+            Garage) and eBay (watchlist + saved searches/sellers) on a timer —
+            even when this app is closed, as long as you're signed in to
+            Windows. Whichever source isn't configured — diecastregistry.com
+            credentials or a connected eBay account — is skipped. Interval is in
+            minutes (15–1439).
           </p>
         </div>
 
@@ -520,8 +533,10 @@ export function Settings() {
                 className="input w-32"
                 type="number"
                 min={15}
+                max={1439}
                 step={5}
                 value={autoSyncInterval}
+                disabled={!autoSyncEnabled}
                 onChange={(e) => setAutoSyncInterval(e.target.value)}
               />
             </div>
@@ -535,12 +550,33 @@ export function Settings() {
           </div>
         </form>
 
-        <div className="text-xs text-fg-subtle">
-          {autoSyncLastRun
-            ? `Last background sync ${new Date(
-                autoSyncLastRun * 1000,
-              ).toLocaleString()}`
-            : "Background sync hasn't run yet."}
+        <div className="space-y-1">
+          <div className="text-xs">
+            {autoSyncEnabled && autoSyncScheduled && (
+              <span className="text-emerald-400">✓ Scheduled task registered</span>
+            )}
+            {autoSyncEnabled && !autoSyncScheduled && (
+              <span className="text-amber-400">
+                ⚠ Enabled, but no scheduled task is registered — click Save to
+                (re)create it.
+              </span>
+            )}
+            {!autoSyncEnabled && autoSyncScheduled && (
+              <span className="text-amber-400">
+                ⚠ A scheduled task still exists — click Save to remove it.
+              </span>
+            )}
+            {!autoSyncEnabled && !autoSyncScheduled && (
+              <span className="text-fg-subtle">Not scheduled.</span>
+            )}
+          </div>
+          <div className="text-xs text-fg-subtle">
+            {autoSyncLastRun
+              ? `Last background sync ${new Date(
+                  autoSyncLastRun * 1000,
+                ).toLocaleString()}`
+              : "Background sync hasn't run yet."}
+          </div>
         </div>
 
         {autoSyncMessage && (
