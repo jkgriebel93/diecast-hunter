@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
   api,
+  sortDriverOptions,
   type AutoSyncSettings,
   type CredentialState,
   type EbayCredentialsState,
@@ -138,7 +139,7 @@ export function Settings() {
       // form-options cache hasn't been populated yet).
       try {
         const ds = await api.listRegistryFormOptions("driver");
-        setDrivers(ds);
+        setDrivers(sortDriverOptions(ds, (x) => x.display));
       } catch {
         // not fatal — picker shows empty
       }

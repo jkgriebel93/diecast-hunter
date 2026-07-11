@@ -13,6 +13,8 @@ import {
   isPreferredOem,
   prepareScaleOptions,
   prepareYearOptions,
+  byDriverNamePriority,
+  sortDriverOptions,
   type DriverOption,
   type FormOptionRow,
   type GroupMigrationProposal,
@@ -75,7 +77,10 @@ function clusterGroupsByDriver(groups: ListingGroup[]): {
   }
   const drivers = Array.from(byDriver.entries())
     .map(([id, v]) => ({ id, name: v.name, groups: v.groups }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort(
+      (a, b) =>
+        byDriverNamePriority(a.name, b.name) || a.name.localeCompare(b.name),
+    );
   for (const d of drivers) d.groups.sort((a, b) => a.name.localeCompare(b.name));
   noDriver.sort((a, b) => a.name.localeCompare(b.name));
   return { drivers, noDriver, archived };
@@ -280,7 +285,7 @@ export function Listings() {
   async function loadLocalDrivers() {
     try {
       const list = await api.listDrivers();
-      setLocalDrivers(list);
+      setLocalDrivers(sortDriverOptions(list, (d) => d.name));
     } catch {
       // Non-fatal: the driver picker still works on free-form input.
     }
@@ -737,7 +742,10 @@ export function Listings() {
     }
     const options = Array.from(byKey.entries())
       .map(([key, v]) => ({ value: `d:${key}`, name: v.name, count: v.count }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort(
+        (a, b) =>
+          byDriverNamePriority(a.name, b.name) || a.name.localeCompare(b.name),
+      );
     return { options, noneCount, allCount };
   }, [rows, filterState]);
 
@@ -3082,7 +3090,7 @@ function DriverMultiSelect({
     api
       .listDrivers()
       .then((d) => {
-        if (alive) setDrivers(d);
+        if (alive) setDrivers(sortDriverOptions(d, (x) => x.name));
       })
       .catch(() => {
         // Non-fatal: typing a new name still works — it resolves on save.
@@ -3443,7 +3451,7 @@ function GroupMigrationWizard({
       .listDrivers()
       .then((ds) => {
         if (!alive) return;
-        setDrivers(ds);
+        setDrivers(sortDriverOptions(ds, (x) => x.name));
         const seeded: MigrationRule[] = [];
         const seen = new Set<string>();
         for (const d of ds) {
@@ -3920,7 +3928,7 @@ function RegistrySearchDialog({
         api.listRegistryFormOptions("make"),
         api.listRegistryFormOptions("finish"),
       ]);
-      setDrivers(d);
+      setDrivers(sortDriverOptions(d, (x) => x.display));
       setOems(o);
       setScales(prepareScaleOptions(s));
       setYears(prepareYearOptions(y));

@@ -1,2 +1,8 @@
 - Prioritize single drivers in driver dropdown search
+    - Perhaps a favorite drivers feature?
 - Auto sync overnight
+- Wishlist feature
+    - Select DCR entries
+    - Link saved eBay listings
+- FB Marketplace integration
+- Lionel website integration

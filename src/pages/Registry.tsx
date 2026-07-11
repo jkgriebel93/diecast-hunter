@@ -6,6 +6,7 @@ import {
   isPreferredOem,
   prepareScaleOptions,
   prepareYearOptions,
+  sortDriverOptions,
   type Condition,
   type FormOptionRow,
   type ProductionSearchResult,
@@ -88,7 +89,7 @@ export function Registry() {
         api.listRegistryFormOptions("make"),
         api.listRegistryFormOptions("finish"),
       ]);
-      setDrivers(d);
+      setDrivers(sortDriverOptions(d, (x) => x.display));
       setOems(o);
       setScales(prepareScaleOptions(s));
       setYears(prepareYearOptions(y));

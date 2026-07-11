@@ -702,6 +702,52 @@ export interface DriverOption {
   normalized_name: string;
 }
 
+/** Generational suffixes that belong to one driver's name rather than
+ *  signalling a second driver. */
+const DRIVER_SUFFIX_TOKENS = new Set([
+  "jr",
+  "jr.",
+  "sr",
+  "sr.",
+  "ii",
+  "iii",
+  "iv",
+  "v",
+]);
+
+/** Multi-driver entries concatenate full names with no delimiter
+ *  (e.g. "Jeff Gordon Tony Stewart"), so word count is the only signal we
+ *  have: an entry of two words or fewer — ignoring suffixes like "Jr" —
+ *  names a single driver. (Rare three-word single names like
+ *  "Juan Pablo Montoya" are misread as multi-driver; there's no reliable
+ *  way to tell them apart from a name string alone.) */
+export function isSingleDriverName(name: string): boolean {
+  const words = name
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w && !DRIVER_SUFFIX_TOKENS.has(w.toLowerCase()));
+  return words.length <= 2;
+}
+
+/** Comparator that floats single-driver entries above multi-driver ones,
+ *  leaving same-bucket ordering to a caller-supplied secondary sort. */
+export function byDriverNamePriority(a: string, b: string): number {
+  return Number(!isSingleDriverName(a)) - Number(!isSingleDriverName(b));
+}
+
+/** Sort a list of driver-bearing rows: single-driver names first, then
+ *  alphabetically. Returns a new array; the input is left untouched. */
+export function sortDriverOptions<T>(
+  list: T[],
+  nameOf: (row: T) => string,
+): T[] {
+  return [...list].sort(
+    (a, b) =>
+      byDriverNamePriority(nameOf(a), nameOf(b)) ||
+      nameOf(a).localeCompare(nameOf(b)),
+  );
+}
+
 export function formatCents(cents: number | null): string {
   if (cents === null || cents === undefined) return "—";
   return `$${(cents / 100).toFixed(2)}`;
