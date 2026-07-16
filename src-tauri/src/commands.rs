@@ -5,6 +5,7 @@ use tauri::State;
 
 use crate::error::{AppError, AppResult};
 use crate::listing_groups;
+use crate::match_feedback::{self, FeedbackLabel};
 use crate::progress::ProgressEmitter;
 use crate::saved;
 use crate::settings;
@@ -732,6 +733,27 @@ pub async fn clear_listing_match(state: State<'_, AppState>, listing_id: i64) ->
 /// no registry entry).
 #[tauri::command]
 pub async fn reject_listing_match(state: State<'_, AppState>, listing_id: i64) -> AppResult<()> {
+    // What is the user rejecting? An unconfirmed auto-suggestion is a
+    // labeled negative for that specific entry; otherwise it's a bare
+    // "nothing matches". Read it before the upsert erases it.
+    let previous: Option<(Option<i64>, i64, Option<String>)> = sqlx::query_as(
+        "SELECT registry_entry_id, user_confirmed, matched_by
+         FROM listing_matches WHERE listing_id = ?",
+    )
+    .bind(listing_id)
+    .fetch_optional(&state.db.pool)
+    .await?;
+    let already_rejected = previous
+        .as_ref()
+        .is_some_and(|(e, c, _)| *c != 0 && e.is_none());
+    let rejected_entry = previous.as_ref().and_then(|(e, c, m)| {
+        if *c == 0 && m.as_deref() == Some("auto") {
+            *e
+        } else {
+            None
+        }
+    });
+
     let now = chrono::Utc::now().timestamp();
     sqlx::query(
         "INSERT INTO listing_matches
@@ -750,6 +772,17 @@ pub async fn reject_listing_match(state: State<'_, AppState>, listing_id: i64) -
     .bind(now)
     .execute(&state.db.pool)
     .await?;
+
+    if !already_rejected {
+        match_feedback::record_best_effort(
+            &state.db.pool,
+            listing_id,
+            rejected_entry,
+            FeedbackLabel::Rejected,
+            "reject_button",
+        )
+        .await;
+    }
     Ok(())
 }
 
@@ -757,17 +790,36 @@ pub async fn reject_listing_match(state: State<'_, AppState>, listing_id: i64) -
 /// kept as-is so the row still records how sure the matcher was.
 #[tauri::command]
 pub async fn confirm_listing_match(state: State<'_, AppState>, listing_id: i64) -> AppResult<()> {
-    let result = sqlx::query(
+    let row: Option<(Option<i64>, i64)> = sqlx::query_as(
+        "SELECT registry_entry_id, user_confirmed
+         FROM listing_matches WHERE listing_id = ? AND registry_entry_id IS NOT NULL",
+    )
+    .bind(listing_id)
+    .fetch_optional(&state.db.pool)
+    .await?;
+    let Some((entry_id, was_confirmed)) = row else {
+        return Err(AppError::Parse(format!(
+            "listing {listing_id} has no match to confirm"
+        )));
+    };
+
+    sqlx::query(
         "UPDATE listing_matches SET user_confirmed = 1
          WHERE listing_id = ? AND registry_entry_id IS NOT NULL",
     )
     .bind(listing_id)
     .execute(&state.db.pool)
     .await?;
-    if result.rows_affected() == 0 {
-        return Err(AppError::Parse(format!(
-            "listing {listing_id} has no match to confirm"
-        )));
+
+    if was_confirmed == 0 {
+        match_feedback::record_best_effort(
+            &state.db.pool,
+            listing_id,
+            entry_id,
+            FeedbackLabel::Confirmed,
+            "confirm_button",
+        )
+        .await;
     }
     Ok(())
 }

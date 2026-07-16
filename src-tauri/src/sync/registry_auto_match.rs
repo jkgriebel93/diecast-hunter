@@ -7,15 +7,18 @@
 //! entries and the caller allows network, we run the same /Production
 //! search the pre-warm flow uses to pull them in first.
 //!
-//! Scoring works off the listing *title* only. The truly reliable
-//! identifiers (part number, production count) usually live in listing
-//! photos, which we can't read — but sellers often quote the production
-//! run ("1 of 5,004") in the title, and that plus year/scale/scheme/OEM
-//! gets us a defensible confidence number. Matches are written to
-//! `listing_matches` with `user_confirmed = 0` and `matched_by = 'auto'`,
-//! plus a JSON list of reasons so the UI can show *why* we think it fits.
-//! Rows the user has confirmed (or explicitly marked no-match) are never
-//! touched.
+//! Scoring reads the listing *title* plus whatever the source payload in
+//! `listings.raw_json` offers: eBay Browse `localizedAspects` (seller-filled
+//! item specifics like Scale / Year / Brand — higher precision than title
+//! regexes) and free-text descriptions, which often quote the production
+//! run ("1 of 5,004") even when the title doesn't. Each signal is a named
+//! feature in [`MatchFeatures`]; the score is a dot product with
+//! [`MatchWeights`], so the weights can later be fit to the verdicts
+//! accumulating in `match_feedback` instead of staying hand-tuned.
+//! Matches are written to `listing_matches` with `user_confirmed = 0` and
+//! `matched_by = 'auto'`, plus a JSON list of reasons so the UI can show
+//! *why* we think it fits. Rows the user has confirmed (or explicitly
+//! marked no-match) are never touched.
 
 use std::collections::{HashMap, HashSet};
 
@@ -38,6 +41,73 @@ const MAX_CONFIDENCE: f64 = 95.0;
 /// genuinely ambiguous, so the confidence takes a penalty.
 const AMBIGUITY_MARGIN: f64 = 5.0;
 const AMBIGUITY_PENALTY: f64 = 15.0;
+
+/// Defines `MatchFeatures` and `MatchWeights` with identical fields so the
+/// dot product can't silently miss one.
+macro_rules! match_feature_fields {
+    ($($field:ident),* $(,)?) => {
+        /// Named signals for one (listing, registry entry) pair. Fields are
+        /// 0/1 indicators except `scheme_overlap` (fraction in [0, 1]).
+        /// Serialized as `features_json` in `match_feedback` rows.
+        #[derive(Debug, Default, Clone, Serialize)]
+        pub struct MatchFeatures {
+            $(pub $field: f64,)*
+        }
+
+        /// Per-feature points. Conflict weights are negative. Hand-tuned for
+        /// now; the plan is to fit these to `match_feedback` verdicts.
+        #[derive(Debug, Clone, Serialize)]
+        pub struct MatchWeights {
+            $(pub $field: f64,)*
+        }
+
+        impl MatchFeatures {
+            pub fn score(&self, w: &MatchWeights) -> f64 {
+                0.0 $(+ self.$field * w.$field)*
+            }
+        }
+    };
+}
+
+match_feature_fields!(
+    driver_match,
+    prod_count_match,
+    prod_count_conflict,
+    year_match,
+    year_conflict,
+    scale_match,
+    scale_conflict,
+    car_number_match,
+    car_number_conflict,
+    scheme_overlap,
+    oem_match,
+    brand_match,
+    aspect_year_match,
+    aspect_scale_match,
+    aspect_maker_match,
+);
+
+impl Default for MatchWeights {
+    fn default() -> Self {
+        MatchWeights {
+            driver_match: 25.0,
+            prod_count_match: 30.0,
+            prod_count_conflict: -20.0,
+            year_match: 15.0,
+            year_conflict: -10.0,
+            scale_match: 10.0,
+            scale_conflict: -15.0,
+            car_number_match: 8.0,
+            car_number_conflict: -8.0,
+            scheme_overlap: 15.0,
+            oem_match: 5.0,
+            brand_match: 5.0,
+            aspect_year_match: 5.0,
+            aspect_scale_match: 5.0,
+            aspect_maker_match: 3.0,
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Clone)]
 pub struct AutoMatchOutcome {
@@ -77,6 +147,7 @@ pub struct AutoMatchSummary {
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct Candidate {
     id: i64,
+    driver_id: Option<i64>,
     year: Option<i64>,
     year_raced: Option<i64>,
     oem: Option<String>,
@@ -87,6 +158,26 @@ struct Candidate {
     production_qty: Option<i64>,
 }
 
+/// Bidirectional token bridges from the `scheme_aliases` table: looking up
+/// either side of a row yields the other, so "bud" in a title reaches
+/// "budweiser" in a scheme and vice versa.
+type AliasMap = HashMap<String, Vec<String>>;
+
+async fn load_aliases(pool: &SqlitePool) -> AppResult<AliasMap> {
+    let rows: Vec<(String, String)> = sqlx::query_as("SELECT alias, canonical FROM scheme_aliases")
+        .fetch_all(pool)
+        .await?;
+    let mut map: AliasMap = HashMap::new();
+    for (alias, canonical) in rows {
+        let (alias, canonical) = (alias.to_lowercase(), canonical.to_lowercase());
+        map.entry(alias.clone())
+            .or_default()
+            .push(canonical.clone());
+        map.entry(canonical).or_default().push(alias);
+    }
+    Ok(map)
+}
+
 /// Auto-match a single listing. `network` enables the pull-from-DCR
 /// fallback when the listing's driver has no local registry entries; pass
 /// `None` for the cheap local-only flavor used after listing add/refresh.
@@ -95,12 +186,12 @@ pub async fn auto_match_listing(
     listing_id: i64,
     network: Option<&ProgressEmitter>,
 ) -> AppResult<AutoMatchOutcome> {
-    let row: Option<(String, Option<i64>)> =
-        sqlx::query_as("SELECT title, driver_id FROM listings WHERE id = ?")
+    let row: Option<(String, Option<i64>, Option<String>)> =
+        sqlx::query_as("SELECT title, driver_id, raw_json FROM listings WHERE id = ?")
             .bind(listing_id)
             .fetch_optional(pool)
             .await?;
-    let Some((title, driver_id)) = row else {
+    let Some((title, driver_id, raw_json)) = row else {
         return Err(AppError::Parse(format!("listing {listing_id} not found")));
     };
 
@@ -129,7 +220,9 @@ pub async fn auto_match_listing(
         ));
     }
 
-    apply_best(pool, listing_id, &title, &candidates).await
+    let aliases = load_aliases(pool).await?;
+    let sig = build_signals(&title, raw_json.as_deref(), &aliases);
+    apply_best(pool, listing_id, &sig, &candidates).await
 }
 
 /// Auto-match every listing that the user hasn't already confirmed or
@@ -142,8 +235,8 @@ pub async fn auto_match_all(
     progress: &ProgressEmitter,
     allow_network: bool,
 ) -> AppResult<AutoMatchSummary> {
-    let rows: Vec<(i64, String, Option<i64>)> = sqlx::query_as(
-        "SELECT l.id, l.title, l.driver_id
+    let rows: Vec<(i64, String, Option<i64>, Option<String>)> = sqlx::query_as(
+        "SELECT l.id, l.title, l.driver_id, l.raw_json
          FROM listings l
          LEFT JOIN listing_matches lm ON lm.listing_id = l.id
          WHERE COALESCE(lm.user_confirmed, 0) = 0
@@ -162,11 +255,12 @@ pub async fn auto_match_all(
         return Ok(summary);
     }
 
+    let aliases = load_aliases(pool).await?;
     let mut cache: HashMap<i64, Vec<Candidate>> = HashMap::new();
     let mut prewarm_attempted: HashSet<i64> = HashSet::new();
     let mut network_ok = allow_network;
 
-    for (idx, (listing_id, title, driver_id)) in rows.into_iter().enumerate() {
+    for (idx, (listing_id, title, driver_id, raw_json)) in rows.into_iter().enumerate() {
         progress.check_cancelled()?;
         let done = (idx + 1) as u32;
         if done == 1 || done % 25 == 0 || done == total {
@@ -208,7 +302,8 @@ pub async fn auto_match_all(
             summary.no_candidates += 1;
             continue;
         }
-        let outcome = apply_best(pool, listing_id, &title, candidates).await?;
+        let sig = build_signals(&title, raw_json.as_deref(), &aliases);
+        let outcome = apply_best(pool, listing_id, &sig, candidates).await?;
         if outcome.matched {
             summary.matched += 1;
         } else {
@@ -227,15 +322,55 @@ pub async fn auto_match_all(
     Ok(summary)
 }
 
-/// Score the candidates against the title and persist the winner if it
-/// clears the threshold; otherwise drop any stale auto-match row.
+/// Compute the feature vector and raw score for an arbitrary
+/// (listing, registry entry) pair — the hook `match_feedback` uses to
+/// snapshot *why* a pairing looked the way it did when the user passed a
+/// verdict on it. Unlike the auto-match path, the entry may belong to a
+/// different driver than the listing (or no driver), so the driver signal
+/// is computed rather than assumed. Returns None when either row is gone.
+pub async fn features_for_pair(
+    pool: &SqlitePool,
+    listing_id: i64,
+    entry_id: i64,
+) -> AppResult<Option<(MatchFeatures, f64)>> {
+    let listing: Option<(String, Option<i64>, Option<String>)> =
+        sqlx::query_as("SELECT title, driver_id, raw_json FROM listings WHERE id = ?")
+            .bind(listing_id)
+            .fetch_optional(pool)
+            .await?;
+    let Some((title, listing_driver, raw_json)) = listing else {
+        return Ok(None);
+    };
+
+    let candidate: Option<Candidate> = sqlx::query_as(
+        "SELECT id, driver_id, year, year_raced, oem, brand, scale, car_number,
+                scheme_text, production_qty
+         FROM registry_entries WHERE id = ?",
+    )
+    .bind(entry_id)
+    .fetch_optional(pool)
+    .await?;
+    let Some(candidate) = candidate else {
+        return Ok(None);
+    };
+
+    let aliases = load_aliases(pool).await?;
+    let sig = build_signals(&title, raw_json.as_deref(), &aliases);
+    let driver_match = listing_driver.is_some() && listing_driver == candidate.driver_id;
+    let (features, _reasons) = extract_features(&sig, &candidate, driver_match);
+    let score = features.score(&MatchWeights::default());
+    Ok(Some((features, score)))
+}
+
+/// Score the candidates against the listing signals and persist the winner
+/// if it clears the threshold; otherwise drop any stale auto-match row.
 async fn apply_best(
     pool: &SqlitePool,
     listing_id: i64,
-    title: &str,
+    sig: &ListingSignals,
     candidates: &[Candidate],
 ) -> AppResult<AutoMatchOutcome> {
-    let Some((entry_id, confidence, reasons)) = pick_best(title, candidates) else {
+    let Some((entry_id, confidence, reasons)) = pick_best(sig, candidates) else {
         return Ok(AutoMatchOutcome::skipped("no candidate scored at all"));
     };
 
@@ -307,7 +442,7 @@ async fn is_user_confirmed(pool: &SqlitePool, listing_id: i64) -> AppResult<bool
 
 async fn load_candidates(pool: &SqlitePool, driver_id: i64) -> AppResult<Vec<Candidate>> {
     let rows: Vec<Candidate> = sqlx::query_as(
-        "SELECT id, year, year_raced, oem, brand, scale, car_number,
+        "SELECT id, driver_id, year, year_raced, oem, brand, scale, car_number,
                 scheme_text, production_qty
          FROM registry_entries WHERE driver_id = ?",
     )
@@ -342,11 +477,13 @@ async fn prewarm_driver(
     Ok(true)
 }
 
-// ----- scoring (pure, unit-tested) -----
+// ----- signal extraction and scoring (pure, unit-tested) -----
 
-/// Everything we can read off a listing title.
+/// Everything we can read off a listing: title, plus item specifics and
+/// description text from the stored source payload.
 #[derive(Debug, Default)]
-struct TitleSignals {
+struct ListingSignals {
+    /// Title tokens, expanded with scheme-alias bridges (both directions).
     tokens: HashSet<String>,
     years: HashSet<i64>,
     /// Normalized "1:24" form.
@@ -355,6 +492,13 @@ struct TitleSignals {
     car_numbers: HashSet<String>,
     /// Production-run sizes ("1 of 5,004" → 5004).
     production_counts: HashSet<i64>,
+    /// Subsets of the above that came from structured eBay item specifics
+    /// (`localizedAspects`) — seller-filled fields, more trustworthy than a
+    /// regex hit in free text, so they earn a scoring bonus.
+    aspect_years: HashSet<i64>,
+    aspect_scales: HashSet<String>,
+    /// Tokens from Brand / Manufacturer / Make aspects.
+    aspect_maker_tokens: HashSet<String>,
 }
 
 static SCALE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b1\s*[:/]\s*(18|24|32|64)\b").unwrap());
@@ -371,28 +515,56 @@ fn parse_count(s: &str) -> Option<i64> {
     s.replace(',', "").parse().ok()
 }
 
-fn extract_signals(title: &str) -> TitleSignals {
-    let mut sig = TitleSignals {
+fn year_from_token(t: &str) -> Option<i64> {
+    if t.len() != 4 {
+        return None;
+    }
+    let y: i64 = t.parse().ok()?;
+    (1948..=2035).contains(&y).then_some(y)
+}
+
+/// Build the full signal set for a listing: title first, then whatever the
+/// stored source payload adds (see [`merge_raw_json_signals`]), then the
+/// alias expansion of the title tokens.
+fn build_signals(title: &str, raw_json: Option<&str>, aliases: &AliasMap) -> ListingSignals {
+    let mut sig = ListingSignals {
         tokens: tokenize(title).into_iter().collect(),
         ..Default::default()
     };
-    for t in &sig.tokens {
-        if t.len() == 4 {
-            if let Ok(y) = t.parse::<i64>() {
-                if (1948..=2035).contains(&y) {
-                    sig.years.insert(y);
-                }
-            }
+    merge_text_signals(&mut sig, title);
+    if let Some(raw) = raw_json {
+        merge_raw_json_signals(&mut sig, raw);
+    }
+    let expansions: Vec<String> = sig
+        .tokens
+        .iter()
+        .filter_map(|t| aliases.get(t))
+        .flatten()
+        .cloned()
+        .collect();
+    sig.tokens.extend(expansions);
+    sig
+}
+
+/// Regex-extract years / scales / car numbers / production counts from a
+/// chunk of free text into the general signal sets. Deliberately does NOT
+/// add the text's tokens to `sig.tokens`: descriptions often mention a
+/// seller's *other* cars, and letting those words into the scheme-overlap
+/// pool would reward wrong candidates.
+fn merge_text_signals(sig: &mut ListingSignals, text: &str) {
+    for t in tokenize(text) {
+        if let Some(y) = year_from_token(&t) {
+            sig.years.insert(y);
         }
     }
-    for c in SCALE_RE.captures_iter(title) {
+    for c in SCALE_RE.captures_iter(text) {
         sig.scales.insert(format!("1:{}", &c[1]));
     }
-    for c in CAR_NUM_RE.captures_iter(title) {
+    for c in CAR_NUM_RE.captures_iter(text) {
         sig.car_numbers
             .insert(c[1].trim_start_matches('0').to_string());
     }
-    for c in PROD_COUNT_RE.captures_iter(title) {
+    for c in PROD_COUNT_RE.captures_iter(text) {
         // Denominator ≥ 100 keeps scale fractions ("1/24") and lot counts
         // ("2 of 3") out; production runs are practically always larger.
         if let (Some(num), Some(den)) = (parse_count(&c[1]), parse_count(&c[2])) {
@@ -401,14 +573,60 @@ fn extract_signals(title: &str) -> TitleSignals {
             }
         }
     }
-    for c in LIMITED_RE.captures_iter(title) {
+    for c in LIMITED_RE.captures_iter(text) {
         if let Some(den) = parse_count(&c[1]) {
             if den >= 100 {
                 sig.production_counts.insert(den);
             }
         }
     }
-    sig
+}
+
+/// Mine the stored source payload. eBay Browse responses carry
+/// `localizedAspects` (structured item specifics) and `shortDescription`;
+/// the FB-extension payload carries `description`.
+fn merge_raw_json_signals(sig: &mut ListingSignals, raw_json: &str) {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(raw_json) else {
+        return;
+    };
+
+    if let Some(aspects) = v.get("localizedAspects").and_then(|a| a.as_array()) {
+        for aspect in aspects {
+            let name = aspect.get("name").and_then(|n| n.as_str());
+            let value = aspect.get("value").and_then(|n| n.as_str());
+            let (Some(name), Some(value)) = (name, value) else {
+                continue;
+            };
+            let name = name.to_lowercase();
+            if name.contains("scale") {
+                for c in SCALE_RE.captures_iter(value) {
+                    let s = format!("1:{}", &c[1]);
+                    sig.scales.insert(s.clone());
+                    sig.aspect_scales.insert(s);
+                }
+            } else if name.contains("year") {
+                for t in tokenize(value) {
+                    if let Some(y) = year_from_token(&t) {
+                        sig.years.insert(y);
+                        sig.aspect_years.insert(y);
+                    }
+                }
+            } else if name.contains("brand") || name.contains("manufacturer") || name == "make" {
+                for t in tokenize(value) {
+                    if t.len() >= 3 {
+                        sig.aspect_maker_tokens.insert(t.clone());
+                        sig.tokens.insert(t);
+                    }
+                }
+            }
+        }
+    }
+
+    for key in ["shortDescription", "description"] {
+        if let Some(text) = v.get(key).and_then(|s| s.as_str()) {
+            merge_text_signals(sig, text);
+        }
+    }
 }
 
 /// Candidate-side car number: the dedicated column when enriched, else the
@@ -438,51 +656,70 @@ fn scheme_tokens(scheme_text: &str) -> HashSet<String> {
         .collect()
 }
 
-fn score_candidate(sig: &TitleSignals, c: &Candidate) -> (f64, Vec<String>) {
-    // Candidates are pre-filtered to the listing's detected driver, so every
-    // one starts with that signal banked.
-    let mut score = 25.0;
-    let mut reasons = vec!["driver matches".to_string()];
+/// The feature vector for one candidate, plus human-readable reasons for
+/// every signal that fired. `driver_match` is passed in because the
+/// auto-match path pre-filters candidates to the listing's driver (always
+/// true) while `features_for_pair` compares arbitrary pairs.
+fn extract_features(
+    sig: &ListingSignals,
+    c: &Candidate,
+    driver_match: bool,
+) -> (MatchFeatures, Vec<String>) {
+    let mut f = MatchFeatures::default();
+    let mut reasons = Vec::new();
 
-    // Production run — the strongest signal a title can carry.
+    if driver_match {
+        f.driver_match = 1.0;
+        reasons.push("driver matches".to_string());
+    }
+
+    // Production run — the strongest signal a listing can carry.
     if let Some(qty) = c.production_qty {
         if sig.production_counts.contains(&qty) {
-            score += 30.0;
-            reasons.push(format!("production run of {qty} in title"));
+            f.prod_count_match = 1.0;
+            reasons.push(format!("production run of {qty} in listing"));
         } else if !sig.production_counts.is_empty() {
-            score -= 20.0;
-            reasons.push("production count in title differs".to_string());
+            f.prod_count_conflict = 1.0;
+            reasons.push("production count in listing differs".to_string());
         }
     }
 
     if !sig.years.is_empty() {
         let candidate_years: Vec<i64> = [c.year, c.year_raced].into_iter().flatten().collect();
         if let Some(y) = candidate_years.iter().find(|y| sig.years.contains(y)) {
-            score += 15.0;
+            f.year_match = 1.0;
             reasons.push(format!("year {y} matches"));
+            if sig.aspect_years.contains(y) {
+                f.aspect_year_match = 1.0;
+                reasons.push("year confirmed by item specifics".to_string());
+            }
         } else if !candidate_years.is_empty() {
-            score -= 10.0;
-            reasons.push("year in title differs".to_string());
+            f.year_conflict = 1.0;
+            reasons.push("year in listing differs".to_string());
         }
     }
 
     if let Some(scale) = c.scale.as_deref() {
         if sig.scales.contains(scale) {
-            score += 10.0;
+            f.scale_match = 1.0;
             reasons.push(format!("scale {scale} matches"));
+            if sig.aspect_scales.contains(scale) {
+                f.aspect_scale_match = 1.0;
+                reasons.push("scale confirmed by item specifics".to_string());
+            }
         } else if !sig.scales.is_empty() {
-            score -= 15.0;
-            reasons.push("scale in title differs".to_string());
+            f.scale_conflict = 1.0;
+            reasons.push("scale in listing differs".to_string());
         }
     }
 
     if let (Some(cn), false) = (candidate_car_number(c), sig.car_numbers.is_empty()) {
         if sig.car_numbers.contains(&cn) {
-            score += 8.0;
+            f.car_number_match = 1.0;
             reasons.push(format!("car #{cn} matches"));
         } else {
-            score -= 8.0;
-            reasons.push("car number in title differs".to_string());
+            f.car_number_conflict = 1.0;
+            reasons.push("car number in listing differs".to_string());
         }
     }
 
@@ -491,38 +728,51 @@ fn score_candidate(sig: &TitleSignals, c: &Candidate) -> (f64, Vec<String>) {
         if !toks.is_empty() {
             let hits = toks.iter().filter(|t| sig.tokens.contains(*t)).count();
             if hits > 0 {
-                let frac = hits as f64 / toks.len() as f64;
-                score += 15.0 * frac;
+                f.scheme_overlap = hits as f64 / toks.len() as f64;
                 reasons.push(format!("scheme overlap ({hits} of {} words)", toks.len()));
             }
         }
     }
 
-    for (field, label, pts) in [(&c.oem, "OEM", 5.0), (&c.brand, "brand", 5.0)] {
-        if let Some(v) = field.as_deref() {
-            let hit = tokenize(v)
-                .into_iter()
-                .any(|t| t.len() >= 3 && sig.tokens.contains(&t));
-            if hit {
-                score += pts;
-                reasons.push(format!("{label} \"{v}\" in title"));
-            }
-        }
+    // Returns the matching token so the caller can check it against the
+    // structured Brand/Manufacturer aspects.
+    let maker_hit = |field: Option<&str>| -> Option<String> {
+        tokenize(field?)
+            .into_iter()
+            .find(|t| t.len() >= 3 && sig.tokens.contains(t))
+    };
+    let mut aspect_confirmed = false;
+    if let Some(t) = maker_hit(c.oem.as_deref()) {
+        f.oem_match = 1.0;
+        reasons.push(format!("OEM \"{}\" in listing", c.oem.as_deref().unwrap()));
+        aspect_confirmed |= sig.aspect_maker_tokens.contains(&t);
+    }
+    if let Some(t) = maker_hit(c.brand.as_deref()) {
+        f.brand_match = 1.0;
+        reasons.push(format!(
+            "brand \"{}\" in listing",
+            c.brand.as_deref().unwrap()
+        ));
+        aspect_confirmed |= sig.aspect_maker_tokens.contains(&t);
+    }
+    if aspect_confirmed {
+        f.aspect_maker_match = 1.0;
+        reasons.push("maker confirmed by item specifics".to_string());
     }
 
-    (score, reasons)
+    (f, reasons)
 }
 
 /// Returns the winning candidate's (entry id, confidence, reasons), or None
 /// when there are no candidates. Confidence is the raw score minus an
 /// ambiguity penalty when the runner-up is close, clamped to [0, 95].
-fn pick_best(title: &str, candidates: &[Candidate]) -> Option<(i64, f64, Vec<String>)> {
-    let sig = extract_signals(title);
+fn pick_best(sig: &ListingSignals, candidates: &[Candidate]) -> Option<(i64, f64, Vec<String>)> {
+    let weights = MatchWeights::default();
     let mut scored: Vec<(f64, &Candidate, Vec<String>)> = candidates
         .iter()
         .map(|c| {
-            let (s, r) = score_candidate(&sig, c);
-            (s, c, r)
+            let (f, r) = extract_features(sig, c, true);
+            (f.score(&weights), c, r)
         })
         .collect();
     scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -552,9 +802,14 @@ fn tokenize(s: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
+    fn signals(title: &str) -> ListingSignals {
+        build_signals(title, None, &AliasMap::new())
+    }
+
     fn cand(id: i64) -> Candidate {
         Candidate {
             id,
+            driver_id: Some(1),
             year: None,
             year_raced: None,
             oem: None,
@@ -569,6 +824,7 @@ mod tests {
     fn full_cand(id: i64, year: i64, scale: &str, scheme: &str, qty: Option<i64>) -> Candidate {
         Candidate {
             id,
+            driver_id: Some(1),
             year: Some(year),
             year_raced: Some(year),
             oem: Some("Action / Lionel".into()),
@@ -582,7 +838,7 @@ mod tests {
 
     #[test]
     fn extracts_production_counts_but_not_scales() {
-        let sig = extract_signals("1:24 Jeff Gordon DuPont 1/24 scale 1 of 5,004 made");
+        let sig = signals("1:24 Jeff Gordon DuPont 1/24 scale 1 of 5,004 made");
         assert!(sig.production_counts.contains(&5004));
         assert!(!sig.production_counts.contains(&24));
         assert!(sig.scales.contains("1:24"));
@@ -590,18 +846,111 @@ mod tests {
 
     #[test]
     fn extracts_limited_edition_counts() {
-        let sig = extract_signals("Dale Jr Budweiser limited edition of 3,500");
+        let sig = signals("Dale Jr Budweiser limited edition of 3,500");
         assert!(sig.production_counts.contains(&3500));
-        let sig2 = extract_signals("rare! only 504 made");
+        let sig2 = signals("rare! only 504 made");
         assert!(sig2.production_counts.contains(&504));
     }
 
     #[test]
     fn extracts_years_scales_car_numbers() {
-        let sig = extract_signals("2007 Jeff Gordon #24 Nicorette 1/24 Action");
+        let sig = signals("2007 Jeff Gordon #24 Nicorette 1/24 Action");
         assert!(sig.years.contains(&2007));
         assert!(sig.scales.contains("1:24"));
         assert!(sig.car_numbers.contains("24"));
+    }
+
+    #[test]
+    fn mines_ebay_aspects_and_description() {
+        let raw = serde_json::json!({
+            "localizedAspects": [
+                {"type": "STRING", "name": "Scale", "value": "1:24"},
+                {"type": "STRING", "name": "Year of Manufacture", "value": "2007"},
+                {"type": "STRING", "name": "Brand", "value": "Action Racing"},
+            ],
+            "shortDescription": "Mint in box, 1 of 2,508 produced.",
+        })
+        .to_string();
+        let sig = build_signals(
+            "Jeff Gordon Nicorette diecast",
+            Some(&raw),
+            &AliasMap::new(),
+        );
+        assert!(sig.scales.contains("1:24"));
+        assert!(sig.aspect_scales.contains("1:24"));
+        assert!(sig.years.contains(&2007));
+        assert!(sig.aspect_years.contains(&2007));
+        assert!(sig.aspect_maker_tokens.contains("action"));
+        assert!(sig.tokens.contains("action"));
+        assert!(sig.production_counts.contains(&2508));
+    }
+
+    #[test]
+    fn mines_fb_description() {
+        let raw = serde_json::json!({
+            "description": "1998 Chromalusion, 1/24 scale, limited edition of 5,004",
+            "source": "fb_extension",
+        })
+        .to_string();
+        let sig = build_signals("Jeff Gordon DuPont diecast", Some(&raw), &AliasMap::new());
+        assert!(sig.years.contains(&1998));
+        assert!(sig.scales.contains("1:24"));
+        assert!(sig.production_counts.contains(&5004));
+        // Description words must not leak into the scheme-overlap pool.
+        assert!(!sig.tokens.contains("chromalusion"));
+    }
+
+    #[test]
+    fn aspect_confirmation_outscores_title_only() {
+        let c = full_cand(1, 2007, "1:24", "#24 Nicorette", None);
+        let title_sig = signals("2007 Jeff Gordon Nicorette 1:24");
+        let raw = serde_json::json!({
+            "localizedAspects": [
+                {"name": "Scale", "value": "1:24"},
+                {"name": "Year", "value": "2007"},
+            ],
+        })
+        .to_string();
+        let aspect_sig = build_signals(
+            "2007 Jeff Gordon Nicorette 1:24",
+            Some(&raw),
+            &AliasMap::new(),
+        );
+        let w = MatchWeights::default();
+        let (tf, _) = extract_features(&title_sig, &c, true);
+        let (af, ar) = extract_features(&aspect_sig, &c, true);
+        assert!(af.score(&w) > tf.score(&w));
+        assert!(ar.iter().any(|r| r.contains("item specifics")));
+    }
+
+    #[test]
+    fn aliases_bridge_title_abbreviations_to_scheme_words() {
+        let mut aliases = AliasMap::new();
+        aliases.insert("bud".into(), vec!["budweiser".into()]);
+        aliases.insert("budweiser".into(), vec!["bud".into()]);
+        let c = Candidate {
+            scheme_text: Some("Budweiser 2001 Monte Carlo".into()),
+            ..cand(1)
+        };
+        let with = build_signals("Dale Jr #8 Bud 1:24", None, &aliases);
+        let without = build_signals("Dale Jr #8 Bud 1:24", None, &AliasMap::new());
+        let (f_with, _) = extract_features(&with, &c, true);
+        let (f_without, _) = extract_features(&without, &c, true);
+        assert!(f_with.scheme_overlap > f_without.scheme_overlap);
+    }
+
+    #[test]
+    fn features_serialize_with_named_fields() {
+        let (f, _) = extract_features(
+            &signals("2007 Jeff Gordon #24 Nicorette 1:24"),
+            &full_cand(1, 2007, "1:24", "#24 Nicorette", None),
+            true,
+        );
+        let json = serde_json::to_value(&f).unwrap();
+        assert_eq!(json["driver_match"], 1.0);
+        assert_eq!(json["year_match"], 1.0);
+        assert_eq!(json["scale_match"], 1.0);
+        assert_eq!(json["prod_count_match"], 0.0);
     }
 
     #[test]
@@ -623,7 +972,7 @@ mod tests {
             ),
         ];
         let (id, conf, _reasons) = pick_best(
-            "2007 Jeff Gordon #24 Nicorette 1:24 Action Elite 1 of 504",
+            &signals("2007 Jeff Gordon #24 Nicorette 1:24 Action Elite 1 of 504"),
             &candidates,
         )
         .unwrap();
@@ -644,7 +993,7 @@ mod tests {
             ),
         ];
         let (id, _conf, _r) = pick_best(
-            "2007 Jeff Gordon #24 DuPont Flames 1:24 — 1 of 2,508",
+            &signals("2007 Jeff Gordon #24 DuPont Flames 1:24 — 1 of 2,508"),
             &candidates,
         )
         .unwrap();
@@ -657,13 +1006,9 @@ mod tests {
             full_cand(1, 2007, "1:24", "#24 DuPont", None),
             full_cand(2, 2007, "1:24", "#24 DuPont", None),
         ];
-        let (_, conf_ambig, reasons) =
-            pick_best("2007 Jeff Gordon #24 DuPont 1:24", &candidates).unwrap();
-        let (_, conf_clear, _) = pick_best(
-            "2007 Jeff Gordon #24 DuPont 1:24",
-            &candidates[..1].to_vec(),
-        )
-        .unwrap();
+        let sig = signals("2007 Jeff Gordon #24 DuPont 1:24");
+        let (_, conf_ambig, reasons) = pick_best(&sig, &candidates).unwrap();
+        let (_, conf_clear, _) = pick_best(&sig, &candidates[..1].to_vec()).unwrap();
         assert!(conf_ambig < conf_clear);
         assert!(reasons.iter().any(|r| r.contains("almost equally")));
     }
@@ -672,7 +1017,7 @@ mod tests {
     fn driver_only_match_stays_below_threshold() {
         // A bare title with nothing but the driver name shouldn't clear 50.
         let candidates = vec![full_cand(1, 2007, "1:24", "#24 Nicorette", Some(504))];
-        let (_, conf, _) = pick_best("Jeff Gordon diecast lot", &candidates).unwrap();
+        let (_, conf, _) = pick_best(&signals("Jeff Gordon diecast lot"), &candidates).unwrap();
         assert!(conf < MIN_CONFIDENCE, "confidence was {conf}");
     }
 
@@ -680,13 +1025,13 @@ mod tests {
     fn contradictory_scale_and_year_are_penalized() {
         let right = full_cand(1, 1998, "1:64", "#24 DuPont Chromalusion", None);
         let wrong = full_cand(2, 2005, "1:24", "#24 DuPont Flames", None);
-        let title = "1998 Jeff Gordon #24 DuPont Chromalusion 1:64";
-        let (id, _, _) = pick_best(title, &vec![right.clone(), wrong.clone()]).unwrap();
+        let sig = signals("1998 Jeff Gordon #24 DuPont Chromalusion 1:64");
+        let (id, _, _) = pick_best(&sig, &vec![right.clone(), wrong.clone()]).unwrap();
         assert_eq!(id, 1);
-        let sig = extract_signals(title);
-        let (s_wrong, _) = score_candidate(&sig, &wrong);
-        let (s_right, _) = score_candidate(&sig, &right);
-        assert!(s_right - s_wrong > 30.0);
+        let w = MatchWeights::default();
+        let (f_wrong, _) = extract_features(&sig, &wrong, true);
+        let (f_right, _) = extract_features(&sig, &right, true);
+        assert!(f_right.score(&w) - f_wrong.score(&w) > 30.0);
     }
 
     #[test]
@@ -700,6 +1045,6 @@ mod tests {
 
     #[test]
     fn empty_candidates_returns_none() {
-        assert!(pick_best("anything", &[]).is_none());
+        assert!(pick_best(&signals("anything"), &[]).is_none());
     }
 }

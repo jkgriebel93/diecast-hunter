@@ -10,6 +10,7 @@ use sqlx::SqlitePool;
 
 use crate::dcr::DcrClient;
 use crate::error::{AppError, AppResult};
+use crate::match_feedback::{self, FeedbackLabel};
 use crate::settings;
 use crate::sync::dcr_registry;
 
@@ -86,7 +87,17 @@ pub async fn link_listing_to_registry(
             false
         });
 
-    // 3. Lock in the manual match.
+    // 3. Snapshot what this link is replacing, so the verdict log can tell
+    //    "user agreed with the auto-suggestion" from "user overrode it".
+    let previous: Option<(Option<i64>, i64, Option<String>)> = sqlx::query_as(
+        "SELECT registry_entry_id, user_confirmed, matched_by
+         FROM listing_matches WHERE listing_id = ?",
+    )
+    .bind(listing_id)
+    .fetch_optional(pool)
+    .await?;
+
+    // 4. Lock in the manual match.
     sqlx::query(
         "INSERT INTO listing_matches
             (listing_id, registry_entry_id, confidence, user_confirmed,
@@ -105,6 +116,40 @@ pub async fn link_listing_to_registry(
     .bind(now)
     .execute(pool)
     .await?;
+
+    // 5. Log the verdicts. An auto-suggestion the user linked away from is
+    //    a negative example for that entry; the linked entry is a positive
+    //    one (unless this is a no-op re-link of an already-confirmed pair).
+    let prev_auto_entry = previous.as_ref().and_then(|(e, _, m)| {
+        if m.as_deref() == Some("auto") {
+            *e
+        } else {
+            None
+        }
+    });
+    let already_confirmed_same = previous
+        .as_ref()
+        .is_some_and(|(e, c, _)| *c != 0 && *e == Some(entry_id));
+    if let Some(old) = prev_auto_entry.filter(|&old| old != entry_id) {
+        match_feedback::record_best_effort(
+            pool,
+            listing_id,
+            Some(old),
+            FeedbackLabel::CorrectedAway,
+            "manual_link",
+        )
+        .await;
+    }
+    if !already_confirmed_same {
+        match_feedback::record_best_effort(
+            pool,
+            listing_id,
+            Some(entry_id),
+            FeedbackLabel::Confirmed,
+            "manual_link",
+        )
+        .await;
+    }
 
     Ok(LinkResult {
         registry_entry_id: entry_id,
