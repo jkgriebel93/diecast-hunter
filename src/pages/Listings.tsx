@@ -11,6 +11,7 @@ import {
   api,
   formatCents,
   isPreferredOem,
+  prepareBrandOptions,
   prepareScaleOptions,
   prepareYearOptions,
   byDriverNamePriority,
@@ -3932,7 +3933,7 @@ function RegistrySearchDialog({
       setOems(o);
       setScales(prepareScaleOptions(s));
       setYears(prepareYearOptions(y));
-      setBrands(b);
+      setBrands(prepareBrandOptions(b));
       setMakes(m);
       setFinishes(f);
       setOptionsLoaded(true);

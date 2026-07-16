@@ -429,16 +429,40 @@ export const PREFERRED_OEM_DISPLAYS = [
   "Winners Circle",
 ];
 
-function normalizeOemKey(s: string): string {
+function normalizeOptionKey(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 const PREFERRED_OEM_KEYS = new Set(
-  PREFERRED_OEM_DISPLAYS.map(normalizeOemKey),
+  PREFERRED_OEM_DISPLAYS.map(normalizeOptionKey),
 );
 
 export function isPreferredOem(display: string): boolean {
-  return PREFERRED_OEM_KEYS.has(normalizeOemKey(display));
+  return PREFERRED_OEM_KEYS.has(normalizeOptionKey(display));
+}
+
+/** Brands floated to the top of brand dropdowns, in this order. */
+export const PREFERRED_BRAND_DISPLAYS = [
+  "ARC",
+  "Elite",
+  "NASCAR Authentics",
+  "QVC FRFO",
+  "RCCA",
+];
+
+const PREFERRED_BRAND_RANK = new Map(
+  PREFERRED_BRAND_DISPLAYS.map((d, i) => [normalizeOptionKey(d), i]),
+);
+
+/** Preferred brands first (in PREFERRED_BRAND_DISPLAYS order), then the
+ *  rest in their original order. */
+export function prepareBrandOptions(brands: FormOptionRow[]): FormOptionRow[] {
+  const rankOf = (b: FormOptionRow) =>
+    PREFERRED_BRAND_RANK.get(normalizeOptionKey(b.display));
+  const preferred = brands.filter((b) => rankOf(b) !== undefined);
+  const rest = brands.filter((b) => rankOf(b) === undefined);
+  preferred.sort((a, b) => rankOf(a)! - rankOf(b)!);
+  return [...preferred, ...rest];
 }
 
 /** NASCAR's first season was 1948, so registry year dropdowns never need to

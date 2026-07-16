@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
   api,
   formatCents,
   isPreferredOem,
+  prepareBrandOptions,
   prepareScaleOptions,
   prepareYearOptions,
   sortDriverOptions,
@@ -13,6 +14,7 @@ import {
 } from "@/lib/tauri";
 import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
+import { MultiSelect } from "@/components/MultiSelect";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-24 h-24",
@@ -21,6 +23,40 @@ const IMG_CLASS: Record<ImageSize, string> = {
 };
 
 const DCR_BASE = "https://www.diecastregistry.com";
+
+type SortMode =
+  | "registry"
+  | "driver"
+  | "year-desc"
+  | "year-asc"
+  | "retail-desc"
+  | "retail-asc"
+  | "qty-asc"
+  | "qty-desc";
+
+/** Parse a user-typed dollar amount ("25", "$12.50") into cents; null when
+ *  blank or unparseable, which means "no bound". */
+function parseDollars(s: string): number | null {
+  const t = s.trim().replace(/^\$/, "");
+  if (t === "") return null;
+  const v = Number(t);
+  if (!Number.isFinite(v) || v < 0) return null;
+  return Math.round(v * 100);
+}
+
+/** True when the value satisfies the bounds. With no bounds set, a null
+ *  value passes; once either bound is set, unvalued items are excluded. */
+function inRange(
+  cents: number | null,
+  min: number | null,
+  max: number | null,
+): boolean {
+  if (min === null && max === null) return true;
+  if (cents === null) return false;
+  if (min !== null && cents < min) return false;
+  if (max !== null && cents > max) return false;
+  return true;
+}
 
 const CONDITION_OPTIONS: { value: Condition; label: string }[] = [
   { value: "mint", label: "Mint" },
@@ -48,19 +84,13 @@ export function Registry() {
   const [finishes, setFinishes] = useState<FormOptionRow[]>([]);
   const [optionsLoaded, setOptionsLoaded] = useState(false);
 
-  const [driverInput, setDriverInput] = useState("");
-  const [selectedDriverGuid, setSelectedDriverGuid] = useState("");
-  const [selectedYear, setSelectedYear] = useState("");
-  const [oemInput, setOemInput] = useState("");
-  const [selectedOemGuid, setSelectedOemGuid] = useState("");
-  const [showAllOems, setShowAllOems] = useState(false);
-  const [selectedScaleGuid, setSelectedScaleGuid] = useState("");
-  const [brandInput, setBrandInput] = useState("");
-  const [selectedBrandGuid, setSelectedBrandGuid] = useState("");
-  const [makeInput, setMakeInput] = useState("");
-  const [selectedMakeGuid, setSelectedMakeGuid] = useState("");
-  const [finishInput, setFinishInput] = useState("");
-  const [selectedFinishGuid, setSelectedFinishGuid] = useState("");
+  const [selectedDriverGuids, setSelectedDriverGuids] = useState<string[]>([]);
+  const [selectedYears, setSelectedYears] = useState<string[]>([]);
+  const [selectedOemGuids, setSelectedOemGuids] = useState<string[]>([]);
+  const [selectedScaleGuids, setSelectedScaleGuids] = useState<string[]>([]);
+  const [selectedBrandGuids, setSelectedBrandGuids] = useState<string[]>([]);
+  const [selectedMakeGuids, setSelectedMakeGuids] = useState<string[]>([]);
+  const [selectedFinishGuids, setSelectedFinishGuids] = useState<string[]>([]);
   const [autographed, setAutographed] = useState(false);
   const [raced, setRaced] = useState(false);
 
@@ -72,6 +102,60 @@ export function Registry() {
 
   const [addTarget, setAddTarget] = useState<ProductionSearchResult | null>(null);
   const [imgSize, setImgSize] = useImageSize("registry");
+  const [sortMode, setSortMode] = useState<SortMode>("registry");
+  const [retailMin, setRetailMin] = useState("");
+  const [retailMax, setRetailMax] = useState("");
+  const [wholesaleMin, setWholesaleMin] = useState("");
+  const [wholesaleMax, setWholesaleMax] = useState("");
+
+  const filteredResults = useMemo(() => {
+    if (!results) return null;
+    const rMin = parseDollars(retailMin);
+    const rMax = parseDollars(retailMax);
+    const wMin = parseDollars(wholesaleMin);
+    const wMax = parseDollars(wholesaleMax);
+    if (rMin === null && rMax === null && wMin === null && wMax === null) {
+      return results;
+    }
+    return results.filter(
+      (r) =>
+        inRange(r.retail_value_cents, rMin, rMax) &&
+        inRange(r.wholesale_value_cents, wMin, wMax),
+    );
+  }, [results, retailMin, retailMax, wholesaleMin, wholesaleMax]);
+
+  const sortedResults = useMemo(() => {
+    if (!filteredResults || sortMode === "registry") return filteredResults;
+    const nullsLast = (av: number | null, bv: number | null) => {
+      if (av === null && bv === null) return 0;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+      return av - bv;
+    };
+    const list = [...filteredResults];
+    list.sort((a, b) => {
+      switch (sortMode) {
+        case "driver":
+          return (
+            a.driver_name.localeCompare(b.driver_name) ||
+            (b.year ?? 0) - (a.year ?? 0)
+          );
+        case "year-desc":
+          return nullsLast(b.year, a.year);
+        case "year-asc":
+          return nullsLast(a.year, b.year);
+        case "retail-desc":
+          return nullsLast(b.retail_value_cents, a.retail_value_cents);
+        case "retail-asc":
+          return nullsLast(a.retail_value_cents, b.retail_value_cents);
+        case "qty-asc":
+          return nullsLast(a.seq_produced_total, b.seq_produced_total);
+        case "qty-desc":
+          return nullsLast(b.seq_produced_total, a.seq_produced_total);
+      }
+    });
+    return list;
+  }, [filteredResults, sortMode]);
 
   useEffect(() => {
     void loadOptions();
@@ -93,7 +177,7 @@ export function Registry() {
       setOems(o);
       setScales(prepareScaleOptions(s));
       setYears(prepareYearOptions(y));
-      setBrands(b);
+      setBrands(prepareBrandOptions(b));
       setMakes(m);
       setFinishes(f);
       setOptionsLoaded(true);
@@ -125,13 +209,13 @@ export function Registry() {
     setResults(null);
     try {
       const r = await api.searchDcrProduction({
-        driver_guids: selectedDriverGuid ? [selectedDriverGuid] : [],
-        years: selectedYear ? [selectedYear] : [],
-        oem_guids: selectedOemGuid ? [selectedOemGuid] : [],
-        scale_guids: selectedScaleGuid ? [selectedScaleGuid] : [],
-        brand_guids: selectedBrandGuid ? [selectedBrandGuid] : [],
-        make_guids: selectedMakeGuid ? [selectedMakeGuid] : [],
-        finish_guids: selectedFinishGuid ? [selectedFinishGuid] : [],
+        driver_guids: selectedDriverGuids,
+        years: selectedYears,
+        oem_guids: selectedOemGuids,
+        scale_guids: selectedScaleGuids,
+        brand_guids: selectedBrandGuids,
+        make_guids: selectedMakeGuids,
+        finish_guids: selectedFinishGuids,
         autographed,
         raced,
       });
@@ -144,21 +228,19 @@ export function Registry() {
   }
 
   function onReset() {
-    setDriverInput("");
-    setSelectedDriverGuid("");
-    setSelectedYear("");
-    setOemInput("");
-    setSelectedOemGuid("");
-    setShowAllOems(false);
-    setSelectedScaleGuid("");
-    setBrandInput("");
-    setSelectedBrandGuid("");
-    setMakeInput("");
-    setSelectedMakeGuid("");
-    setFinishInput("");
-    setSelectedFinishGuid("");
+    setSelectedDriverGuids([]);
+    setSelectedYears([]);
+    setSelectedOemGuids([]);
+    setSelectedScaleGuids([]);
+    setSelectedBrandGuids([]);
+    setSelectedMakeGuids([]);
+    setSelectedFinishGuids([]);
     setAutographed(false);
     setRaced(false);
+    setRetailMin("");
+    setRetailMax("");
+    setWholesaleMin("");
+    setWholesaleMax("");
     setResults(null);
     setInfo(null);
     setError(null);
@@ -168,13 +250,13 @@ export function Registry() {
     optionsLoaded && drivers.length === 0 && oems.length === 0;
 
   const canSearch =
-    !!selectedDriverGuid ||
-    !!selectedYear ||
-    !!selectedOemGuid ||
-    !!selectedScaleGuid ||
-    !!selectedBrandGuid ||
-    !!selectedMakeGuid ||
-    !!selectedFinishGuid ||
+    selectedDriverGuids.length > 0 ||
+    selectedYears.length > 0 ||
+    selectedOemGuids.length > 0 ||
+    selectedScaleGuids.length > 0 ||
+    selectedBrandGuids.length > 0 ||
+    selectedMakeGuids.length > 0 ||
+    selectedFinishGuids.length > 0 ||
     autographed ||
     raced;
 
@@ -206,183 +288,94 @@ export function Registry() {
           </button>
         </div>
       ) : (
-        <section className="card space-y-3">
-          <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),1fr))]">
+        <section className="card space-y-4">
+          <div className="grid gap-x-4 gap-y-3 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
             <div>
               <label className="label">Driver</label>
-              <input
-                list="dcr-drivers-list"
-                type="text"
-                value={driverInput}
-                onChange={(e) => {
-                  setDriverInput(e.target.value);
-                  const match = drivers.find(
-                    (d) => d.display === e.target.value,
-                  );
-                  setSelectedDriverGuid(match?.value ?? "");
-                }}
-                className="input"
-                placeholder="Type to search…"
-                autoComplete="off"
+              <MultiSelect
+                options={drivers}
+                selected={selectedDriverGuids}
+                onChange={setSelectedDriverGuids}
+                placeholder="Any (type to search…)"
               />
-              <datalist id="dcr-drivers-list">
-                {drivers.map((d) => (
-                  <option key={d.value} value={d.display} />
-                ))}
-              </datalist>
             </div>
             <div>
               <label className="label">Year</label>
-              <select
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(e.target.value)}
-                className="input"
-              >
-                <option value="">Any</option>
-                {years.map((y) => (
-                  <option key={y.value} value={y.value}>
-                    {y.display}
-                  </option>
-                ))}
-              </select>
+              <MultiSelect
+                options={years}
+                selected={selectedYears}
+                onChange={setSelectedYears}
+              />
             </div>
             <div>
               <label className="label">OEM</label>
-              <input
-                list="dcr-oems-list"
-                type="text"
-                value={oemInput}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setOemInput(v);
-                  const match = oems.find((o) => o.display === v);
-                  setSelectedOemGuid(match?.value ?? "");
-                }}
-                className="input"
+              <MultiSelect
+                options={oems}
+                selected={selectedOemGuids}
+                onChange={setSelectedOemGuids}
                 placeholder="Any (type to search…)"
-                autoComplete="off"
+                shortlist={(o) => isPreferredOem(o.display)}
               />
-              <datalist id="dcr-oems-list">
-                {(oemInput.trim() === "" && !showAllOems
-                  ? oems.filter((o) => isPreferredOem(o.display))
-                  : oems
-                ).map((o) => (
-                  <option key={o.value} value={o.display} />
-                ))}
-              </datalist>
-              {oemInput.trim() === "" && !showAllOems && (
-                <button
-                  type="button"
-                  className="text-xs text-fg-subtle hover:text-fg-muted mt-1"
-                  onClick={() => setShowAllOems(true)}
-                >
-                  More…
-                </button>
-              )}
             </div>
             <div>
               <label className="label">Scale</label>
-              <select
-                value={selectedScaleGuid}
-                onChange={(e) => setSelectedScaleGuid(e.target.value)}
-                className="input"
-              >
-                <option value="">Any</option>
-                {scales.map((s) => (
-                  <option key={s.value} value={s.value}>
-                    {s.display}
-                  </option>
-                ))}
-              </select>
+              <MultiSelect
+                options={scales}
+                selected={selectedScaleGuids}
+                onChange={setSelectedScaleGuids}
+              />
             </div>
             <div>
               <label className="label">Brand</label>
-              <input
-                list="dcr-brands-list"
-                type="text"
-                value={brandInput}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setBrandInput(v);
-                  const match = brands.find((b) => b.display === v);
-                  setSelectedBrandGuid(match?.value ?? "");
-                }}
-                className="input"
+              <MultiSelect
+                options={brands}
+                selected={selectedBrandGuids}
+                onChange={setSelectedBrandGuids}
                 placeholder="Any (type to search…)"
-                autoComplete="off"
               />
-              <datalist id="dcr-brands-list">
-                {brands.map((b) => (
-                  <option key={b.value} value={b.display} />
-                ))}
-              </datalist>
             </div>
             <div>
               <label className="label">Make</label>
-              <input
-                list="dcr-makes-list"
-                type="text"
-                value={makeInput}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setMakeInput(v);
-                  const match = makes.find((m) => m.display === v);
-                  setSelectedMakeGuid(match?.value ?? "");
-                }}
-                className="input"
+              <MultiSelect
+                options={makes}
+                selected={selectedMakeGuids}
+                onChange={setSelectedMakeGuids}
                 placeholder="Any (type to search…)"
-                autoComplete="off"
               />
-              <datalist id="dcr-makes-list">
-                {makes.map((m) => (
-                  <option key={m.value} value={m.display} />
-                ))}
-              </datalist>
             </div>
             <div>
               <label className="label">Finish</label>
-              <input
-                list="dcr-finishes-list"
-                type="text"
-                value={finishInput}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setFinishInput(v);
-                  const match = finishes.find((f) => f.display === v);
-                  setSelectedFinishGuid(match?.value ?? "");
-                }}
-                className="input"
+              <MultiSelect
+                options={finishes}
+                selected={selectedFinishGuids}
+                onChange={setSelectedFinishGuids}
                 placeholder="Any (type to search…)"
-                autoComplete="off"
               />
-              <datalist id="dcr-finishes-list">
-                {finishes.map((f) => (
-                  <option key={f.value} value={f.display} />
-                ))}
-              </datalist>
+            </div>
+            <div>
+              <label className="label">Options</label>
+              <div className="flex flex-col justify-center gap-1.5 min-h-[2.4rem] text-xs">
+                <label className="inline-flex items-center gap-2 text-fg-muted">
+                  <input
+                    type="checkbox"
+                    checked={autographed}
+                    onChange={(e) => setAutographed(e.target.checked)}
+                  />
+                  Autographed only
+                </label>
+                <label className="inline-flex items-center gap-2 text-fg-muted">
+                  <input
+                    type="checkbox"
+                    checked={raced}
+                    onChange={(e) => setRaced(e.target.checked)}
+                  />
+                  Raced version only
+                </label>
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-4 text-xs flex-wrap">
-            <label className="inline-flex items-center gap-2 text-fg-muted">
-              <input
-                type="checkbox"
-                checked={autographed}
-                onChange={(e) => setAutographed(e.target.checked)}
-              />
-              Autographed only
-            </label>
-            <label className="inline-flex items-center gap-2 text-fg-muted">
-              <input
-                type="checkbox"
-                checked={raced}
-                onChange={(e) => setRaced(e.target.checked)}
-              />
-              Raced version only
-            </label>
-          </div>
-
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between border-t border-border pt-3">
             <button
               type="button"
               className="text-xs text-fg-subtle hover:text-fg-muted"
@@ -432,14 +425,57 @@ export function Registry() {
         <div className="card text-sm text-fg-muted">No results.</div>
       ) : (
         <>
-          <div className="flex items-center justify-between text-xs text-fg-subtle">
-            <div>
-              {results.length} result{results.length === 1 ? "" : "s"}.
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-xs text-fg-subtle">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <div>
+                {sortedResults!.length === results.length
+                  ? `${results.length} result${results.length === 1 ? "" : "s"}.`
+                  : `${sortedResults!.length} of ${results.length} results.`}
+              </div>
+              <ValueRangeFilter
+                label="Retail"
+                min={retailMin}
+                max={retailMax}
+                onMin={setRetailMin}
+                onMax={setRetailMax}
+              />
+              <ValueRangeFilter
+                label="Wholesale"
+                min={wholesaleMin}
+                max={wholesaleMax}
+                onMin={setWholesaleMin}
+                onMax={setWholesaleMax}
+              />
             </div>
-            <ImageSizeToggle size={imgSize} onChange={setImgSize} />
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5">
+                <span>Sort:</span>
+                <select
+                  className="input !w-auto !py-0.5 !text-[11px]"
+                  value={sortMode}
+                  onChange={(e) => setSortMode(e.target.value as SortMode)}
+                  title="Sort results"
+                >
+                  <option value="registry">Registry order</option>
+                  <option value="driver">Driver A → Z</option>
+                  <option value="year-desc">Year newest first</option>
+                  <option value="year-asc">Year oldest first</option>
+                  <option value="retail-desc">Retail value high → low</option>
+                  <option value="retail-asc">Retail value low → high</option>
+                  <option value="qty-asc">Production qty low → high</option>
+                  <option value="qty-desc">Production qty high → low</option>
+                </select>
+              </div>
+              <ImageSizeToggle size={imgSize} onChange={setImgSize} />
+            </div>
           </div>
+          {sortedResults!.length === 0 ? (
+            <div className="card text-sm text-fg-muted">
+              No results in this value range.
+            </div>
+          ) : (
           <ul className="space-y-2">
-            {results.map((r) => (
+            {sortedResults!.map((r) => (
               <li
                 key={r.registry_guid}
                 className="card flex items-start gap-4"
@@ -512,6 +548,7 @@ export function Registry() {
               </li>
             ))}
           </ul>
+          )}
         </>
       )}
 
@@ -521,6 +558,45 @@ export function Registry() {
           onClose={() => setAddTarget(null)}
         />
       )}
+    </div>
+  );
+}
+
+function ValueRangeFilter({
+  label,
+  min,
+  max,
+  onMin,
+  onMax,
+}: {
+  label: string;
+  min: string;
+  max: string;
+  onMin: (v: string) => void;
+  onMax: (v: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span>{label} $</span>
+      <input
+        type="text"
+        inputMode="decimal"
+        className="input !w-16 !py-0.5 !text-[11px]"
+        value={min}
+        onChange={(e) => onMin(e.target.value)}
+        placeholder="min"
+        title={`Minimum ${label.toLowerCase()} value`}
+      />
+      <span>–</span>
+      <input
+        type="text"
+        inputMode="decimal"
+        className="input !w-16 !py-0.5 !text-[11px]"
+        value={max}
+        onChange={(e) => onMax(e.target.value)}
+        placeholder="max"
+        title={`Maximum ${label.toLowerCase()} value`}
+      />
     </div>
   );
 }
