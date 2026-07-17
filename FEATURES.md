@@ -1,6 +1,9 @@
 - Prioritize single drivers in driver dropdown search
     - Perhaps a favorite drivers feature?
+    - Order listing of drivers by how common they are.
+    - Favor saved listings or current collection?
 - Auto sync overnight
+  - Auto refresh pre-warmed drivers
 - Wishlist feature
     - Select DCR entries
     - Link saved eBay listings

@@ -15,6 +15,7 @@ import {
   prepareScaleOptions,
   prepareYearOptions,
   byDriverNamePriority,
+  driverListingCounts,
   sortDriverOptions,
   type DriverOption,
   type FormOptionRow,
@@ -84,6 +85,7 @@ function clusterGroupsByDriver(groups: ListingGroup[]): {
     );
   for (const d of drivers) d.groups.sort((a, b) => a.name.localeCompare(b.name));
   noDriver.sort((a, b) => a.name.localeCompare(b.name));
+  archived.sort((a, b) => a.name.localeCompare(b.name));
   return { drivers, noDriver, archived };
 }
 
@@ -286,7 +288,13 @@ export function Listings() {
   async function loadLocalDrivers() {
     try {
       const list = await api.listDrivers();
-      setLocalDrivers(sortDriverOptions(list, (d) => d.name));
+      setLocalDrivers(
+        sortDriverOptions(
+          list,
+          (d) => d.name,
+          (d) => d.listing_count,
+        ),
+      );
     } catch {
       // Non-fatal: the driver picker still works on free-form input.
     }
@@ -743,10 +751,7 @@ export function Listings() {
     }
     const options = Array.from(byKey.entries())
       .map(([key, v]) => ({ value: `d:${key}`, name: v.name, count: v.count }))
-      .sort(
-        (a, b) =>
-          byDriverNamePriority(a.name, b.name) || a.name.localeCompare(b.name),
-      );
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
     return { options, noneCount, allCount };
   }, [rows, filterState]);
 
@@ -2491,6 +2496,23 @@ function GroupChipRow({
     row.auto_driver_name,
   ]);
 
+  // Sections, in display order: the listing's driver's groups first, then
+  // driverless groups (they're cross-driver — "Lots", "Purchased" — so they
+  // stay near the top), then every other driver's groups under that driver's
+  // name. A group tied to several drivers repeats under each, matching the
+  // filter dropdown.
+  const sections = useMemo(() => {
+    const clustered = clusterGroupsByDriver(others);
+    const out: { key: string; label: string; groups: ListingGroup[] }[] = [];
+    if (preferred.length > 0 && driverLabel)
+      out.push({ key: "preferred", label: driverLabel, groups: preferred });
+    if (clustered.noDriver.length > 0)
+      out.push({ key: "no-driver", label: "No driver", groups: clustered.noDriver });
+    for (const d of clustered.drivers)
+      out.push({ key: `d-${d.id}`, label: d.name, groups: d.groups });
+    return out;
+  }, [preferred, others, driverLabel]);
+
   const total =
     row.price_cents !== null ? row.price_cents + (row.shipping_cents ?? 0) : null;
 
@@ -2597,20 +2619,18 @@ function GroupChipRow({
                     No groups match “{query.trim()}”.
                   </div>
                 )}
-                {preferred.length > 0 && (
-                  <>
-                    <div className="px-2 pt-1 pb-0.5 text-[10px] uppercase tracking-wide text-fg-subtle">
-                      {driverLabel}
+                {sections.map((s, i) => (
+                  <div key={s.key}>
+                    <div
+                      className={`px-2 pt-1 pb-0.5 text-[10px] uppercase tracking-wide text-fg-subtle ${
+                        i > 0 ? "border-t border-border mt-1" : ""
+                      }`}
+                    >
+                      {s.label}
                     </div>
-                    {preferred.map(renderOption)}
-                    {others.length > 0 && (
-                      <div className="px-2 pt-1 pb-0.5 text-[10px] uppercase tracking-wide text-fg-subtle border-t border-border mt-1">
-                        Other groups
-                      </div>
-                    )}
-                  </>
-                )}
-                {others.map(renderOption)}
+                    {s.groups.map(renderOption)}
+                  </div>
+                ))}
               </div>
             </div>
           </>
@@ -2768,6 +2788,32 @@ function BulkGroupMenu({
       preferredDrivers.names,
     );
   }, [filtered, preferredDrivers]);
+
+  // Same section order as the per-listing picker: the selection's drivers'
+  // groups, then driverless (cross-driver) groups, then each other driver's
+  // groups, then archived (present only in the remove menu, which lists all
+  // groups).
+  const sections = useMemo(() => {
+    const clustered = clusterGroupsByDriver(others);
+    const out: { key: string; label: string; groups: ListingGroup[] }[] = [];
+    if (preferred.length > 0)
+      out.push({
+        key: "preferred",
+        label: "Selected drivers",
+        groups: preferred,
+      });
+    if (clustered.noDriver.length > 0)
+      out.push({
+        key: "no-driver",
+        label: "No driver",
+        groups: clustered.noDriver,
+      });
+    for (const d of clustered.drivers)
+      out.push({ key: `d-${d.id}`, label: d.name, groups: d.groups });
+    if (clustered.archived.length > 0)
+      out.push({ key: "archived", label: "Archived", groups: clustered.archived });
+    return out;
+  }, [preferred, others]);
   return (
     <div className="relative">
       <button
@@ -2829,20 +2875,18 @@ function BulkGroupMenu({
                   No groups match “{query.trim()}”.
                 </div>
               ) : (
-                <>
-                  {preferred.length > 0 && (
-                    <div className="px-2 pt-1 pb-0.5 text-[10px] uppercase tracking-wide text-fg-subtle">
-                      Selected drivers
+                sections.map((s, i) => (
+                  <div key={s.key}>
+                    <div
+                      className={`px-2 pt-1 pb-0.5 text-[10px] uppercase tracking-wide text-fg-subtle ${
+                        i > 0 ? "border-t border-border mt-1" : ""
+                      }`}
+                    >
+                      {s.label}
                     </div>
-                  )}
-                  {preferred.map((g) => renderBulkOption(g, setOpen, onPick))}
-                  {preferred.length > 0 && others.length > 0 && (
-                    <div className="px-2 pt-1 pb-0.5 text-[10px] uppercase tracking-wide text-fg-subtle border-t border-border mt-1">
-                      Other groups
-                    </div>
-                  )}
-                  {others.map((g) => renderBulkOption(g, setOpen, onPick))}
-                </>
+                    {s.groups.map((g) => renderBulkOption(g, setOpen, onPick))}
+                  </div>
+                ))
               )}
             </div>
           </div>
@@ -2865,6 +2909,10 @@ function ManageGroupsDialog({
   const [wizardOpen, setWizardOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Same driver clustering as the filter dropdown: one section per driver
+  // (multi-driver groups repeat under each), then driverless, then archived.
+  const clustered = useMemo(() => clusterGroupsByDriver(groups), [groups]);
 
   async function onDelete(g: ListingGroup) {
     if (
@@ -2932,79 +2980,43 @@ function ManageGroupsDialog({
 
         {error && <div className="text-xs text-red-400 mb-2">{error}</div>}
 
-        <div className="flex-1 overflow-y-auto -mx-1 px-1 space-y-2 min-h-[6rem]">
+        <div className="flex-1 overflow-y-auto -mx-1 px-1 space-y-4 min-h-[6rem]">
           {groups.length === 0 ? (
             <div className="text-sm text-fg-subtle">No groups yet.</div>
           ) : (
-            groups.map((g) => (
-              <div
-                key={g.id}
-                className={`rounded border border-border px-3 py-2 ${g.archived ? "opacity-70" : ""}`}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium flex items-center gap-2">
-                      {g.name}
-                      {g.archived && (
-                        <span className="text-[10px] uppercase tracking-wide text-fg-subtle border border-border rounded px-1">
-                          archived
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-xs text-fg-subtle">
-                      {g.member_count} listing
-                      {g.member_count === 1 ? "" : "s"}
-                      {g.target_price_cents !== null && (
-                        <> · target ≤ {formatCents(g.target_price_cents)}</>
-                      )}
-                    </div>
-                    {g.drivers.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {g.drivers.map((d) => (
-                          <span
-                            key={d.id}
-                            className="text-[10px] rounded border border-border bg-bg-elevated px-1.5 py-0.5 text-fg-muted"
-                          >
-                            {d.name}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {g.description && (
-                      <div className="text-xs text-fg-muted mt-0.5 whitespace-pre-wrap">
-                        {g.description}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      type="button"
-                      className="text-xs text-fg-muted hover:text-fg"
-                      onClick={() => setEditing(g)}
-                      disabled={busy}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      className="text-xs text-fg-muted hover:text-fg"
-                      onClick={() => onToggleArchive(g)}
-                      disabled={busy}
-                    >
-                      {g.archived ? "Unarchive" : "Archive"}
-                    </button>
-                    <button
-                      type="button"
-                      className="text-xs text-fg-subtle hover:text-red-300"
-                      onClick={() => onDelete(g)}
-                      disabled={busy}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))
+            <>
+              {clustered.drivers.map((d) => (
+                <GroupSection
+                  key={`d-${d.id}`}
+                  label={d.name}
+                  groups={d.groups}
+                  busy={busy}
+                  onEdit={setEditing}
+                  onToggleArchive={onToggleArchive}
+                  onDelete={onDelete}
+                />
+              ))}
+              {clustered.noDriver.length > 0 && (
+                <GroupSection
+                  label="No driver"
+                  groups={clustered.noDriver}
+                  busy={busy}
+                  onEdit={setEditing}
+                  onToggleArchive={onToggleArchive}
+                  onDelete={onDelete}
+                />
+              )}
+              {clustered.archived.length > 0 && (
+                <GroupSection
+                  label="Archived"
+                  groups={clustered.archived}
+                  busy={busy}
+                  onEdit={setEditing}
+                  onToggleArchive={onToggleArchive}
+                  onDelete={onDelete}
+                />
+              )}
+            </>
           )}
         </div>
 
@@ -3061,6 +3073,103 @@ function ManageGroupsDialog({
   );
 }
 
+/** One labeled section of the Manage-groups list: a driver's groups, the
+ *  driverless bucket, or the archived bucket. */
+function GroupSection({
+  label,
+  groups,
+  busy,
+  onEdit,
+  onToggleArchive,
+  onDelete,
+}: {
+  label: string;
+  groups: ListingGroup[];
+  busy: boolean;
+  onEdit: (g: ListingGroup) => void;
+  onToggleArchive: (g: ListingGroup) => void;
+  onDelete: (g: ListingGroup) => void;
+}) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
+        {label}
+      </div>
+      <div className="space-y-2">
+        {groups.map((g) => (
+          <div
+            key={g.id}
+            className={`rounded border border-border px-3 py-2 ${g.archived ? "opacity-70" : ""}`}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-medium flex items-center gap-2">
+                  {g.name}
+                  {g.archived && (
+                    <span className="text-[10px] uppercase tracking-wide text-fg-subtle border border-border rounded px-1">
+                      archived
+                    </span>
+                  )}
+                </div>
+                <div className="text-xs text-fg-subtle">
+                  {g.member_count} listing
+                  {g.member_count === 1 ? "" : "s"}
+                  {g.target_price_cents !== null && (
+                    <> · target ≤ {formatCents(g.target_price_cents)}</>
+                  )}
+                </div>
+                {g.drivers.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {g.drivers.map((d) => (
+                      <span
+                        key={d.id}
+                        className="text-[10px] rounded border border-border bg-bg-elevated px-1.5 py-0.5 text-fg-muted"
+                      >
+                        {d.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {g.description && (
+                  <div className="text-xs text-fg-muted mt-0.5 whitespace-pre-wrap">
+                    {g.description}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  className="text-xs text-fg-muted hover:text-fg"
+                  onClick={() => onEdit(g)}
+                  disabled={busy}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  className="text-xs text-fg-muted hover:text-fg"
+                  onClick={() => onToggleArchive(g)}
+                  disabled={busy}
+                >
+                  {g.archived ? "Unarchive" : "Archive"}
+                </button>
+                <button
+                  type="button"
+                  className="text-xs text-fg-subtle hover:text-red-300"
+                  onClick={() => onDelete(g)}
+                  disabled={busy}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** A driver chip in the group editor. `id` is null when the name doesn't
  *  match a local drivers row yet — the row is created via `ensure_driver`
  *  when the group is saved, never before (so cancelling leaves no trace). */
@@ -3091,7 +3200,14 @@ function DriverMultiSelect({
     api
       .listDrivers()
       .then((d) => {
-        if (alive) setDrivers(sortDriverOptions(d, (x) => x.name));
+        if (alive)
+          setDrivers(
+            sortDriverOptions(
+              d,
+              (x) => x.name,
+              (x) => x.listing_count,
+            ),
+          );
       })
       .catch(() => {
         // Non-fatal: typing a new name still works — it resolves on save.
@@ -3452,7 +3568,13 @@ function GroupMigrationWizard({
       .listDrivers()
       .then((ds) => {
         if (!alive) return;
-        setDrivers(sortDriverOptions(ds, (x) => x.name));
+        setDrivers(
+          sortDriverOptions(
+            ds,
+            (x) => x.name,
+            (x) => x.listing_count,
+          ),
+        );
         const seeded: MigrationRule[] = [];
         const seen = new Set<string>();
         for (const d of ds) {
@@ -3920,7 +4042,7 @@ function RegistrySearchDialog({
   async function loadOptions() {
     setDialogError(null);
     try {
-      const [d, o, s, y, b, m, f] = await Promise.all([
+      const [d, o, s, y, b, m, f, listingCounts] = await Promise.all([
         api.listRegistryFormOptions("driver"),
         api.listRegistryFormOptions("oem"),
         api.listRegistryFormOptions("scale"),
@@ -3928,8 +4050,15 @@ function RegistrySearchDialog({
         api.listRegistryFormOptions("brand"),
         api.listRegistryFormOptions("make"),
         api.listRegistryFormOptions("finish"),
+        driverListingCounts(),
       ]);
-      setDrivers(sortDriverOptions(d, (x) => x.display));
+      setDrivers(
+        sortDriverOptions(
+          d,
+          (x) => x.display,
+          (x) => listingCounts.get(x.normalized) ?? 0,
+        ),
+      );
       setOems(o);
       setScales(prepareScaleOptions(s));
       setYears(prepareYearOptions(y));

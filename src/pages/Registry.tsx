@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
+import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
   api,
   formatCents,
@@ -7,6 +8,7 @@ import {
   prepareBrandOptions,
   prepareScaleOptions,
   prepareYearOptions,
+  driverListingCounts,
   sortDriverOptions,
   type Condition,
   type FormOptionRow,
@@ -96,6 +98,7 @@ export function Registry() {
 
   const [results, setResults] = useState<ProductionSearchResult[] | null>(null);
   const [searching, setSearching] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -164,7 +167,7 @@ export function Registry() {
   async function loadOptions() {
     setError(null);
     try {
-      const [d, o, s, y, b, m, f] = await Promise.all([
+      const [d, o, s, y, b, m, f, listingCounts] = await Promise.all([
         api.listRegistryFormOptions("driver"),
         api.listRegistryFormOptions("oem"),
         api.listRegistryFormOptions("scale"),
@@ -172,8 +175,15 @@ export function Registry() {
         api.listRegistryFormOptions("brand"),
         api.listRegistryFormOptions("make"),
         api.listRegistryFormOptions("finish"),
+        driverListingCounts(),
       ]);
-      setDrivers(sortDriverOptions(d, (x) => x.display));
+      setDrivers(
+        sortDriverOptions(
+          d,
+          (x) => x.display,
+          (x) => listingCounts.get(x.normalized) ?? 0,
+        ),
+      );
       setOems(o);
       setScales(prepareScaleOptions(s));
       setYears(prepareYearOptions(y));
@@ -224,6 +234,44 @@ export function Registry() {
       setError(String(e));
     } finally {
       setSearching(false);
+    }
+  }
+
+  /** Export whatever is currently displayed (post value-filter, post-sort)
+   *  to a self-contained HTML file. Finish isn't part of search results, so
+   *  we can only label it when the search was pinned to a single finish. */
+  async function onExport() {
+    if (!sortedResults || sortedResults.length === 0) return;
+    const path = await saveDialog({
+      title: "Export registry search results",
+      defaultPath: "registry-export.html",
+      filters: [{ name: "HTML", extensions: ["html"] }],
+    });
+    if (!path) return;
+    setExporting(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const finishLabel =
+        selectedFinishGuids.length === 1
+          ? (finishes.find((f) => f.value === selectedFinishGuids[0])
+              ?.display ?? null)
+          : null;
+      const summary = await api.exportRegistrySearchHtml(
+        sortedResults,
+        finishLabel,
+        path,
+      );
+      setInfo(
+        `Exported ${summary.entries} result${summary.entries === 1 ? "" : "s"} to ${summary.path}` +
+          (summary.images_failed > 0
+            ? ` (${summary.images_failed} image${summary.images_failed === 1 ? "" : "s"} could not be downloaded).`
+            : "."),
+      );
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -386,6 +434,24 @@ export function Registry() {
               {refreshing ? "Refreshing options…" : "Refresh options"}
             </button>
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={onExport}
+                disabled={
+                  searching ||
+                  exporting ||
+                  !sortedResults ||
+                  sortedResults.length === 0
+                }
+                title={
+                  sortedResults && sortedResults.length > 0
+                    ? "Save the displayed results as an HTML file"
+                    : "Run a search first — exports the displayed results"
+                }
+              >
+                {exporting ? "Exporting…" : "Export"}
+              </button>
               <button
                 type="button"
                 className="btn-secondary"

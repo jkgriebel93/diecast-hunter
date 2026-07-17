@@ -12,6 +12,7 @@
     "core:resources:default",
     "core:menu:default",
     "core:tray:default",
+    "dialog:default",
     {
       "identifier": "shell:allow-open",
       "allow": [

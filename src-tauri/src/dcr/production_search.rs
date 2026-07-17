@@ -54,7 +54,7 @@ pub struct ProductionSearchFilter {
     pub raced: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProductionSearchResult {
     pub registry_guid: String,
     pub detail_url: Option<String>,

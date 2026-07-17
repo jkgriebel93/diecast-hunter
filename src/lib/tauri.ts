@@ -187,6 +187,16 @@ export const api = {
     invoke<FormOptionRow[]>("list_registry_form_options", { field }),
   searchDcrProduction: (filter: ProductionSearchFilter) =>
     invoke<ProductionSearchResult[]>("search_dcr_production", { filter }),
+  exportRegistrySearchHtml: (
+    results: ProductionSearchResult[],
+    finishLabel: string | null,
+    path: string,
+  ) =>
+    invoke<ExportSummary>("export_registry_search_html", {
+      results,
+      finishLabel,
+      path,
+    }),
   linkListingToRegistry: (
     listingId: number,
     registryGuid: string,
@@ -530,6 +540,13 @@ export interface ProductionSearchResult {
   wholesale_value_cents: number | null;
 }
 
+export interface ExportSummary {
+  path: string;
+  entries: number;
+  images_embedded: number;
+  images_failed: number;
+}
+
 export interface LinkResult {
   registry_entry_id: number;
   enriched: boolean;
@@ -724,6 +741,8 @@ export interface DriverOption {
   id: number;
   name: string;
   normalized_name: string;
+  /** Saved listings currently linked to this driver. */
+  listing_count: number;
 }
 
 /** Generational suffixes that belong to one driver's name rather than
@@ -759,17 +778,30 @@ export function byDriverNamePriority(a: string, b: string): number {
   return Number(!isSingleDriverName(a)) - Number(!isSingleDriverName(b));
 }
 
-/** Sort a list of driver-bearing rows: single-driver names first, then
- *  alphabetically. Returns a new array; the input is left untouched. */
+/** Sort a list of driver-bearing rows: most saved listings first, ties
+ *  alphabetically — so drivers with no saved listings trail the ones that
+ *  have any. Omit `countOf` when no counts apply (pure alphabetical).
+ *  Returns a new array; the input is left untouched. */
 export function sortDriverOptions<T>(
   list: T[],
   nameOf: (row: T) => string,
+  countOf: (row: T) => number = () => 0,
 ): T[] {
   return [...list].sort(
-    (a, b) =>
-      byDriverNamePriority(nameOf(a), nameOf(b)) ||
-      nameOf(a).localeCompare(nameOf(b)),
+    (a, b) => countOf(b) - countOf(a) || nameOf(a).localeCompare(nameOf(b)),
   );
+}
+
+/** Saved-listing counts keyed by the driver's normalized name — the shared
+ *  key between the local `drivers` table and the DCR form-options cache.
+ *  Never throws; dropdowns fall back to alphabetical on an empty map. */
+export async function driverListingCounts(): Promise<Map<string, number>> {
+  try {
+    const drivers = await api.listDrivers();
+    return new Map(drivers.map((d) => [d.normalized_name, d.listing_count]));
+  } catch {
+    return new Map();
+  }
 }
 
 export function formatCents(cents: number | null): string {

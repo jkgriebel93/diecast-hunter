@@ -3,6 +3,7 @@ mod db;
 mod dcr;
 mod ebay;
 mod error;
+mod export;
 mod listing_groups;
 mod listing_receiver;
 mod match_feedback;
@@ -32,6 +33,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let handle = app.handle().clone();
             let pool = tauri::async_runtime::block_on(async move {
@@ -133,6 +135,7 @@ pub fn run() {
             commands::refresh_registry_form_options,
             commands::list_registry_form_options,
             commands::search_dcr_production,
+            commands::export_registry_search_html,
             commands::link_listing_to_registry,
             commands::prewarm_registry_by_driver,
             commands::list_prewarmed_drivers,

@@ -864,24 +864,33 @@ pub struct DriverOption {
     pub id: i64,
     pub name: String,
     pub normalized_name: String,
+    /// Saved listings currently linked to this driver (`listings.driver_id`).
+    pub listing_count: i64,
 }
 
 /// Every driver we know about locally. Populated organically by DCR
 /// collection sync, registry pre-warm, and user driver-tag picks below.
-/// Returned alphabetically by name (case-insensitive).
+/// Ordered by saved-listing count descending so pickers surface the
+/// most-used drivers first; ties (including all zero-listing drivers,
+/// which land last) break alphabetically by name (case-insensitive).
 #[tauri::command]
 pub async fn list_drivers(state: State<'_, AppState>) -> AppResult<Vec<DriverOption>> {
-    let rows: Vec<(i64, String, String)> = sqlx::query_as(
-        "SELECT id, name, normalized_name FROM drivers ORDER BY name COLLATE NOCASE",
+    let rows: Vec<(i64, String, String, i64)> = sqlx::query_as(
+        "SELECT d.id, d.name, d.normalized_name, COUNT(l.id) AS listing_count
+         FROM drivers d
+         LEFT JOIN listings l ON l.driver_id = d.id
+         GROUP BY d.id, d.name, d.normalized_name
+         ORDER BY listing_count DESC, d.name COLLATE NOCASE",
     )
     .fetch_all(&state.db.pool)
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(id, name, normalized_name)| DriverOption {
+        .map(|(id, name, normalized_name, listing_count)| DriverOption {
             id,
             name,
             normalized_name,
+            listing_count,
         })
         .collect())
 }
@@ -1158,6 +1167,32 @@ pub async fn search_dcr_production(
     let result = run_dcr_production_search(&state.db.pool, &progress, &filter).await;
     clear_active_cancel(&state).await;
     finish_progress(&progress, &result, "Registry search");
+    result
+}
+
+/// Export the currently displayed registry-search results to a standalone
+/// HTML file at `path` (chosen by the user via a save dialog on the JS
+/// side). Images are downloaded and embedded, so this can take a while for
+/// big result sets — it participates in the shared progress/cancel plumbing.
+#[tauri::command]
+pub async fn export_registry_search_html(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    results: Vec<crate::dcr::ProductionSearchResult>,
+    finish_label: Option<String>,
+    path: String,
+) -> AppResult<crate::export::ExportSummary> {
+    let progress = ProgressEmitter::new(app, "registry_export");
+    set_active_cancel(&state, &progress).await;
+    let result = crate::export::export_registry_results(
+        &progress,
+        &results,
+        finish_label.as_deref(),
+        &path,
+    )
+    .await;
+    clear_active_cancel(&state).await;
+    finish_progress(&progress, &result, "Registry export");
     result
 }
 

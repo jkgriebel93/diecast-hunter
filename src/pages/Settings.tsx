@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
   api,
+  driverListingCounts,
   sortDriverOptions,
   type AutoSyncSettings,
   type CredentialState,
@@ -138,8 +139,17 @@ export function Settings() {
       // Drivers list is for the pre-warm picker; harmless if empty (the
       // form-options cache hasn't been populated yet).
       try {
-        const ds = await api.listRegistryFormOptions("driver");
-        setDrivers(sortDriverOptions(ds, (x) => x.display));
+        const [ds, listingCounts] = await Promise.all([
+          api.listRegistryFormOptions("driver"),
+          driverListingCounts(),
+        ]);
+        setDrivers(
+          sortDriverOptions(
+            ds,
+            (x) => x.display,
+            (x) => listingCounts.get(x.normalized) ?? 0,
+          ),
+        );
       } catch {
         // not fatal — picker shows empty
       }
