@@ -138,6 +138,7 @@ pub fn run() {
             commands::export_registry_search_html,
             commands::link_listing_to_registry,
             commands::prewarm_registry_by_driver,
+            commands::backfill_registry_detail_urls,
             commands::list_prewarmed_drivers,
             commands::cancel_active_operation,
             commands::get_ebay_filter_non_diecasts,

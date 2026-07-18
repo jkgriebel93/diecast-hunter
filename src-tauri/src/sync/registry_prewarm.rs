@@ -35,7 +35,22 @@ pub async fn prewarm_by_driver(
     }
 
     progress.step("Logging in to diecastregistry.com…", None, None);
+    let client = logged_in_client(pool).await?;
 
+    let summary = prewarm_driver_with_client(pool, &client, driver_guid, progress).await?;
+
+    progress.done(format!(
+        "Pre-warm complete: {} entries for {}.",
+        summary.registry_entries_upserted, summary.driver_name
+    ));
+
+    Ok(summary)
+}
+
+/// Build a `DcrClient` logged in with the credentials from Settings. Shared
+/// with flows that pre-warm several drivers in one session (e.g. the
+/// detail-url backfill).
+pub(crate) async fn logged_in_client(pool: &SqlitePool) -> AppResult<DcrClient> {
     let username = settings::get(pool, settings::KEY_DCR_USERNAME)
         .await?
         .ok_or_else(|| {
@@ -51,7 +66,17 @@ pub async fn prewarm_by_driver(
         })?;
     let client = DcrClient::new()?;
     client.login(&username, &password).await?;
+    Ok(client)
+}
 
+/// Search + upsert for one driver on an already-logged-in client. Emits
+/// `step` progress only — the caller owns the closing `done` event.
+pub(crate) async fn prewarm_driver_with_client(
+    pool: &SqlitePool,
+    client: &DcrClient,
+    driver_guid: &str,
+    progress: &ProgressEmitter,
+) -> AppResult<PrewarmSummary> {
     let driver_display: Option<(String,)> = sqlx::query_as(
         "SELECT display FROM registry_form_options
          WHERE field = 'driver' AND value = ?",
@@ -75,7 +100,7 @@ pub async fn prewarm_by_driver(
     };
 
     let (results, pages_fetched) =
-        search_all_pages_with_progress(&client, &filter, progress, Some(&driver_name)).await?;
+        search_all_pages_with_progress(client, &filter, progress, Some(&driver_name)).await?;
     let results_seen = results.len() as u32;
 
     let mut upserted = 0u32;
@@ -106,10 +131,6 @@ pub async fn prewarm_by_driver(
         &Utc::now().timestamp().to_string(),
     )
     .await?;
-
-    progress.done(format!(
-        "Pre-warm complete: {upserted} entries for {driver_name}."
-    ));
 
     Ok(PrewarmSummary {
         driver_name,
@@ -155,7 +176,21 @@ async fn upsert_stub_from_search(
             production_qty = COALESCE(excluded.production_qty, registry_entries.production_qty),
             retail_value_cents = COALESCE(excluded.retail_value_cents, registry_entries.retail_value_cents),
             wholesale_value_cents = COALESCE(excluded.wholesale_value_cents, registry_entries.wholesale_value_cents),
-            raw_json = excluded.raw_json,
+            -- Overwriting raw_json wholesale would wipe enriched detail-page
+            -- data (comments, photos). Replace stubs/invalid JSON; for
+            -- enriched rows only refresh the search-derived keys.
+            raw_json = CASE
+                WHEN registry_entries.raw_json IS NULL
+                     OR registry_entries.raw_json = ''
+                     OR NOT json_valid(registry_entries.raw_json)
+                     OR json_extract(registry_entries.raw_json, '$.source') = 'registry_prewarm'
+                  THEN excluded.raw_json
+                ELSE json_set(registry_entries.raw_json,
+                              '$.detail_url', COALESCE(json_extract(excluded.raw_json, '$.detail_url'),
+                                                       json_extract(registry_entries.raw_json, '$.detail_url')),
+                              '$.image_url', COALESCE(json_extract(excluded.raw_json, '$.image_url'),
+                                                      json_extract(registry_entries.raw_json, '$.image_url')))
+            END,
             fetched_at = excluded.fetched_at",
     )
     .bind(&r.registry_guid)

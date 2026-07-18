@@ -1273,6 +1273,23 @@ pub async fn prewarm_registry_by_driver(
     result
 }
 
+/// Re-walk the production search for every driver that has registry entries
+/// missing a `detail_url` in raw_json, merging the recovered URLs back in.
+/// Repairs the "View on diecastregistry.com" link on matched listings for
+/// entries enriched before detail_url was carried forward.
+#[tauri::command]
+pub async fn backfill_registry_detail_urls(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> AppResult<sync::DetailUrlBackfillSummary> {
+    let progress = ProgressEmitter::new(app, "detail-url-backfill");
+    set_active_cancel(&state, &progress).await;
+    let result = sync::backfill_detail_urls(&state.db.pool, &progress).await;
+    clear_active_cancel(&state).await;
+    finish_progress(&progress, &result, "Link repair");
+    result
+}
+
 #[derive(Serialize)]
 pub struct PrewarmedDriver {
     pub driver_guid: String,

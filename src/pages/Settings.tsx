@@ -6,6 +6,7 @@ import {
   sortDriverOptions,
   type AutoSyncSettings,
   type CredentialState,
+  type DetailUrlBackfillSummary,
   type EbayCredentialsState,
   type EbayOauthStatus,
   type EnrichSummary,
@@ -70,6 +71,11 @@ export function Settings() {
     [],
   );
   const [prewarmedSearch, setPrewarmedSearch] = useState("");
+
+  const [linkRepairRunning, setLinkRepairRunning] = useState(false);
+  const [linkRepairSummary, setLinkRepairSummary] =
+    useState<DetailUrlBackfillSummary | null>(null);
+  const [linkRepairError, setLinkRepairError] = useState<string | null>(null);
 
   const [receiverStatus, setReceiverStatus] =
     useState<ListingReceiverStatus | null>(null);
@@ -234,6 +240,24 @@ export function Settings() {
       setPrewarmError(String(e));
     } finally {
       setPrewarming(false);
+    }
+  }
+
+  async function onRepairRegistryLinks() {
+    setLinkRepairRunning(true);
+    setLinkRepairError(null);
+    setLinkRepairSummary(null);
+    try {
+      setLinkRepairSummary(await api.backfillRegistryDetailUrls());
+      try {
+        setPrewarmedDrivers(await api.listPrewarmedDrivers());
+      } catch {
+        // not fatal — list refresh is best-effort
+      }
+    } catch (e) {
+      setLinkRepairError(String(e));
+    } finally {
+      setLinkRepairRunning(false);
     }
   }
 
@@ -907,6 +931,49 @@ export function Settings() {
               })()
             )}
           </div>
+        </div>
+
+        <div className="border-t border-border pt-4 space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="text-sm font-medium">
+                Repair diecastregistry.com links
+              </div>
+              <div className="text-xs text-fg-subtle mt-1">
+                Some registry entries saved by older versions lost the URL of
+                their diecastregistry.com page, so matched listings show no
+                "View on diecastregistry.com" link. This re-walks the registry
+                search for the affected drivers and restores the links. Safe to
+                re-run; does nothing when no links are missing.
+              </div>
+            </div>
+            <button
+              className="btn-secondary shrink-0"
+              type="button"
+              disabled={
+                linkRepairRunning || !creds?.diecastregistry_has_password
+              }
+              onClick={onRepairRegistryLinks}
+            >
+              {linkRepairRunning ? "Repairing…" : "Repair links"}
+            </button>
+          </div>
+          {linkRepairSummary && (
+            <div className="text-xs text-emerald-400">
+              {linkRepairSummary.missing_before === 0
+                ? "All registry entries already have links."
+                : `Restored links for ${linkRepairSummary.entries_patched} of ` +
+                  `${linkRepairSummary.missing_before} entries across ` +
+                  `${linkRepairSummary.drivers_processed} driver` +
+                  `${linkRepairSummary.drivers_processed === 1 ? "" : "s"}` +
+                  (linkRepairSummary.still_missing > 0
+                    ? ` (${linkRepairSummary.still_missing} still missing).`
+                    : ".")}
+            </div>
+          )}
+          {linkRepairError && (
+            <div className="text-xs text-red-400">{linkRepairError}</div>
+          )}
         </div>
       </section>
 

@@ -215,6 +215,8 @@ export const api = {
     invoke<string>("regenerate_listing_receiver_secret"),
   prewarmRegistryByDriver: (driverGuid: string) =>
     invoke<PrewarmSummary>("prewarm_registry_by_driver", { driverGuid }),
+  backfillRegistryDetailUrls: () =>
+    invoke<DetailUrlBackfillSummary>("backfill_registry_detail_urls"),
   listPrewarmedDrivers: () =>
     invoke<PrewarmedDriver[]>("list_prewarmed_drivers"),
   cancelActiveOperation: () => invoke<boolean>("cancel_active_operation"),
@@ -405,6 +407,13 @@ export interface PrewarmSummary {
   results_seen: number;
   registry_entries_upserted: number;
   pages_fetched: number;
+}
+
+export interface DetailUrlBackfillSummary {
+  drivers_processed: number;
+  missing_before: number;
+  entries_patched: number;
+  still_missing: number;
 }
 
 export interface PrewarmedDriver {
