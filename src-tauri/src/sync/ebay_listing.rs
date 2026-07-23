@@ -70,6 +70,11 @@ pub async fn add_listing_from_input(pool: &SqlitePool, input: &str) -> AppResult
         // listing from being saved.
         tracing::warn!("driver auto-assoc for listing {listing_id} failed: {e}");
     }
+    if let Err(e) =
+        crate::sync::attribute_assoc::associate_listing_attributes(pool, listing_id).await
+    {
+        tracing::warn!("attribute auto-assoc for listing {listing_id} failed: {e}");
+    }
     if created {
         // Local-only registry auto-match (no network) — new listings get a
         // best-effort suggestion immediately when the driver's registry
@@ -125,6 +130,11 @@ pub async fn refresh_listing(pool: &SqlitePool, listing_id: i64) -> AppResult<()
     insert_history(pool, listing_id, &item).await?;
     if let Err(e) = crate::sync::driver_assoc::associate_listing_driver(pool, listing_id).await {
         tracing::warn!("driver auto-assoc for listing {listing_id} failed: {e}");
+    }
+    if let Err(e) =
+        crate::sync::attribute_assoc::associate_listing_attributes(pool, listing_id).await
+    {
+        tracing::warn!("attribute auto-assoc for listing {listing_id} failed: {e}");
     }
     Ok(())
 }

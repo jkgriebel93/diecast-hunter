@@ -20,6 +20,7 @@ import {
   type DriverOption,
   type FormOptionRow,
   type GroupMigrationProposal,
+  type ListingAttributes,
   type ListingGroup,
   type ListingGroupInput,
   type ListingRow,
@@ -137,6 +138,12 @@ function listingPassesFilters(row: ListingRow, f: ListingFilterState): boolean {
       row.seller_username,
       row.matched_oem,
       row.matched_brand,
+      row.oem,
+      row.brand,
+      row.finish,
+      row.make,
+      row.is_race_win && "race win",
+      row.is_autographed && "autograph autographed",
     ]
       .filter(Boolean)
       .join(" ")
@@ -231,6 +238,26 @@ export function Listings() {
   const [driverFilter, setDriverFilter] = useState<string>("all");
   const [sortMode, setSortMode] = useState<SortMode>("newest");
   const [bucketSort, setBucketSort] = useState<BucketSort>("name");
+
+  // Filters sidebar visibility, persisted so the choice sticks across
+  // visits. Collapsing does not clear the filters — they keep applying.
+  const [filtersCollapsed, setFiltersCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("listings.filtersCollapsed") === "1";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        "listings.filtersCollapsed",
+        filtersCollapsed ? "1" : "0",
+      );
+    } catch {
+      // ignore
+    }
+  }, [filtersCollapsed]);
 
   // Collapse/expand-all plumbing for the grouped views. The per-section
   // collapse state lives inside GroupedByDriver/GroupedByGroup (they own
@@ -331,6 +358,26 @@ export function Listings() {
     try {
       await api.resetListingDriver(listingId);
       setTagDriverId(null);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function onSetAttributes(listingId: number, attrs: ListingAttributes) {
+    setError(null);
+    try {
+      await api.setListingAttributes(listingId, attrs);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function onResetAttributes(listingId: number) {
+    setError(null);
+    try {
+      await api.resetListingAttributes(listingId);
       await load();
     } catch (e) {
       setError(String(e));
@@ -766,7 +813,21 @@ export function Listings() {
     return key;
   }, [driverFilter, rows]);
 
+  // Number of sidebar filters currently off their defaults, search text
+  // included. Shown on the collapsed filters rail so hidden-but-active
+  // filters stay visible.
+  const activeFilterCount =
+    (searchText.trim() !== "" ? 1 : 0) +
+    (statusFilter !== "active" ? 1 : 0) +
+    (matchFilter !== "all" ? 1 : 0) +
+    (offerFilter !== "all" ? 1 : 0) +
+    (sourceFilter !== "all" ? 1 : 0) +
+    (groupFilter !== "all" ? 1 : 0) +
+    (excludedGroupIds.size > 0 ? 1 : 0) +
+    (driverFilter !== "all" ? 1 : 0);
+
   function clearAllFilters() {
+    setSearchText("");
     setStatusFilter("active");
     setMatchFilter("all");
     setOfferFilter("all");
@@ -858,25 +919,6 @@ export function Listings() {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            className="btn-secondary !px-2.5 !py-1 !text-xs"
-            type="button"
-            onClick={onSyncWatchlist}
-            disabled={syncingWatchlist}
-            title="Pull watchlist from your connected eBay account"
-          >
-            {syncingWatchlist ? "Syncing…" : "Sync watchlist"}
-          </button>
-          <ListingActionsMenu
-            hasListings={!!rows && rows.length > 0}
-            autoMatching={autoMatchingAll}
-            refreshing={bulkRefreshing}
-            onAutoMatchAll={onAutoMatchAll}
-            onRefreshAll={onRefreshAll}
-            onManageGroups={() => setManageGroupsOpen(true)}
-          />
-        </div>
       </header>
 
       {actionSummary && (
@@ -891,22 +933,67 @@ export function Listings() {
       {rows === null ? (
         <div className="card text-sm text-fg-muted">Loading…</div>
       ) : rows.length === 0 ? (
-        <div className="card text-sm text-fg-muted">
-          No listings tracked yet. Sync your eBay watchlist to pull in
-          listings.
+        <div className="card text-sm text-fg-muted flex flex-wrap items-center justify-between gap-3">
+          <span>
+            No listings tracked yet. Sync your eBay watchlist to pull in
+            listings.
+          </span>
+          <button
+            className="btn-secondary !px-2.5 !py-1 !text-xs"
+            type="button"
+            onClick={onSyncWatchlist}
+            disabled={syncingWatchlist}
+            title="Pull watchlist from your connected eBay account"
+          >
+            {syncingWatchlist ? "Syncing…" : "Sync watchlist"}
+          </button>
         </div>
       ) : (
         <>
-          <input
-            type="text"
-            className="input"
-            placeholder="Search title, driver, scheme, seller…"
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-          />
-
           <div className="flex items-start gap-4">
+            {filtersCollapsed ? (
+              <button
+                type="button"
+                className="shrink-0 sticky top-4 card !p-2 flex flex-col items-center gap-1.5 text-fg-muted hover:text-fg"
+                onClick={() => setFiltersCollapsed(false)}
+                title="Show filters"
+                aria-label="Show filters"
+                aria-expanded={false}
+              >
+                <PanelChevronIcon direction="right" />
+                {activeFilterCount > 0 && (
+                  <span
+                    className="rounded-full bg-accent/15 text-accent text-[10px] font-medium px-1.5 py-0.5 tabular-nums"
+                    title={`${activeFilterCount} filter${activeFilterCount === 1 ? "" : "s"} active`}
+                  >
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
+            ) : (
             <aside className="w-52 shrink-0 card !p-3 space-y-4 sticky top-4">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase tracking-wide text-fg-subtle">
+                  Filters
+                </span>
+                <button
+                  type="button"
+                  className="text-fg-subtle hover:text-fg"
+                  onClick={() => setFiltersCollapsed(true)}
+                  title="Hide filters"
+                  aria-label="Hide filters"
+                  aria-expanded={true}
+                >
+                  <PanelChevronIcon direction="left" />
+                </button>
+              </div>
+              <input
+                type="text"
+                className="input !py-1 !text-xs"
+                placeholder="Search title, driver, scheme, seller…"
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+              />
               <FacetList
                 label="Status"
                 value={statusFilter}
@@ -1072,35 +1159,36 @@ export function Listings() {
                 Clear all filters
               </button>
             </aside>
+            )}
 
             <div className="flex-1 min-w-0 space-y-2">
-              {/* View + sort */}
+              {/* Toolbar: view + sort on the left, page actions on the right */}
               <div className="flex items-center justify-between gap-3 flex-wrap text-xs">
-                <div className="inline-flex rounded-md border border-border overflow-hidden">
-                  {(
-                    [
-                      { value: "flat", label: "Flat" },
-                      { value: "byDriver", label: "By driver" },
-                      { value: "byGroup", label: "By group" },
-                    ] as { value: ViewMode; label: string }[]
-                  ).map((opt, i) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      className={`px-3 py-1 ${
-                        i > 0 ? "border-l border-border" : ""
-                      } ${
-                        viewMode === opt.value
-                          ? "bg-accent/15 text-accent"
-                          : "text-fg-muted hover:text-fg hover:bg-bg-elevated"
-                      }`}
-                      onClick={() => setViewMode(opt.value)}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="inline-flex rounded-md border border-border overflow-hidden">
+                    {(
+                      [
+                        { value: "flat", label: "Flat" },
+                        { value: "byDriver", label: "By driver" },
+                        { value: "byGroup", label: "By group" },
+                      ] as { value: ViewMode; label: string }[]
+                    ).map((opt, i) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        className={`px-3 py-1 ${
+                          i > 0 ? "border-l border-border" : ""
+                        } ${
+                          viewMode === opt.value
+                            ? "bg-accent/15 text-accent"
+                            : "text-fg-muted hover:text-fg hover:bg-bg-elevated"
+                        }`}
+                        onClick={() => setViewMode(opt.value)}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
                   <div className="flex items-center gap-1.5">
                     <span className="text-fg-subtle">Sort:</span>
                     <select
@@ -1139,11 +1227,31 @@ export function Listings() {
                       </select>
                     </div>
                   )}
+                  <ImageSizeToggle size={imgSize} onChange={setImgSize} />
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    className="btn-secondary !px-2.5 !py-1 !text-xs"
+                    type="button"
+                    onClick={onSyncWatchlist}
+                    disabled={syncingWatchlist}
+                    title="Pull watchlist from your connected eBay account"
+                  >
+                    {syncingWatchlist ? "Syncing…" : "Sync watchlist"}
+                  </button>
+                  <ListingActionsMenu
+                    hasListings={rows.length > 0}
+                    autoMatching={autoMatchingAll}
+                    refreshing={bulkRefreshing}
+                    onAutoMatchAll={onAutoMatchAll}
+                    onRefreshAll={onRefreshAll}
+                    onManageGroups={() => setManageGroupsOpen(true)}
+                  />
                 </div>
               </div>
 
-              {/* Display utilities */}
-              <div className="flex items-center justify-between gap-3 border-b border-border pb-2 text-xs">
+              {/* Select mode */}
+              <div className="flex items-center gap-3 border-b border-border pb-2 text-xs">
                 <button
                   type="button"
                   role="switch"
@@ -1170,7 +1278,14 @@ export function Listings() {
                     Select mode
                   </span>
                 </button>
-                <ImageSizeToggle size={imgSize} onChange={setImgSize} />
+              </div>
+
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <div className="text-fg-subtle">
+                  {filteredRows && filteredRows.length !== rows.length
+                    ? `Showing ${filteredRows.length} of ${rows.length} listings.`
+                    : ""}
+                </div>
                 <button
                   type="button"
                   className="text-fg-muted hover:text-fg underline decoration-dotted underline-offset-2 disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
@@ -1192,12 +1307,6 @@ export function Listings() {
                   {allCollapsed ? "Expand all" : "Collapse all"}
                 </button>
               </div>
-
-              {filteredRows && filteredRows.length !== rows.length && (
-                <div className="text-xs text-fg-subtle">
-                  Showing {filteredRows.length} of {rows.length} listings.
-                </div>
-              )}
 
               {filteredRows && filteredRows.length === 0 ? (
                 <div className="card text-sm text-fg-muted">
@@ -1236,6 +1345,8 @@ export function Listings() {
               }
               onClearDriver={() => onClearDriver(r.listing_id)}
               onResetDriver={() => onResetDriver(r.listing_id)}
+              onSetAttributes={(attrs) => onSetAttributes(r.listing_id, attrs)}
+              onResetAttributes={() => onResetAttributes(r.listing_id)}
               selectMode={selectMode}
               selected={selectedIds.has(r.listing_id)}
               onToggleSelect={() => toggleSelected(r.listing_id)}
@@ -1272,6 +1383,8 @@ export function Listings() {
           onSetDriver={onSetDriver}
           onClearDriver={onClearDriver}
           onResetDriver={onResetDriver}
+          onSetAttributes={onSetAttributes}
+          onResetAttributes={onResetAttributes}
           selectMode={selectMode}
           selectedIds={selectedIds}
           onToggleSelect={toggleSelected}
@@ -1306,6 +1419,8 @@ export function Listings() {
           onSetDriver={onSetDriver}
           onClearDriver={onClearDriver}
           onResetDriver={onResetDriver}
+          onSetAttributes={onSetAttributes}
+          onResetAttributes={onResetAttributes}
           selectMode={selectMode}
           selectedIds={selectedIds}
           onToggleSelect={toggleSelected}
@@ -1411,6 +1526,8 @@ function ListingCard({
   onSetDriver,
   onClearDriver,
   onResetDriver,
+  onSetAttributes,
+  onResetAttributes,
   selectMode,
   selected,
   onToggleSelect,
@@ -1440,6 +1557,8 @@ function ListingCard({
   onSetDriver: (name: string, normalized: string) => void;
   onClearDriver: () => void;
   onResetDriver: () => void;
+  onSetAttributes: (attrs: ListingAttributes) => void;
+  onResetAttributes: () => void;
   selectMode: boolean;
   selected: boolean;
   onToggleSelect: () => void;
@@ -1606,6 +1725,12 @@ function ListingCard({
           onSet={onSetDriver}
           onClear={onClearDriver}
           onReset={onResetDriver}
+        />
+
+        <AttributesSection
+          row={row}
+          onSave={onSetAttributes}
+          onReset={onResetAttributes}
         />
 
         <div className="text-xs text-fg-subtle mt-1">
@@ -1930,6 +2055,233 @@ function DriverTagSection({
   );
 }
 
+/** Suggestion lists for the attribute editor, from the cached DCR form
+ *  options. Fetched once per app session on first editor open; a failure
+ *  resets the cache (so a later open retries) and the editor degrades to
+ *  free-form inputs. */
+interface AttributeOptions {
+  oems: string[];
+  brands: string[];
+  makes: string[];
+  finishes: string[];
+}
+const EMPTY_ATTRIBUTE_OPTIONS: AttributeOptions = {
+  oems: [],
+  brands: [],
+  makes: [],
+  finishes: [],
+};
+let attributeOptionsPromise: Promise<AttributeOptions> | null = null;
+function loadAttributeOptions() {
+  attributeOptionsPromise ??= Promise.all([
+    api.listRegistryFormOptions("oem"),
+    api.listRegistryFormOptions("brand"),
+    api.listRegistryFormOptions("make"),
+    api.listRegistryFormOptions("finish"),
+  ]).then(
+    ([o, b, m, f]) => ({
+      // Stable sort floats the OEMs the user actually buys to the top.
+      oems: o
+        .map((x) => x.display)
+        .sort(
+          (a, b2) => Number(isPreferredOem(b2)) - Number(isPreferredOem(a)),
+        ),
+      brands: prepareBrandOptions(b).map((x) => x.display),
+      makes: m.map((x) => x.display),
+      finishes: f.map((x) => x.display),
+    }),
+    () => {
+      attributeOptionsPromise = null;
+      return EMPTY_ATTRIBUTE_OPTIONS;
+    },
+  );
+  return attributeOptionsPromise;
+}
+
+/** Listing-level attributes (oem / brand / finish / make + race-win and
+ *  autograph flags) — chips when closed, an inline form when editing.
+ *  Auto-filled from the title by the backend unless the user pinned them;
+ *  independent of any registry match. */
+function AttributesSection({
+  row,
+  onSave,
+  onReset,
+}: {
+  row: ListingRow;
+  onSave: (attrs: ListingAttributes) => void;
+  onReset: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  // Draft buffers, seeded from the row each time the editor opens so
+  // cancel has no side effects.
+  const [oem, setOem] = useState("");
+  const [brand, setBrand] = useState("");
+  const [finish, setFinish] = useState("");
+  const [make, setMake] = useState("");
+  const [raceWin, setRaceWin] = useState(false);
+  const [autographed, setAutographed] = useState(false);
+  const [options, setOptions] = useState<AttributeOptions>(
+    EMPTY_ATTRIBUTE_OPTIONS,
+  );
+
+  function openEditor() {
+    setOem(row.oem ?? "");
+    setBrand(row.brand ?? "");
+    setFinish(row.finish ?? "");
+    setMake(row.make ?? "");
+    setRaceWin(row.is_race_win);
+    setAutographed(row.is_autographed);
+    setOpen(true);
+    void loadAttributeOptions().then(setOptions);
+  }
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    setOpen(false);
+    onSave({
+      oem: oem.trim() || null,
+      brand: brand.trim() || null,
+      finish: finish.trim() || null,
+      make: make.trim() || null,
+      is_race_win: raceWin,
+      is_autographed: autographed,
+    });
+  }
+
+  const hasAny =
+    row.oem !== null ||
+    row.brand !== null ||
+    row.finish !== null ||
+    row.make !== null ||
+    row.is_race_win ||
+    row.is_autographed;
+
+  if (!open) {
+    return (
+      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+        {([
+          ["OEM", row.oem],
+          ["Brand", row.brand],
+          ["Make", row.make],
+          ["Finish", row.finish],
+        ] as const).map(
+          ([label, value]) =>
+            value !== null && (
+              <span
+                key={label}
+                className="inline-flex items-center gap-1 rounded border border-border bg-bg-elevated px-1.5 py-0.5"
+              >
+                <span className="text-fg-muted">{label}:</span>
+                <span className="text-fg">{value}</span>
+              </span>
+            ),
+        )}
+        {row.is_race_win && (
+          <span className="rounded border border-border bg-bg-elevated px-1.5 py-0.5 text-amber-300">
+            Race Win
+          </span>
+        )}
+        {row.is_autographed && (
+          <span className="rounded border border-border bg-bg-elevated px-1.5 py-0.5 text-emerald-300">
+            Autograph
+          </span>
+        )}
+        {hasAny && (
+          <span
+            className={`text-[10px] uppercase tracking-wide ${
+              row.attributes_user_set ? "text-accent" : "text-fg-faint"
+            }`}
+            title={
+              row.attributes_user_set
+                ? "You saved these manually — auto-detection won't change them"
+                : "Detected automatically from the listing title"
+            }
+          >
+            {row.attributes_user_set ? "manual" : "auto"}
+          </span>
+        )}
+        <button
+          type="button"
+          className="text-fg-muted hover:text-fg"
+          onClick={openEditor}
+          title="Tag this listing with OEM / brand / make / finish and race-win or autograph flags"
+        >
+          {hasAny ? "Edit attributes…" : "Attributes…"}
+        </button>
+        {row.attributes_user_set && (
+          <button
+            type="button"
+            className="text-fg-subtle hover:text-fg-muted"
+            onClick={onReset}
+            title="Drop the manual pin, clear the attributes, and re-run auto-detection on the title"
+          >
+            Reset to auto
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  const idBase = `attrs-${row.listing_id}`;
+  return (
+    <form
+      onSubmit={submit}
+      className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs"
+    >
+      {([
+        ["oem", "OEM", oem, setOem, options.oems],
+        ["brand", "Brand", brand, setBrand, options.brands],
+        ["make", "Make", make, setMake, options.makes],
+        ["finish", "Finish", finish, setFinish, options.finishes],
+      ] as const).map(([key, placeholder, value, setValue, opts]) => (
+        <Fragment key={key}>
+          <input
+            list={`${idBase}-${key}`}
+            type="text"
+            className="input !py-1 !text-xs w-32"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder={placeholder}
+          />
+          <datalist id={`${idBase}-${key}`}>
+            {opts.map((o) => (
+              <option key={o} value={o} />
+            ))}
+          </datalist>
+        </Fragment>
+      ))}
+      <label className="inline-flex items-center gap-1 cursor-pointer">
+        <input
+          type="checkbox"
+          className="w-3.5 h-3.5 accent-accent"
+          checked={raceWin}
+          onChange={(e) => setRaceWin(e.target.checked)}
+        />
+        Race Win
+      </label>
+      <label className="inline-flex items-center gap-1 cursor-pointer">
+        <input
+          type="checkbox"
+          className="w-3.5 h-3.5 accent-accent"
+          checked={autographed}
+          onChange={(e) => setAutographed(e.target.checked)}
+        />
+        Autograph
+      </label>
+      <button type="submit" className="text-emerald-400 hover:text-emerald-300">
+        Save
+      </button>
+      <button
+        type="button"
+        className="text-fg-subtle hover:text-fg-muted"
+        onClick={() => setOpen(false)}
+      >
+        Cancel
+      </button>
+    </form>
+  );
+}
+
 function GroupedByDriver({
   rows,
   groups,
@@ -1958,6 +2310,8 @@ function GroupedByDriver({
   onSetDriver,
   onClearDriver,
   onResetDriver,
+  onSetAttributes,
+  onResetAttributes,
   selectMode,
   selectedIds,
   onToggleSelect,
@@ -1990,6 +2344,8 @@ function GroupedByDriver({
   onSetDriver: (id: number, name: string, normalized: string) => void;
   onClearDriver: (id: number) => void;
   onResetDriver: (id: number) => void;
+  onSetAttributes: (id: number, attrs: ListingAttributes) => void;
+  onResetAttributes: (id: number) => void;
   selectMode: boolean;
   selectedIds: Set<number>;
   onToggleSelect: (listingId: number) => void;
@@ -2108,6 +2464,10 @@ function GroupedByDriver({
                     }
                     onClearDriver={() => onClearDriver(r.listing_id)}
                     onResetDriver={() => onResetDriver(r.listing_id)}
+                    onSetAttributes={(attrs) =>
+                      onSetAttributes(r.listing_id, attrs)
+                    }
+                    onResetAttributes={() => onResetAttributes(r.listing_id)}
                     selectMode={selectMode}
                     selected={selectedIds.has(r.listing_id)}
                     onToggleSelect={() => onToggleSelect(r.listing_id)}
@@ -2151,6 +2511,8 @@ function GroupedByGroup({
   onSetDriver,
   onClearDriver,
   onResetDriver,
+  onSetAttributes,
+  onResetAttributes,
   selectMode,
   selectedIds,
   onToggleSelect,
@@ -2183,6 +2545,8 @@ function GroupedByGroup({
   onSetDriver: (id: number, name: string, normalized: string) => void;
   onClearDriver: (id: number) => void;
   onResetDriver: (id: number) => void;
+  onSetAttributes: (id: number, attrs: ListingAttributes) => void;
+  onResetAttributes: (id: number) => void;
   selectMode: boolean;
   selectedIds: Set<number>;
   onToggleSelect: (listingId: number) => void;
@@ -2316,6 +2680,8 @@ function GroupedByGroup({
         }
         onClearDriver={() => onClearDriver(r.listing_id)}
         onResetDriver={() => onResetDriver(r.listing_id)}
+        onSetAttributes={(attrs) => onSetAttributes(r.listing_id, attrs)}
+        onResetAttributes={() => onResetAttributes(r.listing_id)}
         selectMode={selectMode}
         selected={selectedIds.has(r.listing_id)}
         onToggleSelect={() => onToggleSelect(r.listing_id)}
@@ -4739,6 +5105,28 @@ function ExcludeGroupsMenu({
 /** One sidebar facet: a vertical list of mutually exclusive options with a
  *  live result count per option (computed by the caller against every other
  *  active filter — "what would I see if I picked this?"). */
+/** Collapse/expand chevron for the filters sidebar toggle. */
+function PanelChevronIcon({ direction }: { direction: "left" | "right" }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{
+        transform: direction === "right" ? "rotate(180deg)" : undefined,
+      }}
+    >
+      <polyline points="15 18 9 12 15 6" />
+    </svg>
+  );
+}
+
 function FacetList({
   label,
   value,

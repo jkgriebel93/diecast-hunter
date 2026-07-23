@@ -181,6 +181,18 @@ export const api = {
     invoke<void>("clear_listing_driver", { listingId }),
   resetListingDriver: (listingId: number) =>
     invoke<number | null>("reset_listing_driver", { listingId }),
+  setListingAttributes: (listingId: number, attrs: ListingAttributes) =>
+    invoke<void>("set_listing_attributes", {
+      listingId,
+      oem: attrs.oem,
+      brand: attrs.brand,
+      finish: attrs.finish,
+      make: attrs.make,
+      isRaceWin: attrs.is_race_win,
+      isAutographed: attrs.is_autographed,
+    }),
+  resetListingAttributes: (listingId: number) =>
+    invoke<void>("reset_listing_attributes", { listingId }),
   refreshRegistryFormOptions: () =>
     invoke<RefreshOptionsSummary>("refresh_registry_form_options"),
   listRegistryFormOptions: (field: string) =>
@@ -744,6 +756,31 @@ export interface ListingRow {
   auto_driver_user_set: boolean;
   /** ids of user-curated listing groups this row belongs to. */
   group_ids: number[];
+  /** Listing-level attributes, auto-filled from the title unless the user
+   *  pinned them. For matched rows the registry entry's values are
+   *  authoritative; these matter for unmatched listings and as a
+   *  cross-check. */
+  oem: string | null;
+  brand: string | null;
+  finish: string | null;
+  /** Windowed-car/bank code: CWC, CWB, BWC, BWB. */
+  make: string | null;
+  is_race_win: boolean;
+  is_autographed: boolean;
+  /** True when the user saved the attribute editor — auto-fill skips the
+   *  row until "Reset to auto". */
+  attributes_user_set: boolean;
+}
+
+/** The editable attribute set on a listing — saved as one unit by
+ *  `setListingAttributes`. Null/empty strings clear the field. */
+export interface ListingAttributes {
+  oem: string | null;
+  brand: string | null;
+  finish: string | null;
+  make: string | null;
+  is_race_win: boolean;
+  is_autographed: boolean;
 }
 
 export interface DriverOption {

@@ -122,6 +122,11 @@ pub async fn upsert_from_payload(
     if let Err(e) = crate::sync::driver_assoc::associate_listing_driver(pool, listing_id).await {
         tracing::warn!("driver auto-assoc for fb listing {listing_id} failed: {e}");
     }
+    if let Err(e) =
+        crate::sync::attribute_assoc::associate_listing_attributes(pool, listing_id).await
+    {
+        tracing::warn!("attribute auto-assoc for fb listing {listing_id} failed: {e}");
+    }
     if existing.is_none() {
         // Local-only registry auto-match for brand-new listings; see
         // sync::registry_auto_match.

@@ -85,6 +85,22 @@ pub fn run() {
                     Ok(_) => {}
                     Err(e) => tracing::warn!("driver auto-assoc backfill failed: {e}"),
                 }
+
+                // Attribute auto-fill backfill, same spirit: fill-only, so
+                // re-running on every launch is harmless and picks up rows
+                // saved before the vocabulary (form-options cache) existed.
+                match sync::attribute_assoc::associate_all_listing_attributes(&backfill_pool).await
+                {
+                    Ok(summary) if summary.detected > 0 => {
+                        tracing::info!(
+                            "attribute auto-fill backfill: detected on {} of {} listings",
+                            summary.detected,
+                            summary.considered
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!("attribute auto-fill backfill failed: {e}"),
+                }
             });
             Ok(())
         })
@@ -132,6 +148,8 @@ pub fn run() {
             commands::set_listing_driver,
             commands::clear_listing_driver,
             commands::reset_listing_driver,
+            commands::set_listing_attributes,
+            commands::reset_listing_attributes,
             commands::refresh_registry_form_options,
             commands::list_registry_form_options,
             commands::search_dcr_production,

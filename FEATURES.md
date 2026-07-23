@@ -1,7 +1,3 @@
-- Prioritize single drivers in driver dropdown search
-    - Perhaps a favorite drivers feature?
-    - Order listing of drivers by how common they are.
-    - Favor saved listings or current collection?
 - Auto sync overnight
   - Auto refresh pre-warmed drivers
 - Wishlist feature
@@ -9,3 +5,9 @@
     - Link saved eBay listings
 - FB Marketplace integration
 - Lionel website integration
+- Display production qty in DCR search results while manually matching saved listing to registry
+- Show CWC, CWB, BWB, BWC, Hauler at top of Make dropdown
+- Ideas for improving registry search speed
+  - Only pull locally pre-warmed records unless user explicity chooses otherwise
+  - Saved pre-searches that can be cached and filtered live
+    - e.g. `Action / Lionel + 1:24 + Elite + CWC + (Standard)`
