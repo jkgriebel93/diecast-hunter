@@ -199,6 +199,10 @@ export const api = {
     invoke<FormOptionRow[]>("list_registry_form_options", { field }),
   searchDcrProduction: (filter: ProductionSearchFilter) =>
     invoke<ProductionSearchResult[]>("search_dcr_production", { filter }),
+  getRegistrySearchMode: () =>
+    invoke<RegistrySearchMode>("get_registry_search_mode"),
+  setRegistrySearchMode: (mode: RegistrySearchMode) =>
+    invoke<void>("set_registry_search_mode", { mode }),
   exportRegistrySearchHtml: (
     results: ProductionSearchResult[],
     finishLabel: string | null,
@@ -496,6 +500,34 @@ export function prepareBrandOptions(brands: FormOptionRow[]): FormOptionRow[] {
   return [...preferred, ...rest];
 }
 
+/** Makes floated to the top of make dropdowns, in this order. */
+export const PREFERRED_MAKE_DISPLAYS = [
+  "CWC",
+  "BWC",
+  "Bank BWB",
+  "Bank CWB",
+  "Late Model / Modified",
+  "Midget / Sprint",
+  "Multi Car Set",
+  "Pit Wagon",
+  "Transporter",
+];
+
+const PREFERRED_MAKE_RANK = new Map(
+  PREFERRED_MAKE_DISPLAYS.map((d, i) => [normalizeOptionKey(d), i]),
+);
+
+/** Preferred makes first (in PREFERRED_MAKE_DISPLAYS order), then the
+ *  rest in their original order. */
+export function prepareMakeOptions(makes: FormOptionRow[]): FormOptionRow[] {
+  const rankOf = (m: FormOptionRow) =>
+    PREFERRED_MAKE_RANK.get(normalizeOptionKey(m.display));
+  const preferred = makes.filter((m) => rankOf(m) !== undefined);
+  const rest = makes.filter((m) => rankOf(m) === undefined);
+  preferred.sort((a, b) => rankOf(a)! - rankOf(b)!);
+  return [...preferred, ...rest];
+}
+
 /** NASCAR's first season was 1948, so registry year dropdowns never need to
  *  offer anything earlier. Drops pre-1948 (and non-numeric) options and sorts
  *  the rest newest-first. */
@@ -529,6 +561,9 @@ export function filterAllowedScales(scales: string[]): string[] {
     .filter((s) => SCALE_ORDER.has(s))
     .sort((a, b) => SCALE_ORDER.get(a)! - SCALE_ORDER.get(b)!);
 }
+
+/** How registry searches are answered — see Settings → pre-warm section. */
+export type RegistrySearchMode = "remote" | "hybrid" | "local";
 
 export interface ProductionSearchFilter {
   diecast_type?: string;

@@ -16,6 +16,15 @@ pub const KEY_EBAY_FILTER_NON_DIECASTS: &str = "ebay.filter_non_diecasts";
 /// shipping_cents NULL.
 pub const KEY_EBAY_BUYER_ZIP: &str = "ebay.buyer_zip";
 
+/// How registry searches are answered:
+/// - "remote" (or unset): log in to diecastregistry.com and walk the
+///   /Production result pages live.
+/// - "hybrid": answer from pre-warmed local rows when they can fully cover
+///   the query (all filtered drivers pre-warmed, no finish/autographed/raced
+///   filter); otherwise fall back to the live search.
+/// - "local": answer from pre-warmed local rows only; never hit the network.
+pub const KEY_REGISTRY_SEARCH_MODE: &str = "registry.search_mode";
+
 pub const ENTRY_DCR_PASSWORD: &str = "diecastregistry.password";
 pub const ENTRY_EBAY_OAUTH: &str = "ebay.oauth_token";
 pub const ENTRY_EBAY_APP_ID: &str = "ebay.app_id";

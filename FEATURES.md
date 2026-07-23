@@ -6,8 +6,8 @@
 - FB Marketplace integration
 - Lionel website integration
 - Display production qty in DCR search results while manually matching saved listing to registry
-- Show CWC, CWB, BWB, BWC, Hauler at top of Make dropdown
+- ~~Show CWC, CWB, BWB, BWC, Hauler at top of Make dropdown~~
 - Ideas for improving registry search speed
-  - Only pull locally pre-warmed records unless user explicity chooses otherwise
+  - ~~Only pull locally pre-warmed records unless user explicity chooses otherwise~~ (Settings → "Registry search mode": live / hybrid / local-only; live sessions are also now cached ~15 min instead of logging in per search)
   - Saved pre-searches that can be cached and filtered live
     - e.g. `Action / Lionel + 1:24 + Elite + CWC + (Standard)`

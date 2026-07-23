@@ -6,6 +6,7 @@ import {
   formatCents,
   isPreferredOem,
   prepareBrandOptions,
+  prepareMakeOptions,
   prepareScaleOptions,
   prepareYearOptions,
   driverListingCounts,
@@ -188,7 +189,7 @@ export function Registry() {
       setScales(prepareScaleOptions(s));
       setYears(prepareYearOptions(y));
       setBrands(prepareBrandOptions(b));
-      setMakes(m);
+      setMakes(prepareMakeOptions(m));
       setFinishes(f);
       setOptionsLoaded(true);
     } catch (e) {

@@ -25,6 +25,9 @@ pub struct AppState {
     /// Set by long-running command handlers, flipped by the
     /// `cancel_active_operation` command.
     pub active_op_cancel: Mutex<Option<Arc<AtomicBool>>>,
+    /// Cached logged-in diecastregistry.com session, reused across registry
+    /// searches so each one doesn't pay the login round trips.
+    pub dcr_session: dcr::DcrSession,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -43,6 +46,7 @@ pub fn run() {
                 handle.manage(AppState {
                     db: database,
                     active_op_cancel: Mutex::new(None),
+                    dcr_session: dcr::DcrSession::new(),
                 });
                 Ok::<_, error::AppError>(pool)
             })?;
@@ -153,6 +157,8 @@ pub fn run() {
             commands::refresh_registry_form_options,
             commands::list_registry_form_options,
             commands::search_dcr_production,
+            commands::get_registry_search_mode,
+            commands::set_registry_search_mode,
             commands::export_registry_search_html,
             commands::link_listing_to_registry,
             commands::prewarm_registry_by_driver,

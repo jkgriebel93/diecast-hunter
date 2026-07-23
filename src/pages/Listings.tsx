@@ -12,6 +12,7 @@ import {
   formatCents,
   isPreferredOem,
   prepareBrandOptions,
+  prepareMakeOptions,
   prepareScaleOptions,
   prepareYearOptions,
   byDriverNamePriority,
@@ -2087,7 +2088,7 @@ function loadAttributeOptions() {
           (a, b2) => Number(isPreferredOem(b2)) - Number(isPreferredOem(a)),
         ),
       brands: prepareBrandOptions(b).map((x) => x.display),
-      makes: m.map((x) => x.display),
+      makes: prepareMakeOptions(m).map((x) => x.display),
       finishes: f.map((x) => x.display),
     }),
     () => {
@@ -4429,7 +4430,7 @@ function RegistrySearchDialog({
       setScales(prepareScaleOptions(s));
       setYears(prepareYearOptions(y));
       setBrands(prepareBrandOptions(b));
-      setMakes(m);
+      setMakes(prepareMakeOptions(m));
       setFinishes(f);
       setOptionsLoaded(true);
       prefillFromListing(d, s, y);
@@ -4841,6 +4842,11 @@ function RegistrySearchDialog({
                         .filter(Boolean)
                         .join(" · ")}
                     </div>
+                    {r.seq_produced_total !== null && (
+                      <div className="text-xs text-fg-faint mt-0.5">
+                        production qty {r.seq_produced_total.toLocaleString()}
+                      </div>
+                    )}
                     {r.detail_url && (
                       <a
                         href={

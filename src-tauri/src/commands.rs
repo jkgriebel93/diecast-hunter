@@ -103,6 +103,7 @@ pub async fn save_diecastregistry_credentials(
 ) -> AppResult<()> {
     settings::set(&state.db.pool, settings::KEY_DCR_USERNAME, &username).await?;
     settings::secret_set(settings::ENTRY_DCR_PASSWORD, &password)?;
+    state.dcr_session.invalidate().await;
     Ok(())
 }
 
@@ -110,6 +111,7 @@ pub async fn save_diecastregistry_credentials(
 pub async fn clear_diecastregistry_credentials(state: State<'_, AppState>) -> AppResult<()> {
     settings::delete(&state.db.pool, settings::KEY_DCR_USERNAME).await?;
     settings::secret_delete(settings::ENTRY_DCR_PASSWORD)?;
+    state.dcr_session.invalidate().await;
     Ok(())
 }
 
@@ -1252,10 +1254,42 @@ pub async fn search_dcr_production(
 ) -> AppResult<Vec<crate::dcr::ProductionSearchResult>> {
     let progress = ProgressEmitter::new(app, "registry_search");
     set_active_cancel(&state, &progress).await;
-    let result = run_dcr_production_search(&state.db.pool, &progress, &filter).await;
+    let mode = settings::get(&state.db.pool, settings::KEY_REGISTRY_SEARCH_MODE)
+        .await?
+        .unwrap_or_default();
+    let result = match mode.as_str() {
+        "local" => run_local_registry_search(&state.db.pool, &progress, &filter).await,
+        "hybrid" => {
+            run_hybrid_registry_search(&state.db.pool, &state.dcr_session, &progress, &filter)
+                .await
+        }
+        _ => {
+            run_dcr_production_search(&state.db.pool, &state.dcr_session, &progress, &filter)
+                .await
+        }
+    };
     clear_active_cancel(&state).await;
     finish_progress(&progress, &result, "Registry search");
     result
+}
+
+#[tauri::command]
+pub async fn get_registry_search_mode(state: State<'_, AppState>) -> AppResult<String> {
+    Ok(
+        settings::get(&state.db.pool, settings::KEY_REGISTRY_SEARCH_MODE)
+            .await?
+            .unwrap_or_else(|| "remote".to_string()),
+    )
+}
+
+#[tauri::command]
+pub async fn set_registry_search_mode(state: State<'_, AppState>, mode: String) -> AppResult<()> {
+    if !matches!(mode.as_str(), "remote" | "hybrid" | "local") {
+        return Err(AppError::Parse(format!(
+            "unknown registry search mode: {mode}"
+        )));
+    }
+    settings::set(&state.db.pool, settings::KEY_REGISTRY_SEARCH_MODE, &mode).await
 }
 
 /// Export the currently displayed registry-search results to a standalone
@@ -1286,26 +1320,237 @@ pub async fn export_registry_search_html(
 
 async fn run_dcr_production_search(
     pool: &SqlitePool,
+    session: &crate::dcr::DcrSession,
     progress: &ProgressEmitter,
     filter: &crate::dcr::ProductionSearchFilter,
 ) -> AppResult<Vec<crate::dcr::ProductionSearchResult>> {
-    progress.step("Logging in to diecastregistry.com…", None, None);
-    let username = settings::get(pool, settings::KEY_DCR_USERNAME)
-        .await?
-        .ok_or_else(|| {
-            AppError::NotConfigured("diecastregistry.com username not set in Settings".into())
-        })?;
-    let password = settings::secret_get(settings::ENTRY_DCR_PASSWORD)?.ok_or_else(|| {
-        AppError::NotConfigured("diecastregistry.com password not set in Settings".into())
-    })?;
-    let client = crate::dcr::DcrClient::new()?;
-    client.login(&username, &password).await?;
+    progress.step("Connecting to diecastregistry.com…", None, None);
+    let (client, was_cached) = session.get_or_login(pool).await?;
 
     let subject = resolve_search_subject(pool, filter).await;
-    let (results, _pages) =
+    let first =
         crate::dcr::search_all_pages_with_progress(&client, filter, progress, subject.as_deref())
-            .await?;
+            .await;
+    // A cached session that errors — or comes back empty, which is what an
+    // expired auth cookie looks like after the redirect to the login page —
+    // gets one retry on a fresh login. Costs a duplicate search only when
+    // the query genuinely has zero results.
+    let stale_suspect = was_cached && !matches!(&first, Ok((r, _)) if !r.is_empty());
+    let results = if stale_suspect {
+        session.invalidate().await;
+        progress.step(
+            "Session may have expired — logging in to diecastregistry.com again…",
+            None,
+            None,
+        );
+        let (client, _) = session.get_or_login(pool).await?;
+        let (results, _) = crate::dcr::search_all_pages_with_progress(
+            &client,
+            filter,
+            progress,
+            subject.as_deref(),
+        )
+        .await?;
+        results
+    } else {
+        first?.0
+    };
     progress.done(format!("Found {} results.", results.len()));
+    Ok(results)
+}
+
+#[derive(sqlx::FromRow)]
+struct LocalRegistryRow {
+    external_id: String,
+    detail_url: Option<String>,
+    image_url: Option<String>,
+    driver_name: String,
+    driver_normalized: String,
+    year: Option<i32>,
+    oem: Option<String>,
+    brand: Option<String>,
+    scale: Option<String>,
+    make: Option<String>,
+    scheme_text: Option<String>,
+    production_qty: Option<i64>,
+    retail_value_cents: Option<i64>,
+    wholesale_value_cents: Option<i64>,
+}
+
+/// Local counterpart of `run_dcr_production_search`: answers the search from
+/// pre-warmed `registry_entries` rows without touching the network. Filter
+/// GUIDs are translated to the stored display text through
+/// `registry_form_options`. Finish, autographed, and raced aren't stored
+/// locally, so those filters are ignored (called out in the done message).
+async fn run_local_registry_search(
+    pool: &SqlitePool,
+    progress: &ProgressEmitter,
+    filter: &crate::dcr::ProductionSearchFilter,
+) -> AppResult<Vec<crate::dcr::ProductionSearchResult>> {
+    progress.step("Searching pre-warmed local registry…", None, None);
+    let results = local_registry_query(pool, filter).await?;
+
+    let mut ignored: Vec<&str> = Vec::new();
+    if !filter.finish_guids.is_empty() {
+        ignored.push("finish");
+    }
+    if filter.autographed {
+        ignored.push("autographed");
+    }
+    if filter.raced {
+        ignored.push("race-win");
+    }
+    let mut msg = format!("Found {} results in the local registry.", results.len());
+    if !ignored.is_empty() {
+        msg.push_str(&format!(
+            " The {} filter{} not stored locally and {} ignored.",
+            ignored.join(" / "),
+            if ignored.len() == 1 { " is" } else { "s are" },
+            if ignored.len() == 1 { "was" } else { "were" },
+        ));
+    }
+    if results.is_empty() && !filter.driver_guids.is_empty() {
+        msg.push_str(
+            " If this driver hasn't been pre-warmed yet, pre-warm it in Settings or switch the search mode.",
+        );
+    }
+    progress.done(msg);
+    Ok(results)
+}
+
+/// Hybrid mode: answer from the pre-warmed local rows when they can fully
+/// cover the query, otherwise (or when the local answer is empty) fall
+/// through to the live diecastregistry.com search.
+async fn run_hybrid_registry_search(
+    pool: &SqlitePool,
+    session: &crate::dcr::DcrSession,
+    progress: &ProgressEmitter,
+    filter: &crate::dcr::ProductionSearchFilter,
+) -> AppResult<Vec<crate::dcr::ProductionSearchResult>> {
+    if local_can_answer(pool, filter).await? {
+        progress.step("Searching pre-warmed local registry…", None, None);
+        let results = local_registry_query(pool, filter).await?;
+        if !results.is_empty() {
+            progress.done(format!(
+                "Found {} results in the local registry.",
+                results.len()
+            ));
+            return Ok(results);
+        }
+        progress.step(
+            "No local matches — searching diecastregistry.com…",
+            None,
+            None,
+        );
+    }
+    run_dcr_production_search(pool, session, progress, filter).await
+}
+
+/// Local rows can answer a query only when they're guaranteed complete for
+/// it: every filtered driver has been pre-warmed, and the filter doesn't use
+/// fields the local rows don't store (finish / autographed / race-win).
+/// Driverless searches always go remote — local data only covers pre-warmed
+/// drivers, so a broad local answer would silently miss everyone else.
+async fn local_can_answer(
+    pool: &SqlitePool,
+    filter: &crate::dcr::ProductionSearchFilter,
+) -> AppResult<bool> {
+    if filter.driver_guids.is_empty()
+        || !filter.finish_guids.is_empty()
+        || filter.autographed
+        || filter.raced
+    {
+        return Ok(false);
+    }
+    for guid in &filter.driver_guids {
+        let key = format!("dcr.last_prewarm.{guid}");
+        if settings::get(pool, &key).await?.is_none() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+async fn local_registry_query(
+    pool: &SqlitePool,
+    filter: &crate::dcr::ProductionSearchFilter,
+) -> AppResult<Vec<crate::dcr::ProductionSearchResult>> {
+    let mut qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+        "SELECT re.external_id,
+                json_extract(re.raw_json, '$.detail_url') AS detail_url,
+                json_extract(re.raw_json, '$.image_url') AS image_url,
+                COALESCE(d.name, '(unknown driver)') AS driver_name,
+                COALESCE(d.normalized_name, '') AS driver_normalized,
+                re.year, re.oem, re.brand, re.scale, re.make,
+                re.scheme_text, re.production_qty,
+                re.retail_value_cents, re.wholesale_value_cents
+         FROM registry_entries re
+         LEFT JOIN drivers d ON d.id = re.driver_id
+         WHERE 1 = 1",
+    );
+
+    if !filter.driver_guids.is_empty() {
+        qb.push(
+            " AND d.normalized_name IN (SELECT normalized FROM registry_form_options
+               WHERE field = 'driver' AND value IN (",
+        );
+        let mut sep = qb.separated(", ");
+        for g in &filter.driver_guids {
+            sep.push_bind(g);
+        }
+        qb.push("))");
+    }
+    if !filter.years.is_empty() {
+        qb.push(" AND CAST(re.year AS TEXT) IN (");
+        let mut sep = qb.separated(", ");
+        for y in &filter.years {
+            sep.push_bind(y);
+        }
+        qb.push(")");
+    }
+    // Text columns hold the same display strings the dropdowns show, so map
+    // GUID → display through the form-options cache and compare loosely.
+    for (column, field, guids) in [
+        ("re.oem", "oem", &filter.oem_guids),
+        ("re.brand", "brand", &filter.brand_guids),
+        ("re.make", "make", &filter.make_guids),
+        ("re.scale", "scale", &filter.scale_guids),
+    ] {
+        if guids.is_empty() {
+            continue;
+        }
+        qb.push(format!(
+            " AND {column} COLLATE NOCASE IN (SELECT display FROM registry_form_options
+               WHERE field = '{field}' AND value IN ("
+        ));
+        let mut sep = qb.separated(", ");
+        for g in guids {
+            sep.push_bind(g);
+        }
+        qb.push("))");
+    }
+    qb.push(" ORDER BY driver_name COLLATE NOCASE, re.year DESC, re.brand COLLATE NOCASE");
+
+    let rows: Vec<LocalRegistryRow> = qb.build_query_as().fetch_all(pool).await?;
+    let results: Vec<crate::dcr::ProductionSearchResult> = rows
+        .into_iter()
+        .map(|r| crate::dcr::ProductionSearchResult {
+            registry_guid: r.external_id,
+            detail_url: r.detail_url,
+            image_url: r.image_url,
+            driver_name: r.driver_name,
+            driver_normalized: r.driver_normalized,
+            year: r.year,
+            oem: r.oem,
+            brand: r.brand,
+            scale: r.scale,
+            make: r.make,
+            scheme_text: r.scheme_text,
+            seq_produced_total: r.production_qty,
+            retail_value_cents: r.retail_value_cents,
+            wholesale_value_cents: r.wholesale_value_cents,
+        })
+        .collect();
     Ok(results)
 }
 

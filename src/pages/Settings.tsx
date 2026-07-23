@@ -14,6 +14,7 @@ import {
   type ListingReceiverStatus,
   type PrewarmedDriver,
   type PrewarmSummary,
+  type RegistrySearchMode,
   type SyncSummary,
 } from "@/lib/tauri";
 
@@ -71,6 +72,9 @@ export function Settings() {
     [],
   );
   const [prewarmedSearch, setPrewarmedSearch] = useState("");
+  const [searchMode, setSearchMode] = useState<RegistrySearchMode>("remote");
+  const [searchModeSaving, setSearchModeSaving] = useState(false);
+  const [searchModeError, setSearchModeError] = useState<string | null>(null);
 
   const [linkRepairRunning, setLinkRepairRunning] = useState(false);
   const [linkRepairSummary, setLinkRepairSummary] =
@@ -164,6 +168,11 @@ export function Settings() {
       } catch {
         // not fatal — list shows empty
       }
+      try {
+        setSearchMode(await api.getRegistrySearchMode());
+      } catch {
+        // not fatal — leave default (remote)
+      }
     } catch (e) {
       setError(String(e));
     }
@@ -220,6 +229,19 @@ export function Settings() {
       setFilterError(String(e));
     } finally {
       setCleanupRunning(false);
+    }
+  }
+
+  async function onChangeSearchMode(mode: RegistrySearchMode) {
+    setSearchModeSaving(true);
+    setSearchModeError(null);
+    try {
+      await api.setRegistrySearchMode(mode);
+      setSearchMode(mode);
+    } catch (e) {
+      setSearchModeError(String(e));
+    } finally {
+      setSearchModeSaving(false);
     }
   }
 
@@ -876,6 +898,52 @@ export function Settings() {
           {prewarmError && (
             <div className="text-xs text-red-400">{prewarmError}</div>
           )}
+
+          <div className="pt-1 space-y-1.5">
+            <div className="text-sm font-medium">Registry search mode</div>
+            {(
+              [
+                {
+                  mode: "remote",
+                  label: "Live",
+                  hint: "Always search diecastregistry.com (slowest, always complete).",
+                },
+                {
+                  mode: "hybrid",
+                  label: "Hybrid — recommended",
+                  hint: "Answer instantly from pre-warmed data when it fully covers the query; otherwise search the site.",
+                },
+                {
+                  mode: "local",
+                  label: "Local only",
+                  hint: "Never hit the network. Drivers you haven't pre-warmed return no results, and finish / autographed / race-win filters are ignored.",
+                },
+              ] as { mode: RegistrySearchMode; label: string; hint: string }[]
+            ).map((opt) => (
+              <label
+                key={opt.mode}
+                className="flex items-start gap-2 text-sm cursor-pointer"
+              >
+                <input
+                  type="radio"
+                  name="registry-search-mode"
+                  className="mt-0.5"
+                  checked={searchMode === opt.mode}
+                  disabled={searchModeSaving}
+                  onChange={() => onChangeSearchMode(opt.mode)}
+                />
+                <span>
+                  <span>{opt.label}</span>
+                  <span className="block text-xs text-fg-subtle">
+                    {opt.hint}
+                  </span>
+                </span>
+              </label>
+            ))}
+            {searchModeError && (
+              <div className="text-xs text-red-400 mt-1">{searchModeError}</div>
+            )}
+          </div>
 
           <div className="pt-1">
             <div className="text-xs font-medium text-fg-subtle">
