@@ -843,6 +843,8 @@ export interface ListingRow {
   currency: string;
   condition: string | null;
   listing_type: string | null;
+  /** eBay buyingOptions contains BEST_OFFER — independent of listing_type. */
+  accepts_offers: boolean;
   status: string;
   end_time: number | null;
   seller_username: string | null;

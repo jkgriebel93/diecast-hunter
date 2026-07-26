@@ -42,6 +42,9 @@ type ViewMode = "flat" | "byDriver" | "byGroup";
 type StatusFilter = "all" | "active" | "ended";
 type MatchFilter = "all" | "matched" | "unmatched";
 type OfferFilter = "all" | "unresponded" | "with" | "without";
+/** Buying-format facet. "bin" = fixed price that does NOT take offers;
+ *  "offers" = accepts Best Offers (fixed or auction). */
+type TypeFilter = "all" | "auction" | "bin" | "offers";
 /** "all" = no group filter; "none" = listings with zero groups; otherwise the
  *  numeric group id as a string. */
 type GroupFilter = string;
@@ -119,6 +122,7 @@ interface ListingFilterState {
   status: StatusFilter;
   match: MatchFilter;
   offer: OfferFilter;
+  type: TypeFilter;
   group: GroupFilter;
   excluded: Set<number>;
   /** "all", "none", or `d:<lowercased driver name>`. */
@@ -154,6 +158,10 @@ function listingPassesFilters(row: ListingRow, f: ListingFilterState): boolean {
   if (f.status === "ended" && row.status !== "ended") return false;
   if (f.match === "matched" && row.registry_entry_id === null) return false;
   if (f.match === "unmatched" && row.registry_entry_id !== null) return false;
+  if (f.type === "auction" && row.listing_type !== "auction") return false;
+  if (f.type === "bin" && (row.listing_type !== "fixed" || row.accepts_offers))
+    return false;
+  if (f.type === "offers" && !row.accepts_offers) return false;
   if (f.driver !== "all") {
     const name = row.matched_driver_name ?? row.auto_driver_name;
     if (f.driver === "none") {
@@ -225,6 +233,7 @@ export function Listings() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
   const [matchFilter, setMatchFilter] = useState<MatchFilter>("all");
   const [offerFilter, setOfferFilter] = useState<OfferFilter>("all");
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
   const [groupFilter, setGroupFilter] = useState<GroupFilter>("all");
   // Listings belonging to any of these groups are hidden. Independent of
   // `groupFilter` so you can e.g. show all listings except the "Purchased"
@@ -684,6 +693,7 @@ export function Listings() {
       status: statusFilter,
       match: matchFilter,
       offer: offerFilter,
+      type: typeFilter,
       group: groupFilter,
       excluded: excludedGroupIds,
       driver: driverFilter,
@@ -694,6 +704,7 @@ export function Listings() {
       statusFilter,
       matchFilter,
       offerFilter,
+      typeFilter,
       groupFilter,
       excludedGroupIds,
       driverFilter,
@@ -763,6 +774,12 @@ export function Listings() {
         with: count({ offer: "with" }),
         without: count({ offer: "without" }),
       },
+      type: {
+        all: count({ type: "all" }),
+        auction: count({ type: "auction" }),
+        bin: count({ type: "bin" }),
+        offers: count({ type: "offers" }),
+      },
     };
   }, [rows, filterState]);
 
@@ -813,6 +830,7 @@ export function Listings() {
     (statusFilter !== "active" ? 1 : 0) +
     (matchFilter !== "all" ? 1 : 0) +
     (offerFilter !== "all" ? 1 : 0) +
+    (typeFilter !== "all" ? 1 : 0) +
     (groupFilter !== "all" ? 1 : 0) +
     (excludedGroupIds.size > 0 ? 1 : 0) +
     (driverFilter !== "all" ? 1 : 0);
@@ -822,6 +840,7 @@ export function Listings() {
     setStatusFilter("active");
     setMatchFilter("all");
     setOfferFilter("all");
+    setTypeFilter("all");
     setGroupFilter("all");
     setExcludedGroupIds(new Set());
     setDriverFilter("all");
@@ -1042,6 +1061,29 @@ export function Listings() {
                   },
                 ]}
                 onChange={(v) => setOfferFilter(v as OfferFilter)}
+              />
+              <FacetList
+                label="Type"
+                value={typeFilter}
+                options={[
+                  { value: "all", label: "All", count: facetCounts.type.all },
+                  {
+                    value: "auction",
+                    label: "Auction",
+                    count: facetCounts.type.auction,
+                  },
+                  {
+                    value: "bin",
+                    label: "Buy It Now only",
+                    count: facetCounts.type.bin,
+                  },
+                  {
+                    value: "offers",
+                    label: "Accepts offers",
+                    count: facetCounts.type.offers,
+                  },
+                ]}
+                onChange={(v) => setTypeFilter(v as TypeFilter)}
               />
               <div>
                 <div className="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
@@ -1588,7 +1630,10 @@ function ListingCard({
           {[
             row.seller_code,
             row.condition,
-            row.listing_type,
+            row.listing_type &&
+              (row.accepts_offers
+                ? `${row.listing_type} + offers`
+                : row.listing_type),
             row.seller_username && `seller: ${row.seller_username}`,
             row.seller_rating !== null &&
               row.seller_rating !== undefined &&

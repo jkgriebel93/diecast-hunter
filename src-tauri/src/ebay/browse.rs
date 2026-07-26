@@ -80,6 +80,9 @@ pub struct EbayItem {
     pub currency: String,
     pub condition: Option<String>,
     pub listing_type: Option<String>,
+    /// buyingOptions contains BEST_OFFER. Orthogonal to listing_type — most
+    /// fixed-price listings take offers, and the occasional auction does too.
+    pub accepts_offers: bool,
     pub status: String,
     pub end_time: Option<i64>,
     pub seller_username: Option<String>,
@@ -123,6 +126,11 @@ impl EbayItem {
             }
         });
 
+        let accepts_offers = r
+            .buying_options
+            .as_ref()
+            .is_some_and(|opts| opts.iter().any(|o| o == "BEST_OFFER"));
+
         let end_time = r
             .item_end_date
             .as_deref()
@@ -153,6 +161,7 @@ impl EbayItem {
             currency,
             condition: r.condition.clone(),
             listing_type,
+            accepts_offers,
             status,
             end_time,
             seller_username: r.seller.as_ref().map(|s| s.username.clone()),
@@ -238,6 +247,7 @@ mod tests {
         assert_eq!(item.currency, "USD");
         assert_eq!(item.condition.as_deref(), Some("New"));
         assert_eq!(item.listing_type.as_deref(), Some("fixed"));
+        assert!(!item.accepts_offers); // fixture buyingOptions = FIXED_PRICE only
         assert_eq!(item.seller_username.as_deref(), Some("diecast_seller_42"));
         assert_eq!(item.seller_rating, Some(99.8));
         assert!(item.image_url.is_some());

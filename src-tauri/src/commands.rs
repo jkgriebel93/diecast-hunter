@@ -543,6 +543,9 @@ pub struct ListingRow {
     pub currency: String,
     pub condition: Option<String>,
     pub listing_type: Option<String>,
+    /// eBay buyingOptions contains BEST_OFFER. Orthogonal to listing_type:
+    /// most fixed-price listings take offers, the odd auction does too.
+    pub accepts_offers: bool,
     pub status: String,
     pub end_time: Option<i64>,
     pub seller_username: Option<String>,
@@ -614,6 +617,7 @@ struct ListingRowRaw {
     currency: String,
     condition: Option<String>,
     listing_type: Option<String>,
+    accepts_offers: i64,
     status: String,
     end_time: Option<i64>,
     seller_username: Option<String>,
@@ -653,7 +657,7 @@ pub async fn list_listings(state: State<'_, AppState>) -> AppResult<Vec<ListingR
     let rows: Vec<ListingRowRaw> = sqlx::query_as(
         "SELECT l.id, s.code AS seller_code, l.external_id, l.url, l.title,
                 l.price_cents, l.shipping_cents, l.currency,
-                l.condition, l.listing_type, l.status, l.end_time,
+                l.condition, l.listing_type, l.accepts_offers, l.status, l.end_time,
                 l.seller_username, l.seller_rating, l.image_url,
                 l.saved_at, l.last_seen_at,
                 lm.registry_entry_id,
@@ -717,6 +721,7 @@ pub async fn list_listings(state: State<'_, AppState>) -> AppResult<Vec<ListingR
                 currency: r.currency,
                 condition: r.condition,
                 listing_type: r.listing_type,
+                accepts_offers: r.accepts_offers != 0,
                 status: r.status,
                 end_time: r.end_time,
                 seller_username: r.seller_username,

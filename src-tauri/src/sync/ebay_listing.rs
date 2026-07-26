@@ -203,11 +203,11 @@ async fn upsert_listing(pool: &SqlitePool, item: &EbayItem) -> AppResult<(i64, b
         "INSERT INTO listings (
             seller_id, external_id, url, title,
             price_cents, shipping_cents, currency,
-            condition, listing_type, status, end_time,
+            condition, listing_type, accepts_offers, status, end_time,
             seller_username, seller_rating, image_url,
             category_id, category_path,
             saved_at, last_seen_at, raw_json
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(seller_id, external_id) DO UPDATE SET
             url = excluded.url,
             title = excluded.title,
@@ -216,6 +216,7 @@ async fn upsert_listing(pool: &SqlitePool, item: &EbayItem) -> AppResult<(i64, b
             currency = excluded.currency,
             condition = excluded.condition,
             listing_type = excluded.listing_type,
+            accepts_offers = excluded.accepts_offers,
             status = excluded.status,
             end_time = excluded.end_time,
             seller_username = excluded.seller_username,
@@ -235,6 +236,7 @@ async fn upsert_listing(pool: &SqlitePool, item: &EbayItem) -> AppResult<(i64, b
     .bind(&item.currency)
     .bind(&item.condition)
     .bind(&item.listing_type)
+    .bind(item.accepts_offers)
     .bind(&item.status)
     .bind(item.end_time)
     .bind(&item.seller_username)
