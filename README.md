@@ -2,8 +2,8 @@
 
 Desktop app (Windows 11) for managing a NASCAR diecast collection. Imports
 your collection from [diecastregistry.com](https://diecastregistry.com),
-tracks saved listings on eBay and Facebook Marketplace, and compares listing
-prices against the registry's retail/wholesale values.
+tracks saved listings on eBay, and compares listing prices against the
+registry's retail/wholesale values.
 
 ## Stack
 
@@ -77,6 +77,6 @@ This is milestone 1 of 6. See conversation history for the full plan.
 - [x] **M2**: diecastregistry.com collection sync.
 - [x] **M3**: Lazy-enrich registry entries from detail pages.
 - [x] **M4**: eBay direct integration (Browse API, watchlist sync, deal score, registry-search dialog for manual listing↔registry linking).
-- [x] **M5**: Facebook Marketplace browser extension (Firefox + Chrome).
-  See [`extension/`](./extension).
+- [x] **M5**: Facebook Marketplace browser extension (Firefox + Chrome) —
+  built, then removed for now.
 - [ ] **M6**: Bid / Buy It Now actions (gated; requires eBay Buy API approval).

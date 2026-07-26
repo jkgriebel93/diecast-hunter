@@ -29,12 +29,6 @@ pub const ENTRY_DCR_PASSWORD: &str = "diecastregistry.password";
 pub const ENTRY_EBAY_OAUTH: &str = "ebay.oauth_token";
 pub const ENTRY_EBAY_APP_ID: &str = "ebay.app_id";
 pub const ENTRY_EBAY_CERT_ID: &str = "ebay.cert_id";
-pub const ENTRY_LISTING_RECEIVER_SECRET: &str = "listing_receiver.shared_secret";
-
-pub const KEY_LISTING_RECEIVER_PORT: &str = "listing_receiver.port";
-/// Default localhost port the embedded listing-receiver binds to. Picked at
-/// random in the user-port range; configurable via settings if it conflicts.
-pub const DEFAULT_LISTING_RECEIVER_PORT: u16 = 17381;
 
 /// Periodic background sync (see `sync::auto_sync`). When enabled, a startup
 /// task syncs My Garage (DCR) and eBay on the configured interval.

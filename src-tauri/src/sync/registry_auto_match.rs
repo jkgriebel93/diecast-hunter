@@ -584,7 +584,7 @@ fn merge_text_signals(sig: &mut ListingSignals, text: &str) {
 
 /// Mine the stored source payload. eBay Browse responses carry
 /// `localizedAspects` (structured item specifics) and `shortDescription`;
-/// the FB-extension payload carries `description`.
+/// other payloads may carry a plain `description`.
 fn merge_raw_json_signals(sig: &mut ListingSignals, raw_json: &str) {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(raw_json) else {
         return;
@@ -886,10 +886,9 @@ mod tests {
     }
 
     #[test]
-    fn mines_fb_description() {
+    fn mines_plain_description() {
         let raw = serde_json::json!({
             "description": "1998 Chromalusion, 1/24 scale, limited edition of 5,004",
-            "source": "fb_extension",
         })
         .to_string();
         let sig = build_signals("Jeff Gordon DuPont diecast", Some(&raw), &AliasMap::new());

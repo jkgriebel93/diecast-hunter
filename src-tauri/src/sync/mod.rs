@@ -12,7 +12,6 @@ pub mod ebay_all;
 pub mod ebay_listing;
 pub mod ebay_saved;
 pub mod ebay_watchlist;
-pub mod fb_listing;
 pub mod registry_auto_match;
 pub mod registry_link;
 pub mod registry_prewarm;
@@ -30,7 +29,6 @@ pub use ebay_saved::{sync_saved_from_ebay, SavedSyncSummary};
 pub use ebay_watchlist::{
     sync_watchlist, unwatch_and_delete, watch_and_save, WatchlistSyncSummary,
 };
-pub use fb_listing::{upsert_from_payload, FbListingPayload, FbSaveResult};
 pub use registry_auto_match::{AutoMatchOutcome, AutoMatchSummary};
 pub use registry_link::{link_listing_to_registry, LinkResult};
 pub use registry_prewarm::{

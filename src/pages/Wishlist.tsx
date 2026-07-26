@@ -43,8 +43,8 @@ const ACTIVE_LIST_KEY = "wishlist.activeList";
 /**
  * Registry entries the user wants to acquire, organized into named
  * wishlists (tabs). Entries are added from the Registry search page; each
- * wish can collect candidate saved listings (eBay / FB Marketplace) via
- * the "Link listing…" picker.
+ * wish can collect candidate saved listings (eBay) via the
+ * "Link listing…" picker.
  */
 export function Wishlist() {
   const [lists, setLists] = useState<WishlistInfo[] | null>(null);
@@ -967,7 +967,7 @@ function LinkedListingRow({
           {listing.title}
         </a>
         <div className="text-fg-subtle">
-          {listing.seller_code === "ebay" ? "eBay" : "FB Marketplace"}
+          {listing.seller_code === "ebay" ? "eBay" : listing.seller_code}
           {ended && <span className="ml-2">({listing.status})</span>}
         </div>
       </div>
@@ -1103,7 +1103,7 @@ function LinkListingModal({
                       {l.title}
                     </div>
                     <div className="text-fg-subtle">
-                      {l.seller_code === "ebay" ? "eBay" : "FB Marketplace"}
+                      {l.seller_code === "ebay" ? "eBay" : l.seller_code}
                       {l.status !== "active" && (
                         <span className="ml-2">({l.status})</span>
                       )}

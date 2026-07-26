@@ -1173,38 +1173,6 @@ pub async fn remove_non_diecast_listings(state: State<'_, AppState>) -> AppResul
     Ok(summary)
 }
 
-// ----- Listing receiver (FB Marketplace browser-extension target) -----
-
-#[derive(Serialize)]
-pub struct ListingReceiverStatus {
-    pub url: String,
-    pub port: u16,
-    pub has_secret: bool,
-}
-
-#[tauri::command]
-pub async fn get_listing_receiver_status(
-    state: State<'_, AppState>,
-) -> AppResult<ListingReceiverStatus> {
-    let port = crate::listing_receiver::configured_port(&state.db.pool).await?;
-    let has_secret = settings::secret_get(settings::ENTRY_LISTING_RECEIVER_SECRET)?.is_some();
-    Ok(ListingReceiverStatus {
-        url: format!("http://localhost:{port}"),
-        port,
-        has_secret,
-    })
-}
-
-#[tauri::command]
-pub async fn get_listing_receiver_secret(_state: State<'_, AppState>) -> AppResult<String> {
-    crate::listing_receiver::ensure_secret()
-}
-
-#[tauri::command]
-pub async fn regenerate_listing_receiver_secret(_state: State<'_, AppState>) -> AppResult<String> {
-    crate::listing_receiver::regenerate_secret()
-}
-
 // ----- Registry-search dialog (Option C: live search of diecastregistry.com) -----
 
 #[tauri::command]

@@ -5,7 +5,6 @@ mod ebay;
 mod error;
 mod export;
 mod listing_groups;
-mod listing_receiver;
 mod match_feedback;
 mod progress;
 mod saved;
@@ -51,16 +50,6 @@ pub fn run() {
                 });
                 Ok::<_, error::AppError>(pool)
             })?;
-
-            // Spawn the embedded listing receiver. Failures here are
-            // non-fatal — the rest of the app still works without the
-            // browser-extension entry point.
-            let receiver_pool = pool.clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = listing_receiver::run(receiver_pool).await {
-                    tracing::error!("listing receiver: {e}");
-                }
-            });
 
             // One-shot driver auto-association backfill: any listing whose
             // driver_id is still NULL (legacy rows from before this feature,
@@ -174,9 +163,6 @@ pub fn run() {
             commands::get_ebay_buyer_zip,
             commands::set_ebay_buyer_zip,
             commands::remove_non_diecast_listings,
-            commands::get_listing_receiver_status,
-            commands::get_listing_receiver_secret,
-            commands::regenerate_listing_receiver_secret,
             commands::list_saved_searches,
             commands::create_saved_search,
             commands::update_saved_search,

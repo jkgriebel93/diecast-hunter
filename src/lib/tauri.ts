@@ -233,12 +233,6 @@ export const api = {
       registryGuid,
       detailUrl,
     }),
-  getListingReceiverStatus: () =>
-    invoke<ListingReceiverStatus>("get_listing_receiver_status"),
-  getListingReceiverSecret: () =>
-    invoke<string>("get_listing_receiver_secret"),
-  regenerateListingReceiverSecret: () =>
-    invoke<string>("regenerate_listing_receiver_secret"),
   prewarmRegistryByDriver: (driverGuid: string) =>
     invoke<PrewarmSummary>("prewarm_registry_by_driver", { driverGuid }),
   backfillRegistryDetailUrls: () =>
@@ -534,12 +528,6 @@ export interface PrewarmedDriver {
   driver_name: string;
   entry_count: number;
   last_prewarmed_at: number;
-}
-
-export interface ListingReceiverStatus {
-  url: string;
-  port: number;
-  has_secret: boolean;
 }
 
 export interface RefreshOptionsSummary {

@@ -41,7 +41,6 @@ const IMG_CLASS: Record<ImageSize, string> = {
 type ViewMode = "flat" | "byDriver" | "byGroup";
 type StatusFilter = "all" | "active" | "ended";
 type MatchFilter = "all" | "matched" | "unmatched";
-type SourceFilter = "all" | "ebay" | "fb";
 type OfferFilter = "all" | "unresponded" | "with" | "without";
 /** "all" = no group filter; "none" = listings with zero groups; otherwise the
  *  numeric group id as a string. */
@@ -119,7 +118,6 @@ interface ListingFilterState {
   q: string;
   status: StatusFilter;
   match: MatchFilter;
-  source: SourceFilter;
   offer: OfferFilter;
   group: GroupFilter;
   excluded: Set<number>;
@@ -156,7 +154,6 @@ function listingPassesFilters(row: ListingRow, f: ListingFilterState): boolean {
   if (f.status === "ended" && row.status !== "ended") return false;
   if (f.match === "matched" && row.registry_entry_id === null) return false;
   if (f.match === "unmatched" && row.registry_entry_id !== null) return false;
-  if (f.source !== "all" && row.seller_code !== f.source) return false;
   if (f.driver !== "all") {
     const name = row.matched_driver_name ?? row.auto_driver_name;
     if (f.driver === "none") {
@@ -227,7 +224,6 @@ export function Listings() {
   const [searchText, setSearchText] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
   const [matchFilter, setMatchFilter] = useState<MatchFilter>("all");
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [offerFilter, setOfferFilter] = useState<OfferFilter>("all");
   const [groupFilter, setGroupFilter] = useState<GroupFilter>("all");
   // Listings belonging to any of these groups are hidden. Independent of
@@ -686,7 +682,6 @@ export function Listings() {
       q: searchText.trim().toLowerCase(),
       status: statusFilter,
       match: matchFilter,
-      source: sourceFilter,
       offer: offerFilter,
       group: groupFilter,
       excluded: excludedGroupIds,
@@ -697,7 +692,6 @@ export function Listings() {
       searchText,
       statusFilter,
       matchFilter,
-      sourceFilter,
       offerFilter,
       groupFilter,
       excludedGroupIds,
@@ -768,11 +762,6 @@ export function Listings() {
         with: count({ offer: "with" }),
         without: count({ offer: "without" }),
       },
-      source: {
-        all: count({ source: "all" }),
-        ebay: count({ source: "ebay" }),
-        fb: count({ source: "fb" }),
-      },
     };
   }, [rows, filterState]);
 
@@ -823,7 +812,6 @@ export function Listings() {
     (statusFilter !== "active" ? 1 : 0) +
     (matchFilter !== "all" ? 1 : 0) +
     (offerFilter !== "all" ? 1 : 0) +
-    (sourceFilter !== "all" ? 1 : 0) +
     (groupFilter !== "all" ? 1 : 0) +
     (excludedGroupIds.size > 0 ? 1 : 0) +
     (driverFilter !== "all" ? 1 : 0);
@@ -833,7 +821,6 @@ export function Listings() {
     setStatusFilter("active");
     setMatchFilter("all");
     setOfferFilter("all");
-    setSourceFilter("all");
     setGroupFilter("all");
     setExcludedGroupIds(new Set());
     setDriverFilter("all");
@@ -1054,24 +1041,6 @@ export function Listings() {
                   },
                 ]}
                 onChange={(v) => setOfferFilter(v as OfferFilter)}
-              />
-              <FacetList
-                label="Source"
-                value={sourceFilter}
-                options={[
-                  { value: "all", label: "All", count: facetCounts.source.all },
-                  {
-                    value: "ebay",
-                    label: "eBay",
-                    count: facetCounts.source.ebay,
-                  },
-                  {
-                    value: "fb",
-                    label: "Facebook",
-                    count: facetCounts.source.fb,
-                  },
-                ]}
-                onChange={(v) => setSourceFilter(v as SourceFilter)}
               />
               <div>
                 <div className="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">

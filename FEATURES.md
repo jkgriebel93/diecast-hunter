@@ -3,7 +3,7 @@
 - ~~Wishlist feature~~ (Wishlist page with multiple named lists (tabs; create/rename/delete, move entries between lists); "♡ Add to wishlist" on registry search results; per-wish notes, drag-and-drop stack ranking + linked saved listings via the "Link listing…" picker)
     - ~~Select DCR entries~~
     - ~~Link saved eBay listings~~
-- FB Marketplace integration
+- FB Marketplace integration (built, then removed for now — extension + receiver code deleted; see git history)
 - Lionel website integration
 - ~~Display production qty in DCR search results while manually matching saved listing to registry~~
 - ~~Show CWC, CWB, BWB, BWC, Hauler at top of Make dropdown~~
