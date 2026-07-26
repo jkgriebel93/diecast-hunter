@@ -129,7 +129,7 @@ pub async fn set_setting(state: State<'_, AppState>, key: String, value: String)
 #[derive(Serialize)]
 pub struct AutoSyncSettings {
     pub enabled: bool,
-    pub interval_minutes: u32,
+    pub interval_hours: u32,
     /// Unix timestamp of the last background-sync attempt, or null if it has
     /// never run.
     pub last_run: Option<i64>,
@@ -149,10 +149,10 @@ pub async fn get_auto_sync_settings(state: State<'_, AppState>) -> AppResult<Aut
         .await?
         .map(|v| v == "true")
         .unwrap_or(false);
-    let interval_minutes = settings::get(pool, settings::KEY_AUTO_SYNC_INTERVAL_MINUTES)
+    let interval_hours = settings::get(pool, settings::KEY_AUTO_SYNC_INTERVAL_HOURS)
         .await?
         .and_then(|v| v.parse::<u32>().ok())
-        .unwrap_or(settings::DEFAULT_AUTO_SYNC_INTERVAL_MINUTES);
+        .unwrap_or(settings::DEFAULT_AUTO_SYNC_INTERVAL_HOURS);
     let last_run = settings::get(pool, settings::KEY_AUTO_SYNC_LAST_RUN)
         .await?
         .and_then(|v| v.parse::<i64>().ok());
@@ -162,7 +162,7 @@ pub async fn get_auto_sync_settings(state: State<'_, AppState>) -> AppResult<Aut
         .unwrap_or(settings::DEFAULT_PREWARM_REFRESH_MAX_ENTRIES);
     Ok(AutoSyncSettings {
         enabled,
-        interval_minutes,
+        interval_hours,
         last_run,
         scheduled: crate::scheduler::exists(),
         prewarm_max_entries,
@@ -173,13 +173,13 @@ pub async fn get_auto_sync_settings(state: State<'_, AppState>) -> AppResult<Aut
 pub async fn set_auto_sync_settings(
     state: State<'_, AppState>,
     enabled: bool,
-    interval_minutes: u32,
+    interval_hours: u32,
     prewarm_max_entries: u32,
 ) -> AppResult<()> {
     let pool = &state.db.pool;
-    let clamped = interval_minutes.clamp(
-        settings::MIN_AUTO_SYNC_INTERVAL_MINUTES,
-        settings::MAX_AUTO_SYNC_INTERVAL_MINUTES,
+    let clamped = interval_hours.clamp(
+        settings::MIN_AUTO_SYNC_INTERVAL_HOURS,
+        settings::MAX_AUTO_SYNC_INTERVAL_HOURS,
     );
 
     // Register/update (or remove) the OS scheduled task first. If that fails
@@ -195,7 +195,7 @@ pub async fn set_auto_sync_settings(
     .await?;
     settings::set(
         pool,
-        settings::KEY_AUTO_SYNC_INTERVAL_MINUTES,
+        settings::KEY_AUTO_SYNC_INTERVAL_HOURS,
         &clamped.to_string(),
     )
     .await?;

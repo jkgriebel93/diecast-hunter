@@ -584,6 +584,7 @@ export function Listings() {
       const s = await api.syncEbayWatchlist();
       setActionSummary(
         `Watchlist: ${s.created} new, ${s.updated} updated, ` +
+          `${s.skipped_fresh} fresh (skipped), ` +
           `${s.filtered} filtered (non-diecasts), ${s.failed} failed, ` +
           `${s.pruned} pruned (no longer watched) across ${s.pages_fetched} ` +
           `page${s.pages_fetched === 1 ? "" : "s"} (${s.items_seen} items total).`,

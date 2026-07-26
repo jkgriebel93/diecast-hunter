@@ -1,7 +1,7 @@
 //! Windows Task Scheduler integration for the periodic background sync.
 //!
 //! When the user enables auto-sync on the Settings page we register a task
-//! that runs `diecast-hunter.exe --sync` every N minutes (see
+//! that runs `diecast-hunter.exe --sync` every N hours (see
 //! `crate::sync::auto_sync` and `crate::run_headless_sync`). Unlike an
 //! in-process timer, this fires even when the app is closed — as long as the
 //! user is logged in (the task runs with the interactive token so it can reach
@@ -37,7 +37,7 @@ fn schtasks() -> Command {
 
 /// Reconcile the scheduled task with the desired state. Enabling (re)creates
 /// it with the given interval; disabling removes it. Idempotent.
-pub fn apply(enabled: bool, interval_minutes: u32) -> AppResult<()> {
+pub fn apply(enabled: bool, interval_hours: u32) -> AppResult<()> {
     if !enabled {
         return remove();
     }
@@ -56,9 +56,9 @@ pub fn apply(enabled: bool, interval_minutes: u32) -> AppResult<()> {
             "/TR",
             &action,
             "/SC",
-            "MINUTE",
+            "HOURLY",
             "/MO",
-            &interval_minutes.to_string(),
+            &interval_hours.to_string(),
             // Overwrite any existing task so interval edits take effect.
             "/F",
         ])

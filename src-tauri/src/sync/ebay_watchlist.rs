@@ -15,12 +15,23 @@ use crate::progress::ProgressEmitter;
 use crate::settings;
 use crate::sync::ebay_listing;
 
+/// Watchlist items enriched (Browse-fetched) within this window are skipped
+/// on subsequent syncs. Follows the staleness pattern of DCR enrichment
+/// (`dcr_registry::REFRESH_AFTER_SECONDS`), but much shorter since prices
+/// and auction states move faster than registry pages. Keeps the hourly-ish
+/// sync cadence from burning ~1 Browse API call per watched item per run,
+/// which is what exhausted the 5,000/day app quota.
+const SKIP_ENRICH_FRESHER_THAN_SECONDS: i64 = 3 * 24 * 60 * 60; // 3 days
+
 #[derive(Debug, Default, Serialize, Clone)]
 pub struct WatchlistSyncSummary {
     pub items_seen: u32,
     pub created: u32,
     pub updated: u32,
     pub failed: u32,
+    /// Items still on the watchlist whose local row was enriched within the
+    /// last 3 days — left untouched this run (no Browse API call).
+    pub skipped_fresh: u32,
     /// Items eBay returned in the watchlist that we filtered out as
     /// non-diecasts before persisting.
     pub filtered: u32,
@@ -35,16 +46,20 @@ pub struct WatchlistSyncSummary {
 /// Walk the user's eBay watchlist via Trading API GetMyeBayBuying, then for
 /// each item id call the existing add_listing_from_input pathway so the row
 /// gets enriched via the Browse API and a snapshot lands in listing_history.
+/// Items enriched within the last 3 days are skipped (no Browse call) to
+/// stay under the app's daily quota.
 ///
 /// Idempotent: items already in the local listings table are upserted, not
-/// duplicated. Items that fail to enrich are counted as failed but don't
-/// abort the whole sync.
+/// duplicated. Items that fail to enrich are counted as failed and don't
+/// abort the whole sync — except a 429 (quota exhausted), which aborts
+/// immediately with `AppError::RateLimited`.
 pub async fn sync_watchlist(
     pool: &SqlitePool,
     progress: &ProgressEmitter,
 ) -> AppResult<WatchlistSyncSummary> {
     let mut summary = WatchlistSyncSummary::default();
     let mut seen_legacy_ids: HashSet<String> = HashSet::new();
+    let fresh_legacy_ids = load_fresh_legacy_ids(pool).await?;
     let mut walk_complete = true;
     let mut page = 1u32;
     loop {
@@ -66,6 +81,12 @@ pub async fn sync_watchlist(
         for (i, item_id) in result.item_ids.iter().enumerate() {
             progress.check_cancelled()?;
             seen_legacy_ids.insert(item_id.clone());
+            // Fresh rows keep their prune protection (seen-set insert above)
+            // but skip the per-item Browse call.
+            if fresh_legacy_ids.contains(item_id) {
+                summary.skipped_fresh += 1;
+                continue;
+            }
             progress.step(
                 format!(
                     "Importing item {} of {} (id {item_id})…",
@@ -85,6 +106,13 @@ pub async fn sync_watchlist(
                     } else {
                         summary.updated += 1;
                     }
+                }
+                // Out of daily quota: every remaining call would 429 too.
+                // Abort the whole sync (skipping the prune, since the local
+                // picture is incomplete) and surface the error to the user.
+                Err(e @ AppError::RateLimited(_)) => {
+                    tracing::warn!("watchlist sync: aborting — {e}");
+                    return Err(e);
                 }
                 Err(e) => {
                     tracing::warn!(
@@ -130,15 +158,37 @@ pub async fn sync_watchlist(
     .await?;
 
     progress.done(format!(
-        "Watchlist sync done: {} new, {} updated, {} filtered, {} failed, {} pruned.",
+        "Watchlist sync done: {} new, {} updated, {} fresh (skipped), {} filtered, {} failed, {} pruned.",
         summary.created,
         summary.updated,
+        summary.skipped_fresh,
         summary.filtered,
         summary.failed,
         summary.pruned,
     ));
 
     Ok(summary)
+}
+
+/// Legacy ids of local eBay listings whose last successful enrichment is
+/// newer than `SKIP_ENRICH_FRESHER_THAN_SECONDS`. `last_seen_at` is only
+/// bumped by the upsert after a successful Browse fetch, so rows that kept
+/// failing (e.g. during a quota outage) don't count as fresh.
+async fn load_fresh_legacy_ids(pool: &SqlitePool) -> AppResult<HashSet<String>> {
+    let cutoff = Utc::now().timestamp() - SKIP_ENRICH_FRESHER_THAN_SECONDS;
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT l.external_id
+         FROM listings l
+         JOIN sellers s ON s.id = l.seller_id
+         WHERE s.code = 'ebay' AND l.last_seen_at >= ?",
+    )
+    .bind(cutoff)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(external_id,)| legacy_id_from_v1(&external_id).unwrap_or(external_id))
+        .collect())
 }
 
 /// Delete every local eBay listing whose legacy id isn't in the seen set.

@@ -131,6 +131,7 @@ export function Ebay() {
           <div>
             Listings: +{syncSummary.watchlist.created} new, ~
             {syncSummary.watchlist.updated} updated,{" "}
+            {syncSummary.watchlist.skipped_fresh} fresh (skipped),{" "}
             {syncSummary.watchlist.filtered} filtered,{" "}
             {syncSummary.watchlist.failed} failed,{" "}
             -{syncSummary.watchlist.pruned} pruned (

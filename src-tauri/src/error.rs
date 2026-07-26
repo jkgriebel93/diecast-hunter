@@ -20,6 +20,12 @@ pub enum AppError {
     #[error("network error: {0}")]
     Network(String),
 
+    /// eBay answered 429 — the app-level daily API quota is exhausted.
+    /// Long-running syncs abort on this instead of burning the remaining
+    /// quota on calls that are guaranteed to fail.
+    #[error("eBay rate limit reached: {0}")]
+    RateLimited(String),
+
     #[error("login failed: {0}")]
     LoginFailed(String),
 

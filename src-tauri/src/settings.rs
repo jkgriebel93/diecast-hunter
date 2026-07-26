@@ -34,12 +34,15 @@ pub const ENTRY_EBAY_CERT_ID: &str = "ebay.cert_id";
 /// task syncs My Garage (DCR) and eBay on the configured interval.
 /// "true" / "false"; unset = disabled.
 pub const KEY_AUTO_SYNC_ENABLED: &str = "auto_sync.enabled";
-/// Minutes between background syncs. Unset = `DEFAULT_AUTO_SYNC_INTERVAL_MINUTES`.
-pub const KEY_AUTO_SYNC_INTERVAL_MINUTES: &str = "auto_sync.interval_minutes";
+/// Hours between background syncs. Unset = `DEFAULT_AUTO_SYNC_INTERVAL_HOURS`.
+/// (Replaces the old `auto_sync.interval_minutes` key — a stale row for that
+/// key is simply ignored; the hourly cadence it encoded is what exhausted
+/// the eBay daily quota in the first place.)
+pub const KEY_AUTO_SYNC_INTERVAL_HOURS: &str = "auto_sync.interval_hours";
 /// Unix timestamp of the last background-sync attempt (success or failure).
 /// The loop uses this to decide when the interval has elapsed.
 pub const KEY_AUTO_SYNC_LAST_RUN: &str = "auto_sync.last_run";
-pub const DEFAULT_AUTO_SYNC_INTERVAL_MINUTES: u32 = 60;
+pub const DEFAULT_AUTO_SYNC_INTERVAL_HOURS: u32 = 12;
 /// Cap on how many registry entries the background pre-warm refresh may
 /// re-walk in one run (see `sync::registry_prewarm::refresh_stale_prewarms`).
 /// The full registry is tens of thousands of entries, so an uncapped refresh
@@ -49,10 +52,10 @@ pub const KEY_PREWARM_REFRESH_MAX_ENTRIES: &str = "auto_sync.prewarm_max_entries
 pub const DEFAULT_PREWARM_REFRESH_MAX_ENTRIES: u32 = 5000;
 /// Floor on the interval so a typo can't turn the background task into a
 /// tight network loop against DCR / eBay.
-pub const MIN_AUTO_SYNC_INTERVAL_MINUTES: u32 = 15;
-/// Ceiling on the interval. `schtasks /SC MINUTE /MO` accepts at most 1439
-/// (one minute short of a day); a longer cadence would need a DAILY schedule.
-pub const MAX_AUTO_SYNC_INTERVAL_MINUTES: u32 = 1439;
+pub const MIN_AUTO_SYNC_INTERVAL_HOURS: u32 = 1;
+/// Ceiling on the interval. `schtasks /SC HOURLY /MO` accepts at most 23;
+/// a longer cadence would need a DAILY schedule.
+pub const MAX_AUTO_SYNC_INTERVAL_HOURS: u32 = 23;
 
 pub fn ebay_ru_name_key(env: &str) -> String {
     format!("ebay.{env}.ru_name")

@@ -34,7 +34,7 @@ export interface SyncSummary {
 
 export interface AutoSyncSettings {
   enabled: boolean;
-  interval_minutes: number;
+  interval_hours: number;
   /** Unix timestamp of the last background-sync attempt, or null if never run. */
   last_run: number | null;
   /** Whether the Windows scheduled task is actually registered. */
@@ -97,12 +97,12 @@ export const api = {
     invoke<AutoSyncSettings>("get_auto_sync_settings"),
   setAutoSyncSettings: (
     enabled: boolean,
-    intervalMinutes: number,
+    intervalHours: number,
     prewarmMaxEntries: number,
   ) =>
     invoke<void>("set_auto_sync_settings", {
       enabled,
-      intervalMinutes,
+      intervalHours,
       prewarmMaxEntries,
     }),
   syncDcrCollection: (enrich: boolean) =>
@@ -740,6 +740,8 @@ export interface WatchlistSyncSummary {
   created: number;
   updated: number;
   failed: number;
+  /** Still-watched items skipped because they were enriched in the last 3 days. */
+  skipped_fresh: number;
   filtered: number;
   pages_fetched: number;
   /** Local listings deleted because they're no longer on the eBay watchlist. */

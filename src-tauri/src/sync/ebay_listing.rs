@@ -169,6 +169,11 @@ pub async fn refresh_all_active(
         );
         match refresh_listing(pool, id).await {
             Ok(()) => summary.refreshed += 1,
+            // Daily quota exhausted — every remaining refresh would 429 too.
+            Err(e @ AppError::RateLimited(_)) => {
+                tracing::warn!("refresh all: aborting — {e}");
+                return Err(e);
+            }
             Err(e) => {
                 tracing::warn!("listing {id} refresh failed: {e}");
                 summary.failed += 1;

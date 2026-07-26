@@ -29,7 +29,7 @@ export function Settings() {
   const [syncing, setSyncing] = useState(false);
 
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
-  const [autoSyncInterval, setAutoSyncInterval] = useState("60");
+  const [autoSyncInterval, setAutoSyncInterval] = useState("12");
   const [autoSyncLastRun, setAutoSyncLastRun] = useState<number | null>(null);
   const [autoSyncScheduled, setAutoSyncScheduled] = useState(false);
   const [autoSyncPrewarmMax, setAutoSyncPrewarmMax] = useState("5000");
@@ -112,7 +112,7 @@ export function Settings() {
       try {
         const autoSync: AutoSyncSettings = await api.getAutoSyncSettings();
         setAutoSyncEnabled(autoSync.enabled);
-        setAutoSyncInterval(String(autoSync.interval_minutes));
+        setAutoSyncInterval(String(autoSync.interval_hours));
         setAutoSyncLastRun(autoSync.last_run);
         setAutoSyncScheduled(autoSync.scheduled);
         setAutoSyncPrewarmMax(String(autoSync.prewarm_max_entries));
@@ -441,21 +441,21 @@ export function Settings() {
     setAutoSyncMessage(null);
     setAutoSyncError(null);
     try {
-      const minutes = Math.min(
-        1439,
-        Math.max(15, parseInt(autoSyncInterval, 10) || 60),
+      const hours = Math.min(
+        23,
+        Math.max(1, parseInt(autoSyncInterval, 10) || 12),
       );
       // 0 is meaningful (refresh disabled); only blank/garbage falls back.
       const parsedPrewarmMax = parseInt(autoSyncPrewarmMax, 10);
       const prewarmMax = Number.isNaN(parsedPrewarmMax)
         ? 5000
         : Math.max(0, parsedPrewarmMax);
-      await api.setAutoSyncSettings(autoSyncEnabled, minutes, prewarmMax);
-      setAutoSyncInterval(String(minutes));
+      await api.setAutoSyncSettings(autoSyncEnabled, hours, prewarmMax);
+      setAutoSyncInterval(String(hours));
       setAutoSyncPrewarmMax(String(prewarmMax));
       setAutoSyncMessage(
         autoSyncEnabled
-          ? `Automatic sync on — Windows will run it every ${minutes} minutes, even when the app is closed.`
+          ? `Automatic sync on — Windows will run it every ${hours} hour${hours === 1 ? "" : "s"}, even when the app is closed.`
           : "Automatic sync off — scheduled task removed.",
       );
       // Re-read so the registered/last-run status reflects what just happened.
@@ -521,7 +521,7 @@ export function Settings() {
             even when this app is closed, as long as you're signed in to
             Windows. Whichever source isn't configured — diecastregistry.com
             credentials or a connected eBay account — is skipped. Interval is in
-            minutes (15–1439).
+            hours (1–23).
           </p>
         </div>
 
@@ -537,13 +537,13 @@ export function Settings() {
 
           <div className="flex items-end gap-2">
             <div>
-              <label className="label">Interval (minutes)</label>
+              <label className="label">Interval (hours)</label>
               <input
                 className="input w-32"
                 type="number"
-                min={15}
-                max={1439}
-                step={5}
+                min={1}
+                max={23}
+                step={1}
                 value={autoSyncInterval}
                 disabled={!autoSyncEnabled}
                 onChange={(e) => setAutoSyncInterval(e.target.value)}

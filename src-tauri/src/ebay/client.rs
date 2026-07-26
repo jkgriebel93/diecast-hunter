@@ -223,6 +223,15 @@ impl EbayClient {
         let body = resp.text().await.map_err(map_reqwest_err)?;
 
         if !status.is_success() {
+            // 429 = the keyset's daily quota is gone; every further call will
+            // fail until eBay resets it. Surface a dedicated variant so sync
+            // loops can stop instead of hammering the API.
+            if status.as_u16() == 429 {
+                return Err(AppError::RateLimited(format!(
+                    "eBay's daily API quota is used up (HTTP 429 from {url}). \
+                     Syncing will work again after the quota resets."
+                )));
+            }
             // Treat 401 specially: invalidate cache so the next call refreshes.
             if status.as_u16() == 401 {
                 let _ = settings::delete(
