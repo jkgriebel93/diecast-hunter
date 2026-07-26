@@ -13,6 +13,7 @@ import {
 } from "@/lib/tauri";
 import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
+import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-24 h-24",
@@ -779,57 +780,72 @@ function FeedCard({
     item.price_cents !== null
       ? item.price_cents + (item.shipping_cents ?? 0)
       : null;
+  const [minimized, toggleMinimized] = useMinimized(
+    `ebay-item:${item.item_id}`,
+  );
   return (
-    <li className="card flex flex-col gap-2">
+    <li className={`card flex flex-col gap-2 ${minimized ? "!py-2" : ""}`}>
       <div className="flex gap-3">
-        {item.image_url ? (
-          <img
-            src={item.image_url}
-            alt=""
-            loading="lazy"
-            className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
-          />
-        ) : (
-          <div className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`} />
-        )}
+        {!minimized &&
+          (item.image_url ? (
+            <img
+              src={item.image_url}
+              alt=""
+              loading="lazy"
+              className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
+            />
+          ) : (
+            <div className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`} />
+          ))}
+        <MinimizeToggle
+          minimized={minimized}
+          onToggle={toggleMinimized}
+          className="mt-0.5"
+        />
         <div className="min-w-0 flex-1">
           <div
-            className="text-sm font-medium line-clamp-2"
+            className={`text-sm font-medium ${minimized ? "truncate" : "line-clamp-2"}`}
             title={item.title}
           >
             {item.title}
           </div>
-          <div className="text-xs text-fg-subtle mt-1 truncate">
-            {[
-              item.condition,
-              item.listing_type,
-              item.seller_username && `seller: ${item.seller_username}`,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </div>
-          {item.end_time && item.listing_type === "auction" && (
-            <div className="text-xs text-fg-subtle mt-0.5">
-              ends {new Date(item.end_time * 1000).toLocaleString()}
-            </div>
+          {!minimized && (
+            <>
+              <div className="text-xs text-fg-subtle mt-1 truncate">
+                {[
+                  item.condition,
+                  item.listing_type,
+                  item.seller_username && `seller: ${item.seller_username}`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </div>
+              {item.end_time && item.listing_type === "auction" && (
+                <div className="text-xs text-fg-subtle mt-0.5">
+                  ends {new Date(item.end_time * 1000).toLocaleString()}
+                </div>
+              )}
+            </>
           )}
         </div>
         <div className="text-right text-xs tabular-nums shrink-0">
           <div className="text-base text-fg">
             {formatCents(item.price_cents)}
           </div>
-          {item.shipping_cents !== null && item.shipping_cents > 0 && (
+          {!minimized && item.shipping_cents !== null && item.shipping_cents > 0 && (
             <div className="text-fg-subtle">
               + {formatCents(item.shipping_cents)} ship
             </div>
           )}
-          {total !== null &&
+          {!minimized &&
+            total !== null &&
             item.shipping_cents !== null &&
             item.shipping_cents > 0 && (
               <div className="text-fg-muted">total {formatCents(total)}</div>
             )}
         </div>
       </div>
+      {!minimized && (
       <div className="flex items-center justify-end gap-3 text-xs">
         <a
           className="text-accent hover:underline"
@@ -861,6 +877,7 @@ function FeedCard({
           </button>
         )}
       </div>
+      )}
     </li>
   );
 }

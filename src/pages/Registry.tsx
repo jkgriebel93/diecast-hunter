@@ -14,10 +14,13 @@ import {
   type Condition,
   type FormOptionRow,
   type ProductionSearchResult,
+  type WishlistInfo,
 } from "@/lib/tauri";
 import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { MultiSelect } from "@/components/MultiSelect";
+import { ViewLink } from "@/components/ViewLink";
+import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-24 h-24",
@@ -105,6 +108,15 @@ export function Registry() {
   const [info, setInfo] = useState<string | null>(null);
 
   const [addTarget, setAddTarget] = useState<ProductionSearchResult | null>(null);
+  const [wishlistGuids, setWishlistGuids] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [wishing, setWishing] = useState<string | null>(null);
+  /** Set when the user must pick which wishlist to add the result to. */
+  const [wishPicker, setWishPicker] = useState<{
+    result: ProductionSearchResult;
+    lists: WishlistInfo[];
+  } | null>(null);
   const [imgSize, setImgSize] = useImageSize("registry");
   const [sortMode, setSortMode] = useState<SortMode>("registry");
   const [retailMin, setRetailMin] = useState("");
@@ -163,7 +175,51 @@ export function Registry() {
 
   useEffect(() => {
     void loadOptions();
+    // Best-effort: mark results that are already wished for (on any list).
+    // A failure here only loses the "In wishlist" indicators, so it stays
+    // silent.
+    api
+      .listWishlistedGuids()
+      .then((guids) => setWishlistGuids(new Set(guids)))
+      .catch(() => {});
   }, []);
+
+  /** One list → add straight to it; several → open the picker. Lists are
+   *  fetched fresh on each click so a list created in another pane shows
+   *  up without a page reload. */
+  async function onAddToWishlist(r: ProductionSearchResult) {
+    setWishing(r.registry_guid);
+    setError(null);
+    try {
+      const lists = await api.listWishlists();
+      if (lists.length === 0) {
+        setError("No wishlist exists yet — create one on the Wishlist page.");
+      } else if (lists.length === 1) {
+        await api.addWishlistEntry(lists[0].wishlist_id, r);
+        setWishlistGuids((prev) => new Set(prev).add(r.registry_guid));
+      } else {
+        setWishPicker({ result: r, lists });
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setWishing(null);
+    }
+  }
+
+  async function onPickWishlist(wishlistId: number) {
+    if (!wishPicker) return;
+    const r = wishPicker.result;
+    setError(null);
+    try {
+      await api.addWishlistEntry(wishlistId, r);
+      setWishlistGuids((prev) => new Set(prev).add(r.registry_guid));
+      setWishPicker(null);
+    } catch (e) {
+      setError(String(e));
+      setWishPicker(null);
+    }
+  }
 
   async function loadOptions() {
     setError(null);
@@ -543,76 +599,15 @@ export function Registry() {
           ) : (
           <ul className="space-y-2">
             {sortedResults!.map((r) => (
-              <li
+              <RegistryResultCard
                 key={r.registry_guid}
-                className="card flex items-start gap-4"
-              >
-                {r.image_url ? (
-                  <img
-                    src={
-                      r.image_url.startsWith("http")
-                        ? r.image_url
-                        : DCR_BASE + r.image_url
-                    }
-                    alt=""
-                    loading="lazy"
-                    className={`${IMG_CLASS[imgSize]} object-cover rounded border border-border shrink-0`}
-                  />
-                ) : (
-                  <div className={`${IMG_CLASS[imgSize]} rounded border border-border bg-bg shrink-0`} />
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium truncate">
-                    {r.driver_name}
-                    {r.year && (
-                      <span className="text-fg-subtle ml-2">{r.year}</span>
-                    )}
-                  </div>
-                  <div className="text-xs text-fg-muted truncate mt-0.5">
-                    {r.scheme_text ?? "(no scheme)"}
-                  </div>
-                  <div className="text-xs text-fg-subtle mt-0.5">
-                    {[r.oem, r.brand, r.scale, r.make]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </div>
-                  {r.seq_produced_total !== null && (
-                    <div className="text-xs text-fg-faint mt-0.5">
-                      production qty {r.seq_produced_total.toLocaleString()}
-                    </div>
-                  )}
-                  <div className="flex items-center gap-3 mt-1">
-                    {r.detail_url && (
-                      <a
-                        className="text-xs text-accent hover:underline"
-                        href={DCR_BASE + r.detail_url}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          void openExternal(DCR_BASE + r.detail_url!);
-                        }}
-                      >
-                        View on diecastregistry.com →
-                      </a>
-                    )}
-                    <button
-                      type="button"
-                      className="text-xs text-accent hover:underline"
-                      onClick={() => setAddTarget(r)}
-                      title="Register this diecast to your diecastregistry.com garage"
-                    >
-                      + Add to garage
-                    </button>
-                  </div>
-                </div>
-                <div className="text-right text-xs tabular-nums shrink-0 space-y-0.5">
-                  <div className="text-base text-fg">
-                    {formatCents(r.retail_value_cents)}
-                  </div>
-                  <div className="text-fg-subtle">
-                    wholesale {formatCents(r.wholesale_value_cents)}
-                  </div>
-                </div>
-              </li>
+                r={r}
+                imgClass={IMG_CLASS[imgSize]}
+                onAddToGarage={() => setAddTarget(r)}
+                inWishlist={wishlistGuids.has(r.registry_guid)}
+                wishing={wishing === r.registry_guid}
+                onAddToWishlist={() => onAddToWishlist(r)}
+              />
             ))}
           </ul>
           )}
@@ -625,7 +620,191 @@ export function Registry() {
           onClose={() => setAddTarget(null)}
         />
       )}
+
+      {wishPicker && (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setWishPicker(null);
+          }}
+        >
+          <div
+            className="card w-full max-w-sm space-y-3"
+            role="dialog"
+            aria-modal="true"
+          >
+            <header>
+              <h3 className="text-lg font-semibold">Add to which wishlist?</h3>
+              <div className="text-xs text-fg-muted mt-0.5 truncate">
+                {wishPicker.result.driver_name}
+                {wishPicker.result.year !== null && (
+                  <span className="ml-2 text-fg-subtle">
+                    {wishPicker.result.year}
+                  </span>
+                )}
+              </div>
+              {wishPicker.result.scheme_text && (
+                <div className="text-xs text-fg-subtle truncate">
+                  {wishPicker.result.scheme_text}
+                </div>
+              )}
+            </header>
+            <div className="space-y-1.5">
+              {wishPicker.lists.map((l) => (
+                <button
+                  key={l.wishlist_id}
+                  type="button"
+                  className="btn-secondary w-full !justify-between flex items-center"
+                  onClick={() => void onPickWishlist(l.wishlist_id)}
+                >
+                  <span className="truncate">{l.name}</span>
+                  <span className="text-xs text-fg-subtle tabular-nums shrink-0 ml-2">
+                    {l.entry_count} entr{l.entry_count === 1 ? "y" : "ies"}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setWishPicker(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+function RegistryResultCard({
+  r,
+  imgClass,
+  onAddToGarage,
+  inWishlist,
+  wishing,
+  onAddToWishlist,
+}: {
+  r: ProductionSearchResult;
+  imgClass: string;
+  onAddToGarage: () => void;
+  inWishlist: boolean;
+  wishing: boolean;
+  onAddToWishlist: () => void;
+}) {
+  const [minimized, toggleMinimized] = useMinimized(
+    `registry:${r.registry_guid}`,
+  );
+  return (
+    <li
+      className={`card flex items-start gap-4 ${minimized ? "!py-2" : ""}`}
+    >
+      {!minimized &&
+        (r.image_url ? (
+          <img
+            src={
+              r.image_url.startsWith("http")
+                ? r.image_url
+                : DCR_BASE + r.image_url
+            }
+            alt=""
+            loading="lazy"
+            className={`${imgClass} object-cover rounded border border-border shrink-0`}
+          />
+        ) : (
+          <div
+            className={`${imgClass} rounded border border-border bg-bg shrink-0`}
+          />
+        ))}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-start gap-2">
+          <MinimizeToggle
+            minimized={minimized}
+            onToggle={toggleMinimized}
+            className="mt-0.5"
+          />
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium truncate">
+              {r.driver_name}
+              {r.year && (
+                <span className="text-fg-subtle ml-2">{r.year}</span>
+              )}
+            </div>
+            <div className="text-xs text-fg-muted truncate mt-0.5">
+              {r.scheme_text ?? "(no scheme)"}
+            </div>
+          </div>
+        </div>
+        {!minimized && (
+          <>
+            <div className="text-xs text-fg-subtle mt-0.5">
+              {[r.oem, r.brand, r.scale, r.make]
+                .filter(Boolean)
+                .join(" · ")}
+            </div>
+            {r.seq_produced_total !== null && (
+              <div className="text-xs text-fg-faint mt-0.5">
+                production qty {r.seq_produced_total.toLocaleString()}
+              </div>
+            )}
+            <div className="flex items-center gap-3 mt-1">
+              {r.detail_url && (
+                <a
+                  className="text-xs text-accent hover:underline"
+                  href={DCR_BASE + r.detail_url}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    void openExternal(DCR_BASE + r.detail_url!);
+                  }}
+                >
+                  View on diecastregistry.com →
+                </a>
+              )}
+              <button
+                type="button"
+                className="text-xs text-accent hover:underline"
+                onClick={onAddToGarage}
+                title="Register this diecast to your diecastregistry.com garage"
+              >
+                + Add to garage
+              </button>
+              {inWishlist ? (
+                <ViewLink
+                  to="/wishlist"
+                  className="text-xs text-emerald-400 hover:underline"
+                  title="Already on your wishlist — open it"
+                >
+                  ✓ In wishlist
+                </ViewLink>
+              ) : (
+                <button
+                  type="button"
+                  className="text-xs text-accent hover:underline"
+                  onClick={onAddToWishlist}
+                  disabled={wishing}
+                  title="Add this entry to your wishlist"
+                >
+                  {wishing ? "Adding…" : "♡ Add to wishlist"}
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+      <div className="text-right text-xs tabular-nums shrink-0 space-y-0.5">
+        <div className="text-base text-fg">
+          {formatCents(r.retail_value_cents)}
+        </div>
+        {!minimized && (
+          <div className="text-fg-subtle">
+            wholesale {formatCents(r.wholesale_value_cents)}
+          </div>
+        )}
+      </div>
+    </li>
   );
 }
 

@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::sync::atomic::Ordering;
 use tauri::State;
@@ -10,6 +10,7 @@ use crate::progress::ProgressEmitter;
 use crate::saved;
 use crate::settings;
 use crate::sync;
+use crate::wishlist;
 use crate::AppState;
 
 /// Set the active cancel handle so the `cancel_active_operation` command
@@ -136,6 +137,9 @@ pub struct AutoSyncSettings {
     /// drift (settings say enabled but the task is gone, e.g. after a manual
     /// deletion in Task Scheduler).
     pub scheduled: bool,
+    /// Cap on registry entries the pre-warm refresh re-walks per sync run.
+    /// 0 = refresh disabled.
+    pub prewarm_max_entries: u32,
 }
 
 #[tauri::command]
@@ -152,11 +156,16 @@ pub async fn get_auto_sync_settings(state: State<'_, AppState>) -> AppResult<Aut
     let last_run = settings::get(pool, settings::KEY_AUTO_SYNC_LAST_RUN)
         .await?
         .and_then(|v| v.parse::<i64>().ok());
+    let prewarm_max_entries = settings::get(pool, settings::KEY_PREWARM_REFRESH_MAX_ENTRIES)
+        .await?
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(settings::DEFAULT_PREWARM_REFRESH_MAX_ENTRIES);
     Ok(AutoSyncSettings {
         enabled,
         interval_minutes,
         last_run,
         scheduled: crate::scheduler::exists(),
+        prewarm_max_entries,
     })
 }
 
@@ -165,6 +174,7 @@ pub async fn set_auto_sync_settings(
     state: State<'_, AppState>,
     enabled: bool,
     interval_minutes: u32,
+    prewarm_max_entries: u32,
 ) -> AppResult<()> {
     let pool = &state.db.pool;
     let clamped = interval_minutes.clamp(
@@ -187,6 +197,12 @@ pub async fn set_auto_sync_settings(
         pool,
         settings::KEY_AUTO_SYNC_INTERVAL_MINUTES,
         &clamped.to_string(),
+    )
+    .await?;
+    settings::set(
+        pool,
+        settings::KEY_PREWARM_REFRESH_MAX_ENTRIES,
+        &prewarm_max_entries.to_string(),
     )
     .await?;
     Ok(())
@@ -1318,6 +1334,61 @@ pub async fn export_registry_search_html(
     result
 }
 
+/// Export one wishlist (entries, notes, linked candidate listings) to a
+/// standalone print-friendly HTML file at `path`. Same image-embedding and
+/// progress/cancel behavior as the registry export.
+#[tauri::command]
+pub async fn export_wishlist_html(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    wishlist_id: i64,
+    path: String,
+) -> AppResult<crate::export::ExportSummary> {
+    let name: Option<(String,)> = sqlx::query_as("SELECT name FROM wishlists WHERE id = ?")
+        .bind(wishlist_id)
+        .fetch_optional(&state.db.pool)
+        .await?;
+    let name = name
+        .map(|(n,)| n)
+        .ok_or_else(|| AppError::Config("wishlist no longer exists".into()))?;
+    let entries = crate::wishlist::list(&state.db.pool, wishlist_id).await?;
+    let progress = ProgressEmitter::new(app, "wishlist_export");
+    set_active_cancel(&state, &progress).await;
+    let result = crate::export::export_wishlist(&progress, &name, &entries, &path).await;
+    clear_active_cancel(&state).await;
+    finish_progress(&progress, &result, "Wishlist export");
+    result
+}
+
+/// Export the collection rows the My Collection page is currently displaying
+/// (post-filter, post-sort — the frontend passes them back) to a standalone
+/// print-friendly HTML file at `path`. Same image-embedding and
+/// progress/cancel behavior as the registry export.
+#[tauri::command]
+pub async fn export_collection_html(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    rows: Vec<CollectionRow>,
+    path: String,
+) -> AppResult<crate::export::ExportSummary> {
+    let progress = ProgressEmitter::new(app, "collection_export");
+    set_active_cancel(&state, &progress).await;
+    let result = crate::export::export_collection(&progress, &rows, &path).await;
+    clear_active_cancel(&state).await;
+    finish_progress(&progress, &result, "Collection export");
+    result
+}
+
+/// CSV counterpart of [`export_collection_html`] — no images, so it writes
+/// immediately without progress plumbing.
+#[tauri::command]
+pub async fn export_collection_csv(
+    rows: Vec<CollectionRow>,
+    path: String,
+) -> AppResult<crate::export::ExportSummary> {
+    crate::export::export_collection_csv(&rows, &path).await
+}
+
 async fn run_dcr_production_search(
     pool: &SqlitePool,
     session: &crate::dcr::DcrSession,
@@ -1380,8 +1451,8 @@ struct LocalRegistryRow {
 /// Local counterpart of `run_dcr_production_search`: answers the search from
 /// pre-warmed `registry_entries` rows without touching the network. Filter
 /// GUIDs are translated to the stored display text through
-/// `registry_form_options`. Finish, autographed, and raced aren't stored
-/// locally, so those filters are ignored (called out in the done message).
+/// `registry_form_options`. Autographed and raced aren't stored locally, so
+/// those filters are ignored (called out in the done message).
 async fn run_local_registry_search(
     pool: &SqlitePool,
     progress: &ProgressEmitter,
@@ -1391,9 +1462,6 @@ async fn run_local_registry_search(
     let results = local_registry_query(pool, filter).await?;
 
     let mut ignored: Vec<&str> = Vec::new();
-    if !filter.finish_guids.is_empty() {
-        ignored.push("finish");
-    }
     if filter.autographed {
         ignored.push("autographed");
     }
@@ -1448,18 +1516,16 @@ async fn run_hybrid_registry_search(
 
 /// Local rows can answer a query only when they're guaranteed complete for
 /// it: every filtered driver has been pre-warmed, and the filter doesn't use
-/// fields the local rows don't store (finish / autographed / race-win).
-/// Driverless searches always go remote — local data only covers pre-warmed
-/// drivers, so a broad local answer would silently miss everyone else.
+/// fields the local rows don't store (autographed / race-win). Finish IS
+/// stored — detail enrichment fills `registry_entries.finish` — so finish
+/// filters stay local. Driverless searches always go remote — local data
+/// only covers pre-warmed drivers, so a broad local answer would silently
+/// miss everyone else.
 async fn local_can_answer(
     pool: &SqlitePool,
     filter: &crate::dcr::ProductionSearchFilter,
 ) -> AppResult<bool> {
-    if filter.driver_guids.is_empty()
-        || !filter.finish_guids.is_empty()
-        || filter.autographed
-        || filter.raced
-    {
+    if filter.driver_guids.is_empty() || filter.autographed || filter.raced {
         return Ok(false);
     }
     for guid in &filter.driver_guids {
@@ -1478,7 +1544,11 @@ async fn local_registry_query(
     let mut qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
         "SELECT re.external_id,
                 json_extract(re.raw_json, '$.detail_url') AS detail_url,
-                json_extract(re.raw_json, '$.image_url') AS image_url,
+                -- Pre-warmed stubs carry the search-page thumbnail as
+                -- image_url; detail-page-enriched rows only have the
+                -- lightbox photos array. Either renders fine in the UI.
+                COALESCE(json_extract(re.raw_json, '$.image_url'),
+                         json_extract(re.raw_json, '$.photos[0]')) AS image_url,
                 COALESCE(d.name, '(unknown driver)') AS driver_name,
                 COALESCE(d.normalized_name, '') AS driver_normalized,
                 re.year, re.oem, re.brand, re.scale, re.make,
@@ -1515,6 +1585,10 @@ async fn local_registry_query(
         ("re.brand", "brand", &filter.brand_guids),
         ("re.make", "make", &filter.make_guids),
         ("re.scale", "scale", &filter.scale_guids),
+        // Finish comes from detail-page enrichment rather than the pre-warm
+        // stub; entries that were never enriched have NULL finish and drop
+        // out of finish-filtered results.
+        ("re.finish", "finish", &filter.finish_guids),
     ] {
         if guids.is_empty() {
             continue;
@@ -1682,7 +1756,9 @@ pub struct DriverGroup {
     pub wholesale_total_cents: i64,
 }
 
-#[derive(Serialize)]
+// Deserialize too: the collection exports round-trip the displayed rows
+// back from the frontend (see export_collection_html / _csv).
+#[derive(Serialize, Deserialize)]
 pub struct CollectionRow {
     pub collection_id: i64,
     pub asset_guid: String,
@@ -2134,4 +2210,112 @@ pub async fn apply_group_migration(
     items: Vec<listing_groups::GroupMigrationItem>,
 ) -> AppResult<i64> {
     listing_groups::apply_migration(&state.db.pool, items).await
+}
+
+#[tauri::command]
+pub async fn list_wishlists(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<wishlist::WishlistInfo>> {
+    wishlist::list_wishlists(&state.db.pool).await
+}
+
+#[tauri::command]
+pub async fn create_wishlist(
+    state: State<'_, AppState>,
+    name: String,
+) -> AppResult<wishlist::WishlistInfo> {
+    wishlist::create_wishlist(&state.db.pool, &name).await
+}
+
+#[tauri::command]
+pub async fn rename_wishlist(
+    state: State<'_, AppState>,
+    wishlist_id: i64,
+    name: String,
+) -> AppResult<()> {
+    wishlist::rename_wishlist(&state.db.pool, wishlist_id, &name).await
+}
+
+/// Delete a list and its entries. Refuses to delete the last remaining
+/// list so the add-from-search flow always has a target.
+#[tauri::command]
+pub async fn delete_wishlist(state: State<'_, AppState>, wishlist_id: i64) -> AppResult<()> {
+    wishlist::delete_wishlist(&state.db.pool, wishlist_id).await
+}
+
+/// Add a registry-search result to a wishlist. Idempotent — re-adding an
+/// entry already on that list returns `created = false`.
+#[tauri::command]
+pub async fn add_wishlist_entry(
+    state: State<'_, AppState>,
+    wishlist_id: i64,
+    result: crate::dcr::ProductionSearchResult,
+) -> AppResult<wishlist::WishlistAddResult> {
+    wishlist::add_from_search(&state.db.pool, wishlist_id, &result).await
+}
+
+#[tauri::command]
+pub async fn list_wishlist(
+    state: State<'_, AppState>,
+    wishlist_id: i64,
+) -> AppResult<Vec<wishlist::WishlistEntry>> {
+    wishlist::list(&state.db.pool, wishlist_id).await
+}
+
+/// Registry GUIDs wished for on any list — backs the "In wishlist"
+/// indicator on registry search results.
+#[tauri::command]
+pub async fn list_wishlisted_guids(state: State<'_, AppState>) -> AppResult<Vec<String>> {
+    wishlist::wishlisted_guids(&state.db.pool).await
+}
+
+/// Persist a drag-and-drop stack ranking: `ordered_ids[i]` gets rank `i`.
+#[tauri::command]
+pub async fn reorder_wishlist(
+    state: State<'_, AppState>,
+    ordered_ids: Vec<i64>,
+) -> AppResult<()> {
+    wishlist::reorder(&state.db.pool, &ordered_ids).await
+}
+
+#[tauri::command]
+pub async fn remove_wishlist_entry(state: State<'_, AppState>, entry_id: i64) -> AppResult<()> {
+    wishlist::remove(&state.db.pool, entry_id).await
+}
+
+/// Move an entry (with its notes and linked listings) to another list.
+#[tauri::command]
+pub async fn move_wishlist_entry(
+    state: State<'_, AppState>,
+    entry_id: i64,
+    wishlist_id: i64,
+) -> AppResult<()> {
+    wishlist::move_entry(&state.db.pool, entry_id, wishlist_id).await
+}
+
+#[tauri::command]
+pub async fn set_wishlist_notes(
+    state: State<'_, AppState>,
+    entry_id: i64,
+    notes: Option<String>,
+) -> AppResult<()> {
+    wishlist::set_notes(&state.db.pool, entry_id, notes).await
+}
+
+#[tauri::command]
+pub async fn link_listing_to_wishlist(
+    state: State<'_, AppState>,
+    entry_id: i64,
+    listing_id: i64,
+) -> AppResult<()> {
+    wishlist::link_listing(&state.db.pool, entry_id, listing_id).await
+}
+
+#[tauri::command]
+pub async fn unlink_listing_from_wishlist(
+    state: State<'_, AppState>,
+    entry_id: i64,
+    listing_id: i64,
+) -> AppResult<()> {
+    wishlist::unlink_listing(&state.db.pool, entry_id, listing_id).await
 }

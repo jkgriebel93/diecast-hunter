@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
+import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
   api,
   filterAllowedScales,
@@ -8,6 +9,7 @@ import {
 } from "@/lib/tauri";
 import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
+import { setManyMinimized, useMinimized, useMinimizedSet } from "@/lib/minimized";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-24 h-24",
@@ -36,9 +38,9 @@ export function Collection() {
   const [items, setItems] = useState<CollectionRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number | string>>(new Set());
-  // Flat-view rows default to expanded; this tracks the ones the user has
-  // collapsed (keyed by collection_id).
-  const [collapsedItems, setCollapsedItems] = useState<Set<number>>(new Set());
+  // Per-item minimize state lives in the shared, persisted store
+  // (keyed "collection:<collection_id>"); rows default to expanded.
+  const minimizedSet = useMinimizedSet();
   const [syncing, setSyncing] = useState(false);
   const [removingId, setRemovingId] = useState<number | null>(null);
   /** Neutral informational banner (e.g. "wasn't on DCR") — not an error. */
@@ -46,8 +48,10 @@ export function Collection() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const [searchText, setSearchText] = useState("");
+  const [driverFilter, setDriverFilter] = useState<string>("");
   const [scaleFilter, setScaleFilter] = useState<string>("");
   const [oemFilter, setOemFilter] = useState<string>("");
+  const [exporting, setExporting] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>("driver-asc");
   const [groupByDriver, setGroupByDriver] = useGroupByDriver();
   const [imgSize, setImgSize] = useImageSize("collection");
@@ -123,8 +127,58 @@ export function Collection() {
     }
   }
 
-  // Distinct scales / OEMs for filter dropdowns. Scales are limited to the
-  // standard model sizes we surface everywhere (1:18, 1:24, 1:32, 1:64).
+  /** Export the currently displayed rows (post-filter, in displayed order)
+   *  as a print-friendly HTML file (images embedded, opened in the browser
+   *  for printing) or a CSV spreadsheet. */
+  async function onExport(format: "html" | "csv") {
+    const rows = groupByDriver
+      ? (groups ?? []).flatMap((g) => g.items)
+      : (flatItems ?? []);
+    if (rows.length === 0) return;
+    const path = await saveDialog({
+      title: format === "csv" ? "Export collection CSV" : "Export collection",
+      defaultPath: `my-collection.${format}`,
+      filters:
+        format === "csv"
+          ? [{ name: "CSV", extensions: ["csv"] }]
+          : [{ name: "HTML", extensions: ["html"] }],
+    });
+    if (!path) return;
+    setExporting(true);
+    setError(null);
+    setNotice(null);
+    setSuccessMsg(null);
+    try {
+      const summary =
+        format === "csv"
+          ? await api.exportCollectionCsv(rows, path)
+          : await api.exportCollectionHtml(rows, path);
+      setSuccessMsg(
+        `Exported ${summary.entries} item${summary.entries === 1 ? "" : "s"} to ${summary.path}` +
+          (summary.images_failed > 0
+            ? ` (${summary.images_failed} image${summary.images_failed === 1 ? "" : "s"} could not be downloaded).`
+            : ".") +
+          (format === "html"
+            ? " Opening in your browser — print from there."
+            : ""),
+      );
+      if (format === "html") void openExternal(summary.path);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  // Distinct driver names / scales / OEMs for filter dropdowns. Scales are
+  // limited to the standard model sizes we surface everywhere
+  // (1:18, 1:24, 1:32, 1:64).
+  const driverNames = useMemo(() => {
+    const set = new Set<string>();
+    for (const i of items ?? []) set.add(i.driver_name ?? "(unknown)");
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [items]);
+
   const scales = useMemo(() => {
     const set = new Set<string>();
     for (const i of items ?? [])
@@ -161,11 +215,13 @@ export function Collection() {
           .toLowerCase();
         if (!hay.includes(q)) return false;
       }
+      if (driverFilter && (it.driver_name ?? "(unknown)") !== driverFilter)
+        return false;
       if (scaleFilter && it.scale !== scaleFilter) return false;
       if (oemFilter && it.oem !== oemFilter) return false;
       return true;
     });
-  }, [items, searchText, scaleFilter, oemFilter]);
+  }, [items, searchText, driverFilter, scaleFilter, oemFilter]);
 
   // Group filtered items by driver, then sort groups.
   const groups: DriverGroupView[] | null = useMemo(() => {
@@ -260,22 +316,15 @@ export function Collection() {
     });
   }
 
-  function toggleItem(id: number) {
-    setCollapsedItems((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
   // Whether every entry in the active view is currently expanded — drives the
   // Expand all / Collapse all button's label and action.
   const allExpanded = groupByDriver
     ? (groups?.length ?? 0) > 0 &&
       (groups ?? []).every((g) => expanded.has(groupKey(g)))
     : (flatItems?.length ?? 0) > 0 &&
-      (flatItems ?? []).every((i) => !collapsedItems.has(i.collection_id));
+      (flatItems ?? []).every(
+        (i) => !minimizedSet.has(`collection:${i.collection_id}`),
+      );
 
   function toggleAll() {
     if (groupByDriver) {
@@ -283,10 +332,9 @@ export function Collection() {
         allExpanded ? new Set() : new Set((groups ?? []).map(groupKey)),
       );
     } else {
-      setCollapsedItems(
-        allExpanded
-          ? new Set((flatItems ?? []).map((i) => i.collection_id))
-          : new Set(),
+      setManyMinimized(
+        (flatItems ?? []).map((i) => `collection:${i.collection_id}`),
+        allExpanded,
       );
     }
   }
@@ -314,6 +362,32 @@ export function Collection() {
                 : `${filteredItems} of ${totalItems} items shown`}
             </div>
           )}
+          <button
+            className="btn-secondary"
+            type="button"
+            disabled={exporting || filteredItems === 0}
+            onClick={() => onExport("csv")}
+            title={
+              filteredItems > 0
+                ? "Save the displayed items as a CSV spreadsheet"
+                : "Nothing to export"
+            }
+          >
+            Export CSV…
+          </button>
+          <button
+            className="btn-secondary"
+            type="button"
+            disabled={exporting || filteredItems === 0}
+            onClick={() => onExport("html")}
+            title={
+              filteredItems > 0
+                ? "Save the displayed items as a print-friendly HTML file (images embedded) and open it for printing"
+                : "Nothing to export"
+            }
+          >
+            {exporting ? "Exporting…" : "Export / Print…"}
+          </button>
           <button
             className="btn-secondary"
             type="button"
@@ -375,6 +449,21 @@ export function Collection() {
           </label>
           <div className="flex items-center gap-3 text-xs flex-wrap">
             <label className="flex items-center gap-1">
+              <span className="text-fg-subtle">Driver:</span>
+              <select
+                className="bg-bg-elevated border border-border rounded px-2 py-0.5 text-fg"
+                value={driverFilter}
+                onChange={(e) => setDriverFilter(e.target.value)}
+              >
+                <option value="">Any</option>
+                {driverNames.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-1">
               <span className="text-fg-subtle">Scale:</span>
               <select
                 className="bg-bg-elevated border border-border rounded px-2 py-0.5 text-fg"
@@ -404,12 +493,13 @@ export function Collection() {
                 ))}
               </select>
             </label>
-            {(searchText || scaleFilter || oemFilter) && (
+            {(searchText || driverFilter || scaleFilter || oemFilter) && (
               <button
                 type="button"
                 className="text-fg-subtle hover:text-fg"
                 onClick={() => {
                   setSearchText("");
+                  setDriverFilter("");
                   setScaleFilter("");
                   setOemFilter("");
                 }}
@@ -470,9 +560,6 @@ export function Collection() {
                   onRemove={onRemove}
                   removingId={removingId}
                   showDriver
-                  collapsible
-                  collapsed={collapsedItems.has(item.collection_id)}
-                  onToggle={() => toggleItem(item.collection_id)}
                 />
               ))}
             </ul>
@@ -546,9 +633,6 @@ function CollectionItemRow({
   onRemove,
   removingId,
   showDriver = false,
-  collapsible = false,
-  collapsed = false,
-  onToggle,
 }: {
   item: CollectionRow;
   imgSizeClass: string;
@@ -556,12 +640,10 @@ function CollectionItemRow({
   removingId: number | null;
   /** Show the driver name (used by the flat, ungrouped view). */
   showDriver?: boolean;
-  /** Render the title as a click-to-collapse toggle. */
-  collapsible?: boolean;
-  collapsed?: boolean;
-  onToggle?: () => void;
 }) {
-  const isCollapsed = collapsible && collapsed;
+  const [isCollapsed, onToggle] = useMinimized(
+    `collection:${item.collection_id}`,
+  );
 
   const title = (
     <div className="text-sm font-medium truncate">
@@ -575,7 +657,7 @@ function CollectionItemRow({
   );
 
   return (
-    <li className="p-4 flex gap-4">
+    <li className={`${isCollapsed ? "px-4 py-2" : "p-4"} flex gap-4`}>
       {!isCollapsed && item.image_url && (
         <img
           src={resolveImage(item.image_url)}
@@ -584,30 +666,25 @@ function CollectionItemRow({
         />
       )}
       <div className="flex-1 min-w-0">
-        {collapsible ? (
-          <button
-            type="button"
-            className="w-full text-left flex items-start gap-2 hover:opacity-80"
-            onClick={onToggle}
+        <button
+          type="button"
+          className="w-full text-left flex items-start gap-2 hover:opacity-80"
+          onClick={onToggle}
+          title={isCollapsed ? "Expand" : "Minimize"}
+          aria-expanded={!isCollapsed}
+        >
+          <span
+            className={`inline-block mt-0.5 text-xs transition-transform ${
+              isCollapsed ? "" : "rotate-90"
+            }`}
           >
-            <span
-              className={`inline-block mt-0.5 text-xs transition-transform ${
-                isCollapsed ? "" : "rotate-90"
-              }`}
-            >
-              ▶
-            </span>
-            <div className="min-w-0">
-              {driverLine}
-              {title}
-            </div>
-          </button>
-        ) : (
-          <>
+            ▶
+          </span>
+          <div className="min-w-0">
             {driverLine}
             {title}
-          </>
-        )}
+          </div>
+        </button>
         {!isCollapsed && (
           <>
             <div className="text-xs text-fg-subtle mt-0.5">

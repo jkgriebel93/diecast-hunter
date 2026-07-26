@@ -39,6 +39,8 @@ export interface AutoSyncSettings {
   last_run: number | null;
   /** Whether the Windows scheduled task is actually registered. */
   scheduled: boolean;
+  /** Cap on registry entries the pre-warm refresh re-walks per sync run. 0 = disabled. */
+  prewarm_max_entries: number;
 }
 
 export interface RemoveEntrySummary {
@@ -93,8 +95,16 @@ export const api = {
     invoke<void>("set_setting", { key, value }),
   getAutoSyncSettings: () =>
     invoke<AutoSyncSettings>("get_auto_sync_settings"),
-  setAutoSyncSettings: (enabled: boolean, intervalMinutes: number) =>
-    invoke<void>("set_auto_sync_settings", { enabled, intervalMinutes }),
+  setAutoSyncSettings: (
+    enabled: boolean,
+    intervalMinutes: number,
+    prewarmMaxEntries: number,
+  ) =>
+    invoke<void>("set_auto_sync_settings", {
+      enabled,
+      intervalMinutes,
+      prewarmMaxEntries,
+    }),
   syncDcrCollection: (enrich: boolean) =>
     invoke<SyncSummary>("sync_dcr_collection", { enrich }),
   registerDiecastInGarage: (input: RegisterDiecastInput) =>
@@ -302,7 +312,94 @@ export const api = {
     invoke<GroupMigrationProposal[]>("propose_group_migration", { handles }),
   applyGroupMigration: (items: GroupMigrationItem[]) =>
     invoke<number>("apply_group_migration", { items }),
+  listWishlists: () => invoke<WishlistInfo[]>("list_wishlists"),
+  createWishlist: (name: string) =>
+    invoke<WishlistInfo>("create_wishlist", { name }),
+  renameWishlist: (wishlistId: number, name: string) =>
+    invoke<void>("rename_wishlist", { wishlistId, name }),
+  deleteWishlist: (wishlistId: number) =>
+    invoke<void>("delete_wishlist", { wishlistId }),
+  addWishlistEntry: (wishlistId: number, result: ProductionSearchResult) =>
+    invoke<WishlistAddResult>("add_wishlist_entry", { wishlistId, result }),
+  listWishlist: (wishlistId: number) =>
+    invoke<WishlistEntry[]>("list_wishlist", { wishlistId }),
+  listWishlistedGuids: () => invoke<string[]>("list_wishlisted_guids"),
+  reorderWishlist: (orderedIds: number[]) =>
+    invoke<void>("reorder_wishlist", { orderedIds }),
+  removeWishlistEntry: (entryId: number) =>
+    invoke<void>("remove_wishlist_entry", { entryId }),
+  moveWishlistEntry: (entryId: number, wishlistId: number) =>
+    invoke<void>("move_wishlist_entry", { entryId, wishlistId }),
+  setWishlistNotes: (entryId: number, notes: string | null) =>
+    invoke<void>("set_wishlist_notes", { entryId, notes }),
+  linkListingToWishlist: (entryId: number, listingId: number) =>
+    invoke<void>("link_listing_to_wishlist", { entryId, listingId }),
+  unlinkListingFromWishlist: (entryId: number, listingId: number) =>
+    invoke<void>("unlink_listing_from_wishlist", { entryId, listingId }),
+  exportWishlistHtml: (wishlistId: number, path: string) =>
+    invoke<ExportSummary>("export_wishlist_html", { wishlistId, path }),
+  exportCollectionHtml: (rows: CollectionRow[], path: string) =>
+    invoke<ExportSummary>("export_collection_html", { rows, path }),
+  exportCollectionCsv: (rows: CollectionRow[], path: string) =>
+    invoke<ExportSummary>("export_collection_csv", { rows, path }),
 };
+
+/** One named wishlist, for the list-management UI. */
+export interface WishlistInfo {
+  wishlist_id: number;
+  name: string;
+  created_at: number;
+  entry_count: number;
+}
+
+export interface WishlistAddResult {
+  entry_id: number;
+  registry_entry_id: number;
+  /** False when the entry was already on this list. */
+  created: boolean;
+}
+
+/** A saved listing linked to a wishlist entry as a purchase candidate. */
+export interface WishlistListing {
+  listing_id: number;
+  seller_code: string;
+  title: string;
+  url: string;
+  price_cents: number | null;
+  shipping_cents: number | null;
+  currency: string;
+  status: string;
+  end_time: number | null;
+  image_url: string | null;
+  linked_at: number;
+}
+
+export interface WishlistEntry {
+  entry_id: number;
+  wishlist_id: number;
+  registry_entry_id: number;
+  registry_guid: string;
+  driver_name: string | null;
+  year: number | null;
+  oem: string | null;
+  brand: string | null;
+  scale: string | null;
+  make: string | null;
+  scheme_text: string | null;
+  production_qty: number | null;
+  retail_value_cents: number | null;
+  wholesale_value_cents: number | null;
+  image_url: string | null;
+  /** Site-relative path on diecastregistry.com to the entry's detail page. */
+  detail_url: string | null;
+  notes: string | null;
+  added_at: number;
+  /** Stack-rank priority within its list; lower = higher priority. Entries
+   *  arrive already sorted by this — display rank is just the list index. */
+  sort_rank: number;
+  /** Linked candidate listings, oldest link first. */
+  listings: WishlistListing[];
+}
 
 export interface BulkAddResult {
   added: number;

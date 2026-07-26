@@ -5,9 +5,9 @@
 //! (rather than an in-app timer) means it fires even when the GUI is closed,
 //! as long as the user is logged in.
 //!
-//! Both phases are best-effort: a failure in one (missing credentials, network
-//! blip) is logged and doesn't stop the other. The attempt time is recorded in
-//! `auto_sync.last_run` so the Settings page can show when it last ran.
+//! All phases are best-effort: a failure in one (missing credentials, network
+//! blip) is logged and doesn't stop the others. The attempt time is recorded
+//! in `auto_sync.last_run` so the Settings page can show when it last ran.
 
 use chrono::Utc;
 use sqlx::SqlitePool;
@@ -56,6 +56,24 @@ pub async fn run_once(pool: &SqlitePool) -> bool {
         Err(e) => {
             ok = false;
             tracing::warn!("auto-sync eBay failed: {e}");
+        }
+    }
+
+    // Pre-warmed registry refresh. Self-limiting: only drivers whose last
+    // pre-warm is older than the staleness threshold, capped per run, so most
+    // runs do nothing. Skipping the "0 stale" case keeps quiet runs quiet in
+    // the log.
+    match sync::refresh_stale_prewarms(pool, &progress).await {
+        Ok(s) if s.drivers_stale == 0 => {}
+        Ok(s) => tracing::info!(
+            "auto-sync prewarm refresh: {} of {} stale drivers refreshed, {} entries upserted",
+            s.drivers_refreshed,
+            s.drivers_stale,
+            s.registry_entries_upserted,
+        ),
+        Err(e) => {
+            ok = false;
+            tracing::warn!("auto-sync prewarm refresh failed: {e}");
         }
     }
 

@@ -30,6 +30,7 @@ import {
 } from "@/lib/tauri";
 import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
+import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-24 h-24",
@@ -1571,11 +1572,14 @@ function ListingCard({
       : null;
   const ended = row.status === "ended";
   const matched = row.registry_entry_id !== null;
+  const [minimized, toggleMinimized] = useMinimized(
+    `listing:${row.listing_id}`,
+  );
   return (
     <li
-      className={`card flex gap-4 ${ended ? "opacity-60" : ""} ${
-        selectMode && selected ? "ring-2 ring-accent/60" : ""
-      }`}
+      className={`card flex gap-4 ${minimized ? "!py-2" : ""} ${
+        ended ? "opacity-60" : ""
+      } ${selectMode && selected ? "ring-2 ring-accent/60" : ""}`}
     >
       {selectMode && (
         <label
@@ -1593,7 +1597,7 @@ function ListingCard({
           />
         </label>
       )}
-      {row.image_url && (
+      {!minimized && row.image_url && (
         <img
           src={row.image_url}
           alt=""
@@ -1602,11 +1606,14 @@ function ListingCard({
       )}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
+          <MinimizeToggle minimized={minimized} onToggle={toggleMinimized} />
           <div className="text-sm font-medium truncate flex-1 min-w-0">
             {row.title}
           </div>
           {offer && <OfferBadge offer={offer} />}
         </div>
+        {minimized ? null : (
+        <>
         <div className="text-xs text-fg-subtle mt-0.5">
           {[
             row.seller_code,
@@ -1821,16 +1828,18 @@ function ListingCard({
             </button>
           )}
         </div>
+        </>
+        )}
       </div>
       <div className="text-right text-xs tabular-nums shrink-0 space-y-0.5">
         <div className="text-base text-fg">{formatCents(total)}</div>
-        {row.shipping_cents !== null && row.shipping_cents > 0 && (
+        {!minimized && row.shipping_cents !== null && row.shipping_cents > 0 && (
           <div className="text-fg-subtle">
             {formatCents(row.price_cents)} + {formatCents(row.shipping_cents)}{" "}
             ship
           </div>
         )}
-        {matched && (
+        {!minimized && matched && (
           <div className="text-fg-subtle mt-1">
             retail {formatCents(row.matched_retail_cents)}
           </div>

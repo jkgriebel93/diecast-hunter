@@ -17,12 +17,29 @@ use crate::error::{AppError, AppResult};
 use crate::progress::ProgressEmitter;
 use crate::settings;
 
+/// Pre-warmed rows older than this are considered stale and get re-walked by
+/// `refresh_stale_prewarms`. Matches the 30-day detail-page enrichment
+/// cadence in `dcr_registry`.
+const PREWARM_STALE_AFTER_SECONDS: i64 = 30 * 24 * 60 * 60; // 30 days
+
 #[derive(Debug, Default, Serialize, Clone)]
 pub struct PrewarmSummary {
     pub driver_name: String,
     pub results_seen: u32,
     pub registry_entries_upserted: u32,
     pub pages_fetched: u32,
+}
+
+#[derive(Debug, Default, Serialize, Clone)]
+pub struct PrewarmRefreshSummary {
+    /// Drivers whose last pre-warm was older than the staleness threshold.
+    pub drivers_stale: u32,
+    /// Drivers actually re-warmed this run (bounded by the entry cap).
+    pub drivers_refreshed: u32,
+    /// Stale drivers whose entry count alone exceeds the configured cap —
+    /// they can never be refreshed until the cap is raised.
+    pub drivers_over_cap: u32,
+    pub registry_entries_upserted: u32,
 }
 
 pub async fn prewarm_by_driver(
@@ -44,6 +61,116 @@ pub async fn prewarm_by_driver(
         summary.registry_entries_upserted, summary.driver_name
     ));
 
+    Ok(summary)
+}
+
+/// Re-walk the production search for pre-warmed drivers whose
+/// `dcr.last_prewarm.{guid}` timestamp has gone stale, oldest first, until
+/// the configured per-run entry cap (`auto_sync.prewarm_max_entries`) is
+/// filled. Used by the background auto-sync so local/hybrid registry
+/// searches keep seeing new entries and current values. Per-driver failures
+/// are logged and skipped; cancellation propagates.
+pub async fn refresh_stale_prewarms(
+    pool: &SqlitePool,
+    progress: &ProgressEmitter,
+) -> AppResult<PrewarmRefreshSummary> {
+    let max_entries = settings::get(pool, settings::KEY_PREWARM_REFRESH_MAX_ENTRIES)
+        .await?
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(settings::DEFAULT_PREWARM_REFRESH_MAX_ENTRIES as i64);
+    if max_entries <= 0 {
+        progress.done("Pre-warm refresh is disabled (entry cap is 0).");
+        return Ok(PrewarmRefreshSummary::default());
+    }
+
+    let cutoff = Utc::now().timestamp() - PREWARM_STALE_AFTER_SECONDS;
+    // Stale drivers oldest-first, each with its local entry count — the best
+    // available estimate of how many entries a re-walk will fetch, since the
+    // original pre-warm stored them all.
+    let stale: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT substr(s.key, length('dcr.last_prewarm.') + 1) AS guid,
+                (SELECT COUNT(*)
+                   FROM registry_entries re
+                   JOIN drivers d ON d.id = re.driver_id
+                  WHERE d.normalized_name = o.normalized) AS entry_count
+         FROM settings s
+         LEFT JOIN registry_form_options o
+            ON o.field = 'driver'
+           AND o.value = substr(s.key, length('dcr.last_prewarm.') + 1)
+         WHERE s.key LIKE 'dcr.last_prewarm.%'
+           AND CAST(s.value AS INTEGER) <= ?
+         ORDER BY CAST(s.value AS INTEGER)",
+    )
+    .bind(cutoff)
+    .fetch_all(pool)
+    .await?;
+
+    let drivers_stale = stale.len() as u32;
+    if stale.is_empty() {
+        progress.done("All pre-warmed drivers are fresh.");
+        return Ok(PrewarmRefreshSummary::default());
+    }
+
+    // Fill the entry budget oldest-first. A driver that doesn't fit the
+    // remaining budget is left stale for a later run (it stays at the front
+    // of the queue); one that exceeds the whole cap by itself can never run
+    // and is called out so the user knows to raise the cap.
+    let mut batch: Vec<&str> = Vec::new();
+    let mut planned = 0i64;
+    let mut drivers_over_cap = 0u32;
+    for (guid, entry_count) in &stale {
+        if *entry_count > max_entries {
+            drivers_over_cap += 1;
+            tracing::warn!(
+                "prewarm refresh: driver {guid} has {entry_count} entries, more than the \
+                 {max_entries}-entry cap — raise the cap in Settings to refresh it"
+            );
+            continue;
+        }
+        if planned + entry_count > max_entries {
+            continue;
+        }
+        planned += entry_count;
+        batch.push(guid);
+    }
+
+    let mut summary = PrewarmRefreshSummary {
+        drivers_stale,
+        drivers_over_cap,
+        ..Default::default()
+    };
+    if batch.is_empty() {
+        progress.done(format!(
+            "{drivers_stale} stale drivers, but none fit the {max_entries}-entry cap."
+        ));
+        return Ok(summary);
+    }
+
+    progress.step("Logging in to diecastregistry.com…", None, None);
+    let client = logged_in_client(pool).await?;
+
+    let total = batch.len() as u32;
+    for (i, guid) in batch.iter().enumerate() {
+        progress.check_cancelled()?;
+        progress.step(
+            format!("Refreshing stale pre-warm {} of {total}…", i + 1),
+            Some(i as u32),
+            Some(total),
+        );
+        match prewarm_driver_with_client(pool, &client, guid, progress).await {
+            Ok(s) => {
+                summary.drivers_refreshed += 1;
+                summary.registry_entries_upserted += s.registry_entries_upserted;
+            }
+            Err(AppError::Cancelled) => return Err(AppError::Cancelled),
+            Err(e) => tracing::warn!("prewarm refresh: driver {guid} failed: {e}"),
+        }
+    }
+
+    progress.done(format!(
+        "Refreshed {} of {} stale pre-warmed drivers ({} entries updated).",
+        summary.drivers_refreshed, drivers_stale, summary.registry_entries_upserted
+    ));
     Ok(summary)
 }
 
@@ -140,7 +267,9 @@ pub(crate) async fn prewarm_driver_with_client(
     })
 }
 
-async fn upsert_stub_from_search(
+/// Also used by the wishlist add flow so a wish always references a
+/// fully-stubbed registry entry.
+pub(crate) async fn upsert_stub_from_search(
     pool: &SqlitePool,
     r: &ProductionSearchResult,
 ) -> AppResult<()> {

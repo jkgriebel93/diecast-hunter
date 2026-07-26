@@ -33,6 +33,7 @@ export function Settings() {
   const [autoSyncInterval, setAutoSyncInterval] = useState("60");
   const [autoSyncLastRun, setAutoSyncLastRun] = useState<number | null>(null);
   const [autoSyncScheduled, setAutoSyncScheduled] = useState(false);
+  const [autoSyncPrewarmMax, setAutoSyncPrewarmMax] = useState("5000");
   const [autoSyncSaving, setAutoSyncSaving] = useState(false);
   const [autoSyncMessage, setAutoSyncMessage] = useState<string | null>(null);
   const [autoSyncError, setAutoSyncError] = useState<string | null>(null);
@@ -123,6 +124,7 @@ export function Settings() {
         setAutoSyncInterval(String(autoSync.interval_minutes));
         setAutoSyncLastRun(autoSync.last_run);
         setAutoSyncScheduled(autoSync.scheduled);
+        setAutoSyncPrewarmMax(String(autoSync.prewarm_max_entries));
       } catch {
         // not fatal — leave defaults
       }
@@ -499,8 +501,14 @@ export function Settings() {
         1439,
         Math.max(15, parseInt(autoSyncInterval, 10) || 60),
       );
-      await api.setAutoSyncSettings(autoSyncEnabled, minutes);
+      // 0 is meaningful (refresh disabled); only blank/garbage falls back.
+      const parsedPrewarmMax = parseInt(autoSyncPrewarmMax, 10);
+      const prewarmMax = Number.isNaN(parsedPrewarmMax)
+        ? 5000
+        : Math.max(0, parsedPrewarmMax);
+      await api.setAutoSyncSettings(autoSyncEnabled, minutes, prewarmMax);
       setAutoSyncInterval(String(minutes));
+      setAutoSyncPrewarmMax(String(prewarmMax));
       setAutoSyncMessage(
         autoSyncEnabled
           ? `Automatic sync on — Windows will run it every ${minutes} minutes, even when the app is closed.`
@@ -597,6 +605,18 @@ export function Settings() {
                 onChange={(e) => setAutoSyncInterval(e.target.value)}
               />
             </div>
+            <div>
+              <label className="label">Max registry entries per refresh</label>
+              <input
+                className="input w-32"
+                type="number"
+                min={0}
+                step={500}
+                value={autoSyncPrewarmMax}
+                disabled={!autoSyncEnabled}
+                onChange={(e) => setAutoSyncPrewarmMax(e.target.value)}
+              />
+            </div>
             <button
               className="btn-primary"
               type="submit"
@@ -605,6 +625,13 @@ export function Settings() {
               {autoSyncSaving ? "Saving…" : "Save"}
             </button>
           </div>
+          <p className="text-xs text-fg-subtle">
+            Each sync also re-walks stale pre-warmed registry drivers (older
+            than 30 days), up to this many entries per run so a single sync
+            never tries the whole registry at once. Drivers that don't fit are
+            picked up on later runs, oldest first. Set to 0 to skip the
+            registry refresh entirely.
+          </p>
         </form>
 
         <div className="space-y-1">
@@ -916,7 +943,7 @@ export function Settings() {
                 {
                   mode: "local",
                   label: "Local only",
-                  hint: "Never hit the network. Drivers you haven't pre-warmed return no results, and finish / autographed / race-win filters are ignored.",
+                  hint: "Never hit the network. Drivers you haven't pre-warmed return no results, and autographed / race-win filters are ignored.",
                 },
               ] as { mode: RegistrySearchMode; label: string; hint: string }[]
             ).map((opt) => (

@@ -12,6 +12,7 @@ mod saved;
 mod scheduler;
 mod settings;
 mod sync;
+mod wishlist;
 
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -160,6 +161,9 @@ pub fn run() {
             commands::get_registry_search_mode,
             commands::set_registry_search_mode,
             commands::export_registry_search_html,
+            commands::export_wishlist_html,
+            commands::export_collection_html,
+            commands::export_collection_csv,
             commands::link_listing_to_registry,
             commands::prewarm_registry_by_driver,
             commands::backfill_registry_detail_urls,
@@ -196,6 +200,19 @@ pub fn run() {
             commands::ensure_driver,
             commands::propose_group_migration,
             commands::apply_group_migration,
+            commands::list_wishlists,
+            commands::create_wishlist,
+            commands::rename_wishlist,
+            commands::delete_wishlist,
+            commands::add_wishlist_entry,
+            commands::list_wishlist,
+            commands::list_wishlisted_guids,
+            commands::reorder_wishlist,
+            commands::remove_wishlist_entry,
+            commands::move_wishlist_entry,
+            commands::set_wishlist_notes,
+            commands::link_listing_to_wishlist,
+            commands::unlink_listing_from_wishlist,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

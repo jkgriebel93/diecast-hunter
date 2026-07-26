@@ -6,6 +6,7 @@ import { SavedSearches } from "@/pages/SavedSearches";
 import { Listings } from "@/pages/Listings";
 import { Browse } from "@/pages/Browse";
 import { Registry } from "@/pages/Registry";
+import { Wishlist } from "@/pages/Wishlist";
 import { Settings } from "@/pages/Settings";
 
 /**
@@ -25,6 +26,7 @@ export type ViewId =
   | "/listings"
   | "/browse"
   | "/registry"
+  | "/wishlist"
   | "/settings";
 
 export interface ViewDef {
@@ -54,6 +56,7 @@ export const VIEWS: Record<ViewId, ViewDef> = {
     label: "Registry search",
     Component: Registry,
   },
+  "/wishlist": { id: "/wishlist", label: "Wishlist", Component: Wishlist },
   "/settings": { id: "/settings", label: "Settings", Component: Settings },
 };
 

@@ -1,13 +1,15 @@
 - Auto sync overnight
   - Auto refresh pre-warmed drivers
-- Wishlist feature
-    - Select DCR entries
-    - Link saved eBay listings
+- ~~Wishlist feature~~ (Wishlist page with multiple named lists (tabs; create/rename/delete, move entries between lists); "♡ Add to wishlist" on registry search results; per-wish notes, drag-and-drop stack ranking + linked saved listings via the "Link listing…" picker)
+    - ~~Select DCR entries~~
+    - ~~Link saved eBay listings~~
 - FB Marketplace integration
 - Lionel website integration
-- Display production qty in DCR search results while manually matching saved listing to registry
+- ~~Display production qty in DCR search results while manually matching saved listing to registry~~
 - ~~Show CWC, CWB, BWB, BWC, Hauler at top of Make dropdown~~
 - Ideas for improving registry search speed
   - ~~Only pull locally pre-warmed records unless user explicity chooses otherwise~~ (Settings → "Registry search mode": live / hybrid / local-only; live sessions are also now cached ~15 min instead of logging in per search)
   - Saved pre-searches that can be cached and filtered live
     - e.g. `Action / Lionel + 1:24 + Elite + CWC + (Standard)`
+- Improve Saved Seller browsing
+- Year ranges for filters

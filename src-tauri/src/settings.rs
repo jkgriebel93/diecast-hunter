@@ -46,6 +46,13 @@ pub const KEY_AUTO_SYNC_INTERVAL_MINUTES: &str = "auto_sync.interval_minutes";
 /// The loop uses this to decide when the interval has elapsed.
 pub const KEY_AUTO_SYNC_LAST_RUN: &str = "auto_sync.last_run";
 pub const DEFAULT_AUTO_SYNC_INTERVAL_MINUTES: u32 = 60;
+/// Cap on how many registry entries the background pre-warm refresh may
+/// re-walk in one run (see `sync::registry_prewarm::refresh_stale_prewarms`).
+/// The full registry is tens of thousands of entries, so an uncapped refresh
+/// is a near-guaranteed mid-run failure — the backlog drains across runs
+/// instead. "0" disables the refresh phase entirely. Unset = default.
+pub const KEY_PREWARM_REFRESH_MAX_ENTRIES: &str = "auto_sync.prewarm_max_entries";
+pub const DEFAULT_PREWARM_REFRESH_MAX_ENTRIES: u32 = 5000;
 /// Floor on the interval so a typo can't turn the background task into a
 /// tight network loop against DCR / eBay.
 pub const MIN_AUTO_SYNC_INTERVAL_MINUTES: u32 = 15;
