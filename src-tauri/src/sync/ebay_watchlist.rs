@@ -15,13 +15,22 @@ use crate::progress::ProgressEmitter;
 use crate::settings;
 use crate::sync::ebay_listing;
 
-/// Watchlist items enriched (Browse-fetched) within this window are skipped
-/// on subsequent syncs. Follows the staleness pattern of DCR enrichment
-/// (`dcr_registry::REFRESH_AFTER_SECONDS`), but much shorter since prices
-/// and auction states move faster than registry pages. Keeps the hourly-ish
-/// sync cadence from burning ~1 Browse API call per watched item per run,
-/// which is what exhausted the 5,000/day app quota.
-const SKIP_ENRICH_FRESHER_THAN_SECONDS: i64 = 3 * 24 * 60 * 60; // 3 days
+/// Tiered staleness windows: watchlist items enriched (Browse-fetched)
+/// within their tier's window are skipped on subsequent syncs. Follows the
+/// staleness pattern of DCR enrichment (`dcr_registry::REFRESH_AFTER_SECONDS`)
+/// but much shorter, since prices and auction states move faster than
+/// registry pages. Keeps the background sync from burning ~1 Browse API
+/// call per watched item per run, which is what exhausted the 5,000/day
+/// app quota.
+///
+/// Fixed-price listings (with or without Best Offer — the listed price is
+/// what we track, and offers don't move it): 3 days.
+const FIXED_FRESH_SECONDS: i64 = 3 * 24 * 60 * 60; // 3 days
+/// Auctions: bids move the price, so re-enrich daily…
+const AUCTION_FRESH_SECONDS: i64 = 24 * 60 * 60; // 1 day
+/// …and once an auction is inside its final day (or past its recorded end),
+/// it is never considered fresh — every sync refreshes it.
+const AUCTION_ENDING_SOON_SECONDS: i64 = 24 * 60 * 60; // 1 day
 
 #[derive(Debug, Default, Serialize, Clone)]
 pub struct WatchlistSyncSummary {
@@ -29,9 +38,16 @@ pub struct WatchlistSyncSummary {
     pub created: u32,
     pub updated: u32,
     pub failed: u32,
-    /// Items still on the watchlist whose local row was enriched within the
-    /// last 3 days — left untouched this run (no Browse API call).
+    /// Items still on the watchlist whose local row is within its tier's
+    /// staleness window (3 days fixed / 1 day auction) — left untouched this
+    /// run (no Browse API call).
     pub skipped_fresh: u32,
+    /// Ended listings newly flagged `is_archived` this run. Archived rows are
+    /// kept locally forever (match training data, sales-trend history).
+    pub archived: u32,
+    /// Archived listings removed from the eBay watchlist this run, freeing
+    /// slots against eBay's ~1000-item cap.
+    pub unwatched: u32,
     /// Items eBay returned in the watchlist that we filtered out as
     /// non-diecasts before persisting.
     pub filtered: u32,
@@ -46,8 +62,14 @@ pub struct WatchlistSyncSummary {
 /// Walk the user's eBay watchlist via Trading API GetMyeBayBuying, then for
 /// each item id call the existing add_listing_from_input pathway so the row
 /// gets enriched via the Browse API and a snapshot lands in listing_history.
-/// Items enriched within the last 3 days are skipped (no Browse call) to
-/// stay under the app's daily quota.
+/// Items within their tier's staleness window (3 days fixed-price, 1 day
+/// auction, always-refresh for auctions in their final day) are skipped —
+/// no Browse call — to stay under the app's daily quota.
+///
+/// After the walk, ended listings are archived: flagged `is_archived`
+/// locally (the row and its history are kept as match-training / trend
+/// data, exempt from pruning) and removed from the eBay watchlist so they
+/// stop consuming slots against eBay's ~1000-item cap.
 ///
 /// Idempotent: items already in the local listings table are upserted, not
 /// duplicated. Items that fail to enrich are counted as failed and don't
@@ -141,6 +163,14 @@ pub async fn sync_watchlist(
         }
     }
 
+    // Archive ended listings BEFORE the prune so their rows are flagged (and
+    // thereby prune-exempt) in the same run that unwatches them on eBay.
+    // Safe on an incomplete walk: flagging is driven by local status, and
+    // the unwatch half only touches ids actually seen on the watchlist.
+    let (archived, unwatched) = archive_ended_listings(pool, &seen_legacy_ids).await?;
+    summary.archived = archived;
+    summary.unwatched = unwatched;
+
     // Prune only when (a) the walk finished cleanly AND (b) eBay actually
     // returned at least one item. The second condition guards against a
     // transient empty response from wiping the entire local watchlist —
@@ -158,41 +188,117 @@ pub async fn sync_watchlist(
     .await?;
 
     progress.done(format!(
-        "Watchlist sync done: {} new, {} updated, {} fresh (skipped), {} filtered, {} failed, {} pruned.",
+        "Watchlist sync done: {} new, {} updated, {} fresh (skipped), {} filtered, {} failed, {} archived, {} pruned.",
         summary.created,
         summary.updated,
         summary.skipped_fresh,
         summary.filtered,
         summary.failed,
+        summary.archived,
         summary.pruned,
     ));
 
     Ok(summary)
 }
 
-/// Legacy ids of local eBay listings whose last successful enrichment is
-/// newer than `SKIP_ENRICH_FRESHER_THAN_SECONDS`. `last_seen_at` is only
-/// bumped by the upsert after a successful Browse fetch, so rows that kept
-/// failing (e.g. during a quota outage) don't count as fresh.
-async fn load_fresh_legacy_ids(pool: &SqlitePool) -> AppResult<HashSet<String>> {
-    let cutoff = Utc::now().timestamp() - SKIP_ENRICH_FRESHER_THAN_SECONDS;
+/// Flag every ended, not-yet-archived eBay listing as archived, then remove
+/// archived listings that are still on the eBay watchlist (i.e. were seen
+/// this walk) from the watchlist. Removal failures are logged and retried
+/// naturally on the next sync — the item stays on the watchlist, so it shows
+/// up in the next walk's seen-set again. Returns (newly archived, unwatched).
+async fn archive_ended_listings(
+    pool: &SqlitePool,
+    seen_legacy_ids: &HashSet<String>,
+) -> AppResult<(u32, u32)> {
+    let now = Utc::now().timestamp();
+    let archived = sqlx::query(
+        "UPDATE listings SET is_archived = 1, archived_at = ?
+         WHERE id IN (SELECT l.id
+                        FROM listings l
+                        JOIN sellers s ON s.id = l.seller_id
+                       WHERE s.code = 'ebay'
+                         AND l.status = 'ended'
+                         AND l.is_archived = 0)",
+    )
+    .bind(now)
+    .execute(pool)
+    .await?
+    .rows_affected() as u32;
+
+    // Every archived row still on the watchlist — including ones archived in
+    // earlier runs whose removal failed then.
     let rows: Vec<(String,)> = sqlx::query_as(
         "SELECT l.external_id
          FROM listings l
          JOIN sellers s ON s.id = l.seller_id
-         WHERE s.code = 'ebay' AND l.last_seen_at >= ?",
+         WHERE s.code = 'ebay' AND l.is_archived = 1",
     )
-    .bind(cutoff)
     .fetch_all(pool)
     .await?;
-    Ok(rows
+    let to_remove: Vec<String> = rows
         .into_iter()
-        .map(|(external_id,)| legacy_id_from_v1(&external_id).unwrap_or(external_id))
-        .collect())
+        .map(|(ext,)| legacy_id_from_v1(&ext).unwrap_or(ext))
+        .filter(|legacy| seen_legacy_ids.contains(legacy))
+        .collect();
+
+    let mut unwatched = 0u32;
+    if !to_remove.is_empty() {
+        let (env, token) = user_iaf_token(pool).await?;
+        for legacy in &to_remove {
+            match remove_from_watchlist(env, &token, legacy).await {
+                Ok(()) => unwatched += 1,
+                Err(e) => {
+                    tracing::warn!("archive: failed to unwatch item {legacy}: {e}")
+                }
+            }
+        }
+    }
+    Ok((archived, unwatched))
+}
+
+/// Legacy ids of local eBay listings considered fresh enough to skip this
+/// run, per the tiered windows above. `last_seen_at` is only bumped by the
+/// upsert after a successful Browse fetch, so rows that kept failing (e.g.
+/// during a quota outage) don't count as fresh.
+///
+/// Ended and archived rows are always "fresh": their state is final, and
+/// re-enriching them would waste quota on history we've already captured.
+async fn load_fresh_legacy_ids(pool: &SqlitePool) -> AppResult<HashSet<String>> {
+    let now = Utc::now().timestamp();
+    let rows: Vec<(String, Option<String>, i64, Option<i64>, String, i64)> = sqlx::query_as(
+        "SELECT l.external_id, l.listing_type, l.last_seen_at, l.end_time,
+                l.status, l.is_archived
+         FROM listings l
+         JOIN sellers s ON s.id = l.seller_id
+         WHERE s.code = 'ebay'",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut fresh = HashSet::new();
+    for (external_id, listing_type, last_seen_at, end_time, status, is_archived) in rows {
+        let is_fresh = if is_archived != 0 || status == "ended" {
+            true
+        } else if listing_type.as_deref() == Some("auction") {
+            // Final-day auctions (and ones already past their recorded end,
+            // which this sync will flip to ended) always refresh.
+            let ending_soon =
+                end_time.is_some_and(|e| e - now <= AUCTION_ENDING_SOON_SECONDS);
+            !ending_soon && last_seen_at >= now - AUCTION_FRESH_SECONDS
+        } else {
+            last_seen_at >= now - FIXED_FRESH_SECONDS
+        };
+        if is_fresh {
+            fresh.insert(legacy_id_from_v1(&external_id).unwrap_or(external_id));
+        }
+    }
+    Ok(fresh)
 }
 
 /// Delete every local eBay listing whose legacy id isn't in the seen set.
 /// Cascades to listing_history and listing_matches (FK ON DELETE CASCADE).
+/// Archived rows are exempt — we removed them from the watchlist ourselves
+/// and keep them locally as history.
 async fn prune_missing_listings(
     pool: &SqlitePool,
     seen_legacy_ids: &HashSet<String>,
@@ -201,7 +307,7 @@ async fn prune_missing_listings(
         "SELECT l.id, l.external_id
          FROM listings l
          JOIN sellers s ON s.id = l.seller_id
-         WHERE s.code = 'ebay'",
+         WHERE s.code = 'ebay' AND l.is_archived = 0",
     )
     .fetch_all(pool)
     .await?;
@@ -250,7 +356,20 @@ pub async fn watch_and_save(
     // Local mirror. Reuses the diecast-filter + listing_history pipeline.
     // If the local save says "filtered" (non-diecast) we still want it on
     // eBay, so we propagate the result rather than rolling back.
-    ebay_listing::add_listing_from_input(pool, input).await
+    let result = ebay_listing::add_listing_from_input(pool, input).await?;
+
+    // Explicitly watching a listing un-archives it — otherwise the next sync
+    // would see the stale flag and immediately unwatch it again (matters when
+    // a listing we thought ended was extended/revived).
+    if let Some(listing_id) = result.listing_id {
+        sqlx::query(
+            "UPDATE listings SET is_archived = 0, archived_at = NULL WHERE id = ?",
+        )
+        .bind(listing_id)
+        .execute(pool)
+        .await?;
+    }
+    Ok(result)
 }
 
 /// User-initiated "Unwatch": remove from the user's eBay watchlist (best

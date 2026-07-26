@@ -547,6 +547,10 @@ pub struct ListingRow {
     /// most fixed-price listings take offers, the odd auction does too.
     pub accepts_offers: bool,
     pub status: String,
+    /// Ended listing kept locally as history (match training data, trend
+    /// analysis) after the sync removed it from the eBay watchlist. Exempt
+    /// from watchlist pruning.
+    pub is_archived: bool,
     pub end_time: Option<i64>,
     pub seller_username: Option<String>,
     pub seller_rating: Option<f64>,
@@ -619,6 +623,7 @@ struct ListingRowRaw {
     listing_type: Option<String>,
     accepts_offers: i64,
     status: String,
+    is_archived: i64,
     end_time: Option<i64>,
     seller_username: Option<String>,
     seller_rating: Option<f64>,
@@ -657,7 +662,8 @@ pub async fn list_listings(state: State<'_, AppState>) -> AppResult<Vec<ListingR
     let rows: Vec<ListingRowRaw> = sqlx::query_as(
         "SELECT l.id, s.code AS seller_code, l.external_id, l.url, l.title,
                 l.price_cents, l.shipping_cents, l.currency,
-                l.condition, l.listing_type, l.accepts_offers, l.status, l.end_time,
+                l.condition, l.listing_type, l.accepts_offers, l.status,
+                l.is_archived, l.end_time,
                 l.seller_username, l.seller_rating, l.image_url,
                 l.saved_at, l.last_seen_at,
                 lm.registry_entry_id,
@@ -723,6 +729,7 @@ pub async fn list_listings(state: State<'_, AppState>) -> AppResult<Vec<ListingR
                 listing_type: r.listing_type,
                 accepts_offers: r.accepts_offers != 0,
                 status: r.status,
+                is_archived: r.is_archived != 0,
                 end_time: r.end_time,
                 seller_username: r.seller_username,
                 seller_rating: r.seller_rating,

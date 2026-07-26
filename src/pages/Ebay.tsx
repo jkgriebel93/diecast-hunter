@@ -134,6 +134,7 @@ export function Ebay() {
             {syncSummary.watchlist.skipped_fresh} fresh (skipped),{" "}
             {syncSummary.watchlist.filtered} filtered,{" "}
             {syncSummary.watchlist.failed} failed,{" "}
+            {syncSummary.watchlist.archived} archived,{" "}
             -{syncSummary.watchlist.pruned} pruned (
             {syncSummary.watchlist.items_seen} seen across{" "}
             {syncSummary.watchlist.pages_fetched} page

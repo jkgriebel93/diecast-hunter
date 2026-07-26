@@ -595,6 +595,7 @@ export function Listings() {
         `Watchlist: ${s.created} new, ${s.updated} updated, ` +
           `${s.skipped_fresh} fresh (skipped), ` +
           `${s.filtered} filtered (non-diecasts), ${s.failed} failed, ` +
+          `${s.archived} archived (${s.unwatched} unwatched on eBay), ` +
           `${s.pruned} pruned (no longer watched) across ${s.pages_fetched} ` +
           `page${s.pages_fetched === 1 ? "" : "s"} (${s.items_seen} items total).`,
       );
@@ -1634,6 +1635,7 @@ function ListingCard({
               (row.accepts_offers
                 ? `${row.listing_type} + offers`
                 : row.listing_type),
+            row.is_archived && "archived",
             row.seller_username && `seller: ${row.seller_username}`,
             row.seller_rating !== null &&
               row.seller_rating !== undefined &&

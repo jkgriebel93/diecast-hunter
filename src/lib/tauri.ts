@@ -740,8 +740,14 @@ export interface WatchlistSyncSummary {
   created: number;
   updated: number;
   failed: number;
-  /** Still-watched items skipped because they were enriched in the last 3 days. */
+  /** Still-watched items skipped because they're within their staleness
+   *  window (3 days fixed-price / 1 day auction; final-day auctions always
+   *  refresh). */
   skipped_fresh: number;
+  /** Ended listings newly archived this run (kept locally as history). */
+  archived: number;
+  /** Archived listings removed from the eBay watchlist this run. */
+  unwatched: number;
   filtered: number;
   pages_fetched: number;
   /** Local listings deleted because they're no longer on the eBay watchlist. */
@@ -846,6 +852,9 @@ export interface ListingRow {
   /** eBay buyingOptions contains BEST_OFFER — independent of listing_type. */
   accepts_offers: boolean;
   status: string;
+  /** Ended listing kept locally as history after the sync removed it from
+   *  the eBay watchlist. Exempt from watchlist pruning. */
+  is_archived: boolean;
   end_time: number | null;
   seller_username: string | null;
   seller_rating: number | null;
