@@ -6,12 +6,17 @@ mod error;
 mod export;
 mod listing_groups;
 mod match_feedback;
+mod matcher_training;
 mod progress;
 mod saved;
 mod scheduler;
 mod settings;
 mod sync;
 mod wishlist;
+
+/// Dev-harness entry points (used by `examples/retrain_dryrun.rs`); not
+/// part of the app's command surface.
+pub use matcher_training::{retrain as dev_retrain, status as dev_matcher_status};
 
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -95,6 +100,11 @@ pub fn run() {
                     Ok(_) => {}
                     Err(e) => tracing::warn!("attribute auto-fill backfill failed: {e}"),
                 }
+
+                // Auto-retrain the match scorer when enough new verdicts
+                // have accumulated since the last training run. Cheap
+                // no-op otherwise.
+                matcher_training::maybe_retrain(&backfill_pool).await;
             });
             Ok(())
         })
@@ -138,6 +148,9 @@ pub fn run() {
             commands::confirm_listing_match,
             commands::auto_match_listing,
             commands::auto_match_all_listings,
+            commands::retrain_matcher,
+            commands::matcher_status,
+            commands::reset_matcher_model,
             commands::list_drivers,
             commands::set_listing_driver,
             commands::clear_listing_driver,

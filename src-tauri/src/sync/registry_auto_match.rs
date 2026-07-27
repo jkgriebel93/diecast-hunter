@@ -30,6 +30,7 @@ use sqlx::SqlitePool;
 
 use crate::error::{AppError, AppResult};
 use crate::progress::ProgressEmitter;
+use crate::settings;
 use crate::sync::registry_prewarm;
 
 /// Minimum score required before we persist an auto-match. Driver + year +
@@ -43,27 +44,56 @@ const AMBIGUITY_MARGIN: f64 = 5.0;
 const AMBIGUITY_PENALTY: f64 = 15.0;
 
 /// Defines `MatchFeatures` and `MatchWeights` with identical fields so the
-/// dot product can't silently miss one.
+/// dot product can't silently miss one. `#[serde(default)]` keeps old
+/// `features_json` snapshots loadable after new features are added — a
+/// missing field just reads as 0.
 macro_rules! match_feature_fields {
     ($($field:ident),* $(,)?) => {
         /// Named signals for one (listing, registry entry) pair. Fields are
         /// 0/1 indicators except `scheme_overlap` (fraction in [0, 1]).
         /// Serialized as `features_json` in `match_feedback` rows.
-        #[derive(Debug, Default, Clone, Serialize)]
+        #[derive(Debug, Default, Clone, Serialize, serde::Deserialize)]
+        #[serde(default)]
         pub struct MatchFeatures {
             $(pub $field: f64,)*
         }
 
-        /// Per-feature points. Conflict weights are negative. Hand-tuned for
-        /// now; the plan is to fit these to `match_feedback` verdicts.
-        #[derive(Debug, Clone, Serialize)]
+        /// Per-feature points. Conflict weights are negative. Defaults are
+        /// hand-tuned; `matcher_training` fits a learned set to the
+        /// `match_feedback` verdicts.
+        #[derive(Debug, Clone, Serialize, serde::Deserialize)]
+        #[serde(default)]
         pub struct MatchWeights {
             $(pub $field: f64,)*
         }
 
+        /// Field names in declaration order — the order `to_vec` /
+        /// `from_slice` use.
+        pub const FEATURE_NAMES: &[&str] = &[$(stringify!($field),)*];
+
         impl MatchFeatures {
             pub fn score(&self, w: &MatchWeights) -> f64 {
                 0.0 $(+ self.$field * w.$field)*
+            }
+
+            pub fn to_vec(&self) -> Vec<f64> {
+                vec![$(self.$field,)*]
+            }
+        }
+
+        impl MatchWeights {
+            /// Panics if `v.len() != FEATURE_NAMES.len()` — trainer-internal.
+            pub fn from_slice(v: &[f64]) -> Self {
+                let mut it = v.iter().copied();
+                let w = MatchWeights {
+                    $($field: it.next().expect("weight vector too short"),)*
+                };
+                assert!(it.next().is_none(), "weight vector too long");
+                w
+            }
+
+            pub fn to_vec(&self) -> Vec<f64> {
+                vec![$(self.$field,)*]
             }
         }
     };
@@ -109,6 +139,84 @@ impl Default for MatchWeights {
     }
 }
 
+/// A logistic-regression model fit to `match_feedback` verdicts by
+/// `matcher_training::retrain`, stored as JSON under
+/// `settings::KEY_MATCH_MODEL`. The extra fields are provenance for the
+/// Settings page and the auto-retrain trigger.
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+pub struct LearnedModel {
+    pub weights: MatchWeights,
+    pub bias: f64,
+    pub trained_at: i64,
+    pub positives: u32,
+    pub explicit_negatives: u32,
+    pub implicit_negatives: u32,
+    /// Grouped 5-fold cross-validated accuracy on held-out *explicit*
+    /// verdicts, for this model and the hand-tuned baseline, in [0, 1].
+    pub cv_accuracy: f64,
+    pub cv_accuracy_baseline: f64,
+    /// Same folds, ranking metric: fraction of confirmed listings whose
+    /// confirmed entry outranked its strongest rivals. None when no
+    /// held-out listing had rivals.
+    #[serde(default)]
+    pub cv_rank_accuracy: Option<f64>,
+    #[serde(default)]
+    pub cv_rank_accuracy_baseline: Option<f64>,
+    /// COUNT(match_feedback) at training time; the auto-retrain check
+    /// compares the live count against this.
+    pub feedback_rows_at_train: i64,
+}
+
+/// The active scorer. Handcrafted mode reproduces the original behavior:
+/// confidence is the raw dot product ("points"). Learned mode maps the
+/// dot product through a sigmoid onto 0–100, so the existing
+/// `MIN_CONFIDENCE = 50` threshold reads as "more likely right than
+/// wrong" and the UI's percent framing stays truthful.
+pub enum ScoreModel {
+    Handcrafted(MatchWeights),
+    Learned(LearnedModel),
+}
+
+impl Default for ScoreModel {
+    fn default() -> Self {
+        ScoreModel::Handcrafted(MatchWeights::default())
+    }
+}
+
+pub fn sigmoid(x: f64) -> f64 {
+    1.0 / (1.0 + (-x).exp())
+}
+
+impl ScoreModel {
+    /// Load the stored learned model, falling back to the hand-tuned
+    /// defaults when none exists or it fails to parse (a parse failure is
+    /// logged — it means a schema change broke the stored JSON, and
+    /// retraining will rewrite it).
+    pub async fn load(pool: &SqlitePool) -> Self {
+        match settings::get(pool, settings::KEY_MATCH_MODEL).await {
+            Ok(Some(json)) => match serde_json::from_str::<LearnedModel>(&json) {
+                Ok(m) => ScoreModel::Learned(m),
+                Err(e) => {
+                    tracing::warn!("stored matcher model unparseable ({e}); using defaults");
+                    ScoreModel::default()
+                }
+            },
+            Ok(None) => ScoreModel::default(),
+            Err(e) => {
+                tracing::warn!("loading matcher model failed ({e}); using defaults");
+                ScoreModel::default()
+            }
+        }
+    }
+
+    pub fn confidence(&self, f: &MatchFeatures) -> f64 {
+        match self {
+            ScoreModel::Handcrafted(w) => f.score(w),
+            ScoreModel::Learned(m) => 100.0 * sigmoid(f.score(&m.weights) + m.bias),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Clone)]
 pub struct AutoMatchOutcome {
     pub matched: bool,
@@ -145,25 +253,25 @@ pub struct AutoMatchSummary {
 
 /// One registry entry under consideration for a listing.
 #[derive(Debug, Clone, sqlx::FromRow)]
-struct Candidate {
-    id: i64,
-    driver_id: Option<i64>,
-    year: Option<i64>,
-    year_raced: Option<i64>,
-    oem: Option<String>,
-    brand: Option<String>,
-    scale: Option<String>,
-    car_number: Option<String>,
-    scheme_text: Option<String>,
-    production_qty: Option<i64>,
+pub(crate) struct Candidate {
+    pub(crate) id: i64,
+    pub(crate) driver_id: Option<i64>,
+    pub(crate) year: Option<i64>,
+    pub(crate) year_raced: Option<i64>,
+    pub(crate) oem: Option<String>,
+    pub(crate) brand: Option<String>,
+    pub(crate) scale: Option<String>,
+    pub(crate) car_number: Option<String>,
+    pub(crate) scheme_text: Option<String>,
+    pub(crate) production_qty: Option<i64>,
 }
 
 /// Bidirectional token bridges from the `scheme_aliases` table: looking up
 /// either side of a row yields the other, so "bud" in a title reaches
 /// "budweiser" in a scheme and vice versa.
-type AliasMap = HashMap<String, Vec<String>>;
+pub(crate) type AliasMap = HashMap<String, Vec<String>>;
 
-async fn load_aliases(pool: &SqlitePool) -> AppResult<AliasMap> {
+pub(crate) async fn load_aliases(pool: &SqlitePool) -> AppResult<AliasMap> {
     let rows: Vec<(String, String)> = sqlx::query_as("SELECT alias, canonical FROM scheme_aliases")
         .fetch_all(pool)
         .await?;
@@ -221,8 +329,9 @@ pub async fn auto_match_listing(
     }
 
     let aliases = load_aliases(pool).await?;
+    let model = ScoreModel::load(pool).await;
     let sig = build_signals(&title, raw_json.as_deref(), &aliases);
-    apply_best(pool, listing_id, &sig, &candidates).await
+    apply_best(pool, listing_id, &sig, &candidates, &model).await
 }
 
 /// Auto-match every listing that the user hasn't already confirmed or
@@ -256,6 +365,7 @@ pub async fn auto_match_all(
     }
 
     let aliases = load_aliases(pool).await?;
+    let model = ScoreModel::load(pool).await;
     let mut cache: HashMap<i64, Vec<Candidate>> = HashMap::new();
     let mut prewarm_attempted: HashSet<i64> = HashSet::new();
     let mut network_ok = allow_network;
@@ -303,7 +413,7 @@ pub async fn auto_match_all(
             continue;
         }
         let sig = build_signals(&title, raw_json.as_deref(), &aliases);
-        let outcome = apply_best(pool, listing_id, &sig, candidates).await?;
+        let outcome = apply_best(pool, listing_id, &sig, candidates, &model).await?;
         if outcome.matched {
             summary.matched += 1;
         } else {
@@ -355,10 +465,11 @@ pub async fn features_for_pair(
     };
 
     let aliases = load_aliases(pool).await?;
+    let model = ScoreModel::load(pool).await;
     let sig = build_signals(&title, raw_json.as_deref(), &aliases);
     let driver_match = listing_driver.is_some() && listing_driver == candidate.driver_id;
     let (features, _reasons) = extract_features(&sig, &candidate, driver_match);
-    let score = features.score(&MatchWeights::default());
+    let score = model.confidence(&features);
     Ok(Some((features, score)))
 }
 
@@ -369,8 +480,9 @@ async fn apply_best(
     listing_id: i64,
     sig: &ListingSignals,
     candidates: &[Candidate],
+    model: &ScoreModel,
 ) -> AppResult<AutoMatchOutcome> {
-    let Some((entry_id, confidence, reasons)) = pick_best(sig, candidates) else {
+    let Some((entry_id, confidence, reasons)) = pick_best(sig, candidates, model) else {
         return Ok(AutoMatchOutcome::skipped("no candidate scored at all"));
     };
 
@@ -440,7 +552,10 @@ async fn is_user_confirmed(pool: &SqlitePool, listing_id: i64) -> AppResult<bool
     Ok(row.map(|(c,)| c != 0).unwrap_or(false))
 }
 
-async fn load_candidates(pool: &SqlitePool, driver_id: i64) -> AppResult<Vec<Candidate>> {
+pub(crate) async fn load_candidates(
+    pool: &SqlitePool,
+    driver_id: i64,
+) -> AppResult<Vec<Candidate>> {
     let rows: Vec<Candidate> = sqlx::query_as(
         "SELECT id, driver_id, year, year_raced, oem, brand, scale, car_number,
                 scheme_text, production_qty
@@ -482,7 +597,7 @@ async fn prewarm_driver(
 /// Everything we can read off a listing: title, plus item specifics and
 /// description text from the stored source payload.
 #[derive(Debug, Default)]
-struct ListingSignals {
+pub(crate) struct ListingSignals {
     /// Title tokens, expanded with scheme-alias bridges (both directions).
     tokens: HashSet<String>,
     years: HashSet<i64>,
@@ -526,7 +641,11 @@ fn year_from_token(t: &str) -> Option<i64> {
 /// Build the full signal set for a listing: title first, then whatever the
 /// stored source payload adds (see [`merge_raw_json_signals`]), then the
 /// alias expansion of the title tokens.
-fn build_signals(title: &str, raw_json: Option<&str>, aliases: &AliasMap) -> ListingSignals {
+pub(crate) fn build_signals(
+    title: &str,
+    raw_json: Option<&str>,
+    aliases: &AliasMap,
+) -> ListingSignals {
     let mut sig = ListingSignals {
         tokens: tokenize(title).into_iter().collect(),
         ..Default::default()
@@ -649,7 +768,7 @@ fn candidate_car_number(c: &Candidate) -> Option<String> {
 
 /// Scheme tokens worth matching: alphabetic words (sponsor/paint names),
 /// not the car number or years which are scored separately.
-fn scheme_tokens(scheme_text: &str) -> HashSet<String> {
+pub(crate) fn scheme_tokens(scheme_text: &str) -> HashSet<String> {
     tokenize(scheme_text)
         .into_iter()
         .filter(|t| t.len() >= 2 && !t.chars().all(|ch| ch.is_ascii_digit()))
@@ -660,7 +779,7 @@ fn scheme_tokens(scheme_text: &str) -> HashSet<String> {
 /// every signal that fired. `driver_match` is passed in because the
 /// auto-match path pre-filters candidates to the listing's driver (always
 /// true) while `features_for_pair` compares arbitrary pairs.
-fn extract_features(
+pub(crate) fn extract_features(
     sig: &ListingSignals,
     c: &Candidate,
     driver_match: bool,
@@ -764,15 +883,18 @@ fn extract_features(
 }
 
 /// Returns the winning candidate's (entry id, confidence, reasons), or None
-/// when there are no candidates. Confidence is the raw score minus an
+/// when there are no candidates. Confidence is the model's output minus an
 /// ambiguity penalty when the runner-up is close, clamped to [0, 95].
-fn pick_best(sig: &ListingSignals, candidates: &[Candidate]) -> Option<(i64, f64, Vec<String>)> {
-    let weights = MatchWeights::default();
+fn pick_best(
+    sig: &ListingSignals,
+    candidates: &[Candidate],
+    model: &ScoreModel,
+) -> Option<(i64, f64, Vec<String>)> {
     let mut scored: Vec<(f64, &Candidate, Vec<String>)> = candidates
         .iter()
         .map(|c| {
             let (f, r) = extract_features(sig, c, true);
-            (f.score(&weights), c, r)
+            (model.confidence(&f), c, r)
         })
         .collect();
     scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -791,7 +913,7 @@ fn pick_best(sig: &ListingSignals, candidates: &[Candidate]) -> Option<(i64, f64
     Some((best.id, confidence.clamp(0.0, MAX_CONFIDENCE), reasons))
 }
 
-fn tokenize(s: &str) -> Vec<String> {
+pub(crate) fn tokenize(s: &str) -> Vec<String> {
     s.split(|c: char| !c.is_alphanumeric())
         .filter(|t| !t.is_empty())
         .map(|t| t.to_lowercase())
@@ -804,6 +926,12 @@ mod tests {
 
     fn signals(title: &str) -> ListingSignals {
         build_signals(title, None, &AliasMap::new())
+    }
+
+    /// pick_best under the default hand-tuned model, which is what these
+    /// behavior tests pin down.
+    fn pick(sig: &ListingSignals, candidates: &[Candidate]) -> Option<(i64, f64, Vec<String>)> {
+        pick_best(sig, candidates, &ScoreModel::default())
     }
 
     fn cand(id: i64) -> Candidate {
@@ -970,7 +1098,7 @@ mod tests {
                 Some(3000),
             ),
         ];
-        let (id, conf, _reasons) = pick_best(
+        let (id, conf, _reasons) = pick(
             &signals("2007 Jeff Gordon #24 Nicorette 1:24 Action Elite 1 of 504"),
             &candidates,
         )
@@ -991,7 +1119,7 @@ mod tests {
                 Some(2508),
             ),
         ];
-        let (id, _conf, _r) = pick_best(
+        let (id, _conf, _r) = pick(
             &signals("2007 Jeff Gordon #24 DuPont Flames 1:24 — 1 of 2,508"),
             &candidates,
         )
@@ -1006,8 +1134,8 @@ mod tests {
             full_cand(2, 2007, "1:24", "#24 DuPont", None),
         ];
         let sig = signals("2007 Jeff Gordon #24 DuPont 1:24");
-        let (_, conf_ambig, reasons) = pick_best(&sig, &candidates).unwrap();
-        let (_, conf_clear, _) = pick_best(&sig, &candidates[..1].to_vec()).unwrap();
+        let (_, conf_ambig, reasons) = pick(&sig, &candidates).unwrap();
+        let (_, conf_clear, _) = pick(&sig, &candidates[..1].to_vec()).unwrap();
         assert!(conf_ambig < conf_clear);
         assert!(reasons.iter().any(|r| r.contains("almost equally")));
     }
@@ -1016,7 +1144,7 @@ mod tests {
     fn driver_only_match_stays_below_threshold() {
         // A bare title with nothing but the driver name shouldn't clear 50.
         let candidates = vec![full_cand(1, 2007, "1:24", "#24 Nicorette", Some(504))];
-        let (_, conf, _) = pick_best(&signals("Jeff Gordon diecast lot"), &candidates).unwrap();
+        let (_, conf, _) = pick(&signals("Jeff Gordon diecast lot"), &candidates).unwrap();
         assert!(conf < MIN_CONFIDENCE, "confidence was {conf}");
     }
 
@@ -1025,7 +1153,7 @@ mod tests {
         let right = full_cand(1, 1998, "1:64", "#24 DuPont Chromalusion", None);
         let wrong = full_cand(2, 2005, "1:24", "#24 DuPont Flames", None);
         let sig = signals("1998 Jeff Gordon #24 DuPont Chromalusion 1:64");
-        let (id, _, _) = pick_best(&sig, &vec![right.clone(), wrong.clone()]).unwrap();
+        let (id, _, _) = pick(&sig, &vec![right.clone(), wrong.clone()]).unwrap();
         assert_eq!(id, 1);
         let w = MatchWeights::default();
         let (f_wrong, _) = extract_features(&sig, &wrong, true);
@@ -1044,6 +1172,6 @@ mod tests {
 
     #[test]
     fn empty_candidates_returns_none() {
-        assert!(pick_best(&signals("anything"), &[]).is_none());
+        assert!(pick(&signals("anything"), &[]).is_none());
     }
 }

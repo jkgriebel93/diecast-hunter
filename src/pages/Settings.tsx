@@ -11,10 +11,12 @@ import {
   type EbayOauthStatus,
   type EnrichSummary,
   type FormOptionRow,
+  type MatcherStatus,
   type PrewarmedDriver,
   type PrewarmSummary,
   type RegistrySearchMode,
   type SyncSummary,
+  type TrainOutcome,
 } from "@/lib/tauri";
 
 export function Settings() {
@@ -1324,10 +1326,181 @@ export function Settings() {
         </div>
       </section>
 
+      <MatcherLearningSection />
+
       {message && (
         <div className="text-sm text-emerald-400">{message}</div>
       )}
       {error && <div className="text-sm text-red-400">{error}</div>}
     </div>
+  );
+}
+
+/** Auto-match learning: retrain the scorer from confirm/reject verdicts,
+ *  show which weights are active, and revert to the built-ins. */
+function MatcherLearningSection() {
+  const [status, setStatus] = useState<MatcherStatus | null>(null);
+  const [training, setTraining] = useState(false);
+  const [outcome, setOutcome] = useState<TrainOutcome | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showWeights, setShowWeights] = useState(false);
+
+  const loadStatus = async () => {
+    try {
+      setStatus(await api.matcherStatus());
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  useEffect(() => {
+    void loadStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const onRetrain = async () => {
+    setTraining(true);
+    setError(null);
+    setOutcome(null);
+    try {
+      setOutcome(await api.retrainMatcher());
+      await loadStatus();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setTraining(false);
+    }
+  };
+
+  const onReset = async () => {
+    setError(null);
+    setOutcome(null);
+    try {
+      await api.resetMatcherModel();
+      await loadStatus();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const pct = (v: number | null | undefined) =>
+    v === null || v === undefined ? "–" : `${Math.round(v * 100)}%`;
+
+  return (
+    <section className="card space-y-4">
+      <div>
+        <h3 className="text-base font-medium">Auto-match learning</h3>
+        <p className="text-xs text-fg-subtle mt-1">
+          Every match you confirm, reject, or re-link is recorded and used to
+          tune the auto-matcher&apos;s scoring weights to your collection.
+          Retraining also runs automatically at startup once enough new
+          verdicts accumulate. A learned model only activates when it beats
+          the built-in weights in cross-validation.
+        </p>
+      </div>
+
+      {status && (
+        <div className="text-sm space-y-1">
+          <div>
+            Active weights:{" "}
+            {status.learned ? (
+              <span className="text-emerald-400">
+                learned
+                {status.trained_at
+                  ? ` (trained ${new Date(status.trained_at * 1000).toLocaleString()})`
+                  : ""}
+              </span>
+            ) : (
+              <span>built-in defaults</span>
+            )}
+          </div>
+          {status.learned && (
+            <div className="text-xs text-fg-subtle">
+              Verdict accuracy {pct(status.cv_accuracy)} vs{" "}
+              {pct(status.cv_accuracy_baseline)} built-in · ranking accuracy{" "}
+              {pct(status.cv_rank_accuracy)} vs{" "}
+              {pct(status.cv_rank_accuracy_baseline)} built-in — trained on{" "}
+              {status.positives ?? 0} confirms,{" "}
+              {(status.explicit_negatives ?? 0) +
+                (status.implicit_negatives ?? 0)}{" "}
+              negatives ({status.implicit_negatives ?? 0} implied by
+              runner-up candidates).
+            </div>
+          )}
+          <div className="text-xs text-fg-subtle">
+            {status.feedback_rows} verdicts recorded
+            {status.new_since_train !== null
+              ? ` (${status.new_since_train} since last training)`
+              : ""}
+            {status.learned_aliases > 0
+              ? ` · ${status.learned_aliases} learned scheme aliases`
+              : ""}
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        <button
+          className="btn-secondary"
+          type="button"
+          onClick={onRetrain}
+          disabled={training}
+        >
+          {training ? "Training…" : "Retrain now"}
+        </button>
+        {status?.learned && (
+          <button className="btn-secondary" type="button" onClick={onReset}>
+            Revert to built-in weights
+          </button>
+        )}
+        {status && (
+          <button
+            className="btn-secondary"
+            type="button"
+            onClick={() => setShowWeights((v) => !v)}
+          >
+            {showWeights ? "Hide weights" : "Show weights"}
+          </button>
+        )}
+      </div>
+
+      {outcome && (
+        <div
+          className={`text-xs ${outcome.activated ? "text-emerald-400" : "text-amber-400"}`}
+        >
+          {outcome.message}
+          {outcome.learned_aliases > 0 &&
+            ` Learned ${outcome.learned_aliases} scheme aliases.`}
+        </div>
+      )}
+      {error && <div className="text-xs text-red-400">{error}</div>}
+
+      {showWeights && status && (
+        <table className="text-xs w-full max-w-md">
+          <thead>
+            <tr className="text-left text-fg-subtle">
+              <th className="py-1 pr-4 font-normal">Signal</th>
+              <th className="py-1 pr-4 font-normal">Built-in</th>
+              <th className="py-1 font-normal">Learned</th>
+            </tr>
+          </thead>
+          <tbody>
+            {status.weights.map((w) => (
+              <tr key={w.name}>
+                <td className="py-0.5 pr-4 font-mono">{w.name}</td>
+                <td className="py-0.5 pr-4 tabular-nums">
+                  {w.default_weight.toFixed(1)}
+                </td>
+                <td className="py-0.5 tabular-nums">
+                  {w.learned_weight === null
+                    ? "–"
+                    : w.learned_weight.toFixed(2)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
   );
 }

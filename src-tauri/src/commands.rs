@@ -917,6 +917,32 @@ pub async fn auto_match_all_listings(
     result
 }
 
+/// Fit the auto-match scorer to the accumulated confirm/reject verdicts
+/// and re-mine learned scheme aliases. Fast (in-process math over local
+/// rows) — no progress plumbing needed.
+#[tauri::command]
+pub async fn retrain_matcher(
+    state: State<'_, AppState>,
+) -> AppResult<crate::matcher_training::TrainOutcome> {
+    crate::matcher_training::retrain(&state.db.pool).await
+}
+
+/// Current scorer state for the Settings page: which weights are active,
+/// training provenance, and per-feature default vs learned values.
+#[tauri::command]
+pub async fn matcher_status(
+    state: State<'_, AppState>,
+) -> AppResult<crate::matcher_training::MatcherStatus> {
+    crate::matcher_training::status(&state.db.pool).await
+}
+
+/// Discard the learned scoring model (verdict history and learned aliases
+/// are kept); scoring reverts to the built-in weights.
+#[tauri::command]
+pub async fn reset_matcher_model(state: State<'_, AppState>) -> AppResult<()> {
+    crate::matcher_training::reset(&state.db.pool).await
+}
+
 // ----- Listing driver tag (independent of registry match) -----
 
 #[derive(Serialize)]
@@ -1256,12 +1282,10 @@ pub async fn search_dcr_production(
     let result = match mode.as_str() {
         "local" => run_local_registry_search(&state.db.pool, &progress, &filter).await,
         "hybrid" => {
-            run_hybrid_registry_search(&state.db.pool, &state.dcr_session, &progress, &filter)
-                .await
+            run_hybrid_registry_search(&state.db.pool, &state.dcr_session, &progress, &filter).await
         }
         _ => {
-            run_dcr_production_search(&state.db.pool, &state.dcr_session, &progress, &filter)
-                .await
+            run_dcr_production_search(&state.db.pool, &state.dcr_session, &progress, &filter).await
         }
     };
     clear_active_cancel(&state).await;
@@ -1302,13 +1326,9 @@ pub async fn export_registry_search_html(
 ) -> AppResult<crate::export::ExportSummary> {
     let progress = ProgressEmitter::new(app, "registry_export");
     set_active_cancel(&state, &progress).await;
-    let result = crate::export::export_registry_results(
-        &progress,
-        &results,
-        finish_label.as_deref(),
-        &path,
-    )
-    .await;
+    let result =
+        crate::export::export_registry_results(&progress, &results, finish_label.as_deref(), &path)
+            .await;
     clear_active_cancel(&state).await;
     finish_progress(&progress, &result, "Registry export");
     result
@@ -2193,9 +2213,7 @@ pub async fn apply_group_migration(
 }
 
 #[tauri::command]
-pub async fn list_wishlists(
-    state: State<'_, AppState>,
-) -> AppResult<Vec<wishlist::WishlistInfo>> {
+pub async fn list_wishlists(state: State<'_, AppState>) -> AppResult<Vec<wishlist::WishlistInfo>> {
     wishlist::list_wishlists(&state.db.pool).await
 }
 
@@ -2251,10 +2269,7 @@ pub async fn list_wishlisted_guids(state: State<'_, AppState>) -> AppResult<Vec<
 
 /// Persist a drag-and-drop stack ranking: `ordered_ids[i]` gets rank `i`.
 #[tauri::command]
-pub async fn reorder_wishlist(
-    state: State<'_, AppState>,
-    ordered_ids: Vec<i64>,
-) -> AppResult<()> {
+pub async fn reorder_wishlist(state: State<'_, AppState>, ordered_ids: Vec<i64>) -> AppResult<()> {
     wishlist::reorder(&state.db.pool, &ordered_ids).await
 }
 

@@ -176,6 +176,9 @@ export const api = {
     invoke<AutoMatchOutcome>("auto_match_listing", { listingId }),
   autoMatchAllListings: () =>
     invoke<AutoMatchSummary>("auto_match_all_listings"),
+  retrainMatcher: () => invoke<TrainOutcome>("retrain_matcher"),
+  matcherStatus: () => invoke<MatcherStatus>("matcher_status"),
+  resetMatcherModel: () => invoke<void>("reset_matcher_model"),
   listDrivers: () => invoke<DriverOption[]>("list_drivers"),
   setListingDriver: (
     listingId: number,
@@ -709,6 +712,43 @@ export interface AutoMatchSummary {
   no_candidates: number;
   below_threshold: number;
   prewarmed_drivers: number;
+}
+
+export interface TrainOutcome {
+  /** True when a learned model was stored. */
+  activated: boolean;
+  positives: number;
+  explicit_negatives: number;
+  implicit_negatives: number;
+  cv_accuracy: number | null;
+  cv_accuracy_baseline: number | null;
+  cv_rank_accuracy: number | null;
+  cv_rank_accuracy_baseline: number | null;
+  learned_aliases: number;
+  message: string;
+}
+
+export interface WeightRow {
+  name: string;
+  default_weight: number;
+  learned_weight: number | null;
+}
+
+export interface MatcherStatus {
+  /** False -> the built-in hand-tuned weights are scoring. */
+  learned: boolean;
+  trained_at: number | null;
+  positives: number | null;
+  explicit_negatives: number | null;
+  implicit_negatives: number | null;
+  cv_accuracy: number | null;
+  cv_accuracy_baseline: number | null;
+  cv_rank_accuracy: number | null;
+  cv_rank_accuracy_baseline: number | null;
+  feedback_rows: number;
+  new_since_train: number | null;
+  learned_aliases: number;
+  weights: WeightRow[];
 }
 
 export type Condition =

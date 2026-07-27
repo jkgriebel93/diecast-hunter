@@ -25,6 +25,10 @@ pub const KEY_EBAY_BUYER_ZIP: &str = "ebay.buyer_zip";
 /// - "local": answer from pre-warmed local rows only; never hit the network.
 pub const KEY_REGISTRY_SEARCH_MODE: &str = "registry.search_mode";
 
+/// Learned auto-match scoring model (JSON `LearnedModel`), written by
+/// `matcher_training::retrain`. Absent → hand-tuned default weights.
+pub const KEY_MATCH_MODEL: &str = "matcher.model";
+
 pub const ENTRY_DCR_PASSWORD: &str = "diecastregistry.password";
 pub const ENTRY_EBAY_OAUTH: &str = "ebay.oauth_token";
 pub const ENTRY_EBAY_APP_ID: &str = "ebay.app_id";
