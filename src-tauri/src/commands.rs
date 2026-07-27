@@ -1131,7 +1131,7 @@ pub async fn set_listing_attributes(
     .bind(clean(make))
     .bind(is_race_win as i64)
     .bind(is_autographed as i64)
-    .bind(production_count.filter(|v| *v > 0))
+    .bind(production_count.filter(|v| *v >= 0))
     .bind(listing_id)
     .execute(&state.db.pool)
     .await?;

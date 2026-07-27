@@ -742,7 +742,10 @@ pub(crate) fn build_signals(
         attrs_from_entry_id: attrs.attrs_from_entry_id,
         ..Default::default()
     };
-    if let Some(pc) = attrs.production_count.filter(|v| *v > 0) {
+    // 0 is meaningful: collector convention for prototypes/samples. It can
+    // never equal a production entry's qty, so it conflicts with every
+    // production candidate — exactly what a prototype should do.
+    if let Some(pc) = attrs.production_count.filter(|v| *v >= 0) {
         if attrs.attrs_from_entry_id.is_some() {
             // Borrowed from a confirmed match — usable against every
             // entry except the one it came from.
@@ -1309,6 +1312,19 @@ mod tests {
         assert_eq!(f_twin.attr_finish_match, 0.0);
         assert_eq!(f_twin.prod_count_match, 0.0);
         assert_eq!(f_twin.prod_count_conflict, 0.0);
+    }
+
+    #[test]
+    fn prototype_run_of_zero_conflicts_with_every_production_entry() {
+        let attrs = ListingAttrs {
+            production_count: Some(0),
+            ..Default::default()
+        };
+        let sig = build_signals("Jeff Gordon prototype", None, &AliasMap::new(), &attrs);
+        let c = full_cand(1, 2007, "1:24", "#24 Nicorette", Some(5004));
+        let (f, _) = extract_features(&sig, &c, true);
+        assert_eq!(f.prod_count_conflict, 1.0);
+        assert_eq!(f.prod_count_match, 0.0);
     }
 
     #[test]

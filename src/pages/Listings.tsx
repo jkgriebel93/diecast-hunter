@@ -1848,15 +1848,19 @@ function ListingCard({
               {unwatching ? "Removing…" : "Remove from watchlist"}
             </button>
           )}
-          {!matched && !row.match_user_confirmed && (
+          {!row.match_user_confirmed && (
             <button
               className="text-xs text-fg-muted hover:text-fg"
               type="button"
               onClick={onAutoMatch}
               disabled={autoMatching}
-              title="Search the registry for a best-effort match (pulls the driver's entries from diecastregistry.com if needed)"
+              title={
+                matched
+                  ? "Re-run auto-matching — useful after correcting attributes; replaces or clears the current suggestion"
+                  : "Search the registry for a best-effort match (pulls the driver's entries from diecastregistry.com if needed)"
+              }
             >
-              {autoMatching ? "Matching…" : "Auto-match"}
+              {autoMatching ? "Matching…" : matched ? "Re-match" : "Auto-match"}
             </button>
           )}
           <button
@@ -2228,7 +2232,8 @@ function AttributesSection({
       make: make.trim() || null,
       is_race_win: raceWin,
       is_autographed: autographed,
-      production_count: Number.isFinite(pc) && pc > 0 ? pc : null,
+      // 0 is valid: collector convention for prototypes/samples.
+      production_count: Number.isFinite(pc) && pc >= 0 ? pc : null,
     });
   }
 
@@ -2268,7 +2273,9 @@ function AttributesSection({
           >
             <span className="text-fg-muted">Run:</span>
             <span className="text-fg">
-              {row.production_count.toLocaleString()}
+              {row.production_count === 0
+                ? "0 (prototype)"
+                : row.production_count.toLocaleString()}
             </span>
           </span>
         )}
@@ -2363,7 +2370,7 @@ function AttributesSection({
         value={prodCount}
         onChange={(e) => setProdCount(e.target.value)}
         placeholder="Run (1 of…)"
-        title="Production-run size from the tag photo, e.g. 5004"
+        title="Production-run size from the tag photo, e.g. 5004 — enter 0 for prototypes/samples"
       />
       <label className="inline-flex items-center gap-1 cursor-pointer">
         <input
