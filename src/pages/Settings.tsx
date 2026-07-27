@@ -1428,6 +1428,12 @@ function MatcherLearningSection() {
             </div>
           )}
           <div className="text-xs text-fg-subtle">
+            Last training run:{" "}
+            {status.last_train_at
+              ? new Date(status.last_train_at * 1000).toLocaleString()
+              : "never"}
+          </div>
+          <div className="text-xs text-fg-subtle">
             {status.feedback_rows} verdicts recorded
             {status.new_since_train !== null
               ? ` (${status.new_since_train} since last training)`

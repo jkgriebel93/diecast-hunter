@@ -35,6 +35,11 @@ pub const KEY_MATCH_MODEL: &str = "matcher.model";
 /// training pass on every single launch.
 pub const KEY_MATCH_TRAIN_ATTEMPT: &str = "matcher.last_train_attempt_rows";
 
+/// Unix timestamp of the last training run (manual or automatic), stored
+/// even when the run declined to activate a model. Shown on the Settings
+/// page as "Last training run".
+pub const KEY_MATCH_TRAIN_LAST_AT: &str = "matcher.last_train_at";
+
 pub const ENTRY_DCR_PASSWORD: &str = "diecastregistry.password";
 pub const ENTRY_EBAY_OAUTH: &str = "ebay.oauth_token";
 pub const ENTRY_EBAY_APP_ID: &str = "ebay.app_id";

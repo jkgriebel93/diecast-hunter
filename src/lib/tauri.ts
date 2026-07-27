@@ -738,6 +738,9 @@ export interface MatcherStatus {
   /** False -> the built-in hand-tuned weights are scoring. */
   learned: boolean;
   trained_at: number | null;
+  /** Last training run (manual or automatic), even if it declined to
+   *  activate a model. */
+  last_train_at: number | null;
   positives: number | null;
   explicit_negatives: number | null;
   implicit_negatives: number | null;

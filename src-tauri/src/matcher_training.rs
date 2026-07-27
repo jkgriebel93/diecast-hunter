@@ -126,6 +126,9 @@ pub struct MatcherStatus {
     /// False → hand-tuned defaults are scoring.
     pub learned: bool,
     pub trained_at: Option<i64>,
+    /// When the last training run happened (manual or automatic), even if
+    /// it declined to activate a model.
+    pub last_train_at: Option<i64>,
     pub positives: Option<u32>,
     pub explicit_negatives: Option<u32>,
     pub implicit_negatives: Option<u32>,
@@ -161,6 +164,12 @@ pub async fn retrain(pool: &SqlitePool) -> AppResult<TrainOutcome> {
         pool,
         settings::KEY_MATCH_TRAIN_ATTEMPT,
         &feedback_rows.to_string(),
+    )
+    .await?;
+    settings::set(
+        pool,
+        settings::KEY_MATCH_TRAIN_LAST_AT,
+        &Utc::now().timestamp().to_string(),
     )
     .await?;
 
@@ -281,6 +290,9 @@ pub async fn status(pool: &SqlitePool) -> AppResult<MatcherStatus> {
         sqlx::query_as("SELECT COUNT(*) FROM scheme_aliases WHERE source = 'learned'")
             .fetch_one(pool)
             .await?;
+    let last_train_at: Option<i64> = settings::get(pool, settings::KEY_MATCH_TRAIN_LAST_AT)
+        .await?
+        .and_then(|s| s.parse().ok());
 
     let defaults = MatchWeights::default().to_vec();
     let model = match ScoreModel::load(pool).await {
@@ -301,6 +313,7 @@ pub async fn status(pool: &SqlitePool) -> AppResult<MatcherStatus> {
     Ok(MatcherStatus {
         learned: model.is_some(),
         trained_at: model.as_ref().map(|m| m.trained_at),
+        last_train_at,
         positives: model.as_ref().map(|m| m.positives),
         explicit_negatives: model.as_ref().map(|m| m.explicit_negatives),
         implicit_negatives: model.as_ref().map(|m| m.implicit_negatives),
@@ -317,9 +330,32 @@ pub async fn status(pool: &SqlitePool) -> AppResult<MatcherStatus> {
     })
 }
 
+/// Payload of the "matcher-training" Tauri event emitted around an
+/// *automatic* training run so the frontend can show a banner. Manual
+/// retrains from the Settings page report their outcome inline instead.
+#[derive(Debug, Serialize, Clone)]
+pub struct TrainingEvent {
+    /// "started" | "finished" | "failed"
+    pub phase: String,
+    pub message: String,
+    /// Set on "finished": whether a learned model was activated.
+    pub activated: Option<bool>,
+}
+
+fn emit_training_event(app: Option<&tauri::AppHandle>, event: TrainingEvent) {
+    use tauri::Emitter;
+    if let Some(app) = app {
+        if let Err(e) = app.emit("matcher-training", event) {
+            tracing::debug!("matcher-training emit failed (non-fatal): {e}");
+        }
+    }
+}
+
 /// Startup hook: retrain when enough new verdicts piled up since the last
 /// run (or ever, if no model exists yet). Best-effort — failures only log.
-pub async fn maybe_retrain(pool: &SqlitePool) {
+/// When an `app` handle is given, "matcher-training" events bracket the
+/// run so the UI can tell the user training is happening.
+pub async fn maybe_retrain(pool: &SqlitePool, app: Option<&tauri::AppHandle>) {
     let count: Result<(i64,), _> = sqlx::query_as("SELECT COUNT(*) FROM match_feedback")
         .fetch_one(pool)
         .await;
@@ -339,9 +375,39 @@ pub async fn maybe_retrain(pool: &SqlitePool) {
     if count - stored.max(attempted) < AUTO_RETRAIN_NEW_ROWS {
         return;
     }
+    emit_training_event(
+        app,
+        TrainingEvent {
+            phase: "started".to_string(),
+            message: format!(
+                "Training the auto-match model on {count} recorded match verdicts…"
+            ),
+            activated: None,
+        },
+    );
     match retrain(pool).await {
-        Ok(o) => tracing::info!("matcher auto-retrain: {}", o.message),
-        Err(e) => tracing::warn!("matcher auto-retrain failed: {e}"),
+        Ok(o) => {
+            tracing::info!("matcher auto-retrain: {}", o.message);
+            emit_training_event(
+                app,
+                TrainingEvent {
+                    phase: "finished".to_string(),
+                    message: o.message,
+                    activated: Some(o.activated),
+                },
+            );
+        }
+        Err(e) => {
+            tracing::warn!("matcher auto-retrain failed: {e}");
+            emit_training_event(
+                app,
+                TrainingEvent {
+                    phase: "failed".to_string(),
+                    message: format!("Auto-match training failed: {e}"),
+                    activated: None,
+                },
+            );
+        }
     }
 }
 

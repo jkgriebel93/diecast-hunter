@@ -63,6 +63,7 @@ pub fn run() {
             // existing values. Runs detached so a slow scan never blocks the
             // UI from showing up.
             let backfill_pool = pool.clone();
+            let events_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let progress = progress::ProgressEmitter::null("driver_assoc_backfill");
                 match sync::driver_assoc::associate_all_listings(
@@ -104,7 +105,7 @@ pub fn run() {
                 // Auto-retrain the match scorer when enough new verdicts
                 // have accumulated since the last training run. Cheap
                 // no-op otherwise.
-                matcher_training::maybe_retrain(&backfill_pool).await;
+                matcher_training::maybe_retrain(&backfill_pool, Some(&events_handle)).await;
             });
             Ok(())
         })
