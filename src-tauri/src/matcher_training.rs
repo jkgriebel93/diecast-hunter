@@ -26,7 +26,7 @@ use chrono::Utc;
 use serde::Serialize;
 use sqlx::SqlitePool;
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::settings;
 use crate::sync::registry_auto_match::{
     build_signals, extract_features, load_aliases, load_candidate, load_candidates,
@@ -151,6 +151,19 @@ struct Example {
 
 /// Retrain from all accumulated feedback, then re-mine learned aliases.
 pub async fn retrain(pool: &SqlitePool) -> AppResult<TrainOutcome> {
+    // Record the attempt up front — even a declined or under-data run
+    // counts, so `maybe_retrain` doesn't repeat it until enough new
+    // verdicts arrive.
+    let (feedback_rows,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM match_feedback")
+        .fetch_one(pool)
+        .await?;
+    settings::set(
+        pool,
+        settings::KEY_MATCH_TRAIN_ATTEMPT,
+        &feedback_rows.to_string(),
+    )
+    .await?;
+
     let examples = assemble_examples(pool).await?;
     let positives = examples.iter().filter(|e| e.y > 0.5).count();
     let explicit_negatives = examples.iter().filter(|e| e.y < 0.5 && !e.implicit).count();
@@ -179,7 +192,15 @@ pub async fn retrain(pool: &SqlitePool) -> AppResult<TrainOutcome> {
         return Ok(outcome);
     }
 
-    let cv = cross_validate(&examples);
+    // The regression math is pure CPU — run it off the async workers so a
+    // launch-time retrain can't starve UI commands.
+    let (cv, w, b) = tokio::task::spawn_blocking(move || {
+        let cv = cross_validate(&examples);
+        let (w, b) = fit(&examples.iter().collect::<Vec<_>>());
+        (cv, w, b)
+    })
+    .await
+    .map_err(|e| AppError::Parse(format!("matcher training task failed: {e}")))?;
     outcome.cv_accuracy = Some(cv.point);
     outcome.cv_accuracy_baseline = Some(cv.point_baseline);
     outcome.cv_rank_accuracy = cv.rank;
@@ -203,10 +224,6 @@ pub async fn retrain(pool: &SqlitePool) -> AppResult<TrainOutcome> {
         return Ok(outcome);
     }
 
-    let (w, b) = fit(&examples.iter().collect::<Vec<_>>());
-    let feedback_rows: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM match_feedback")
-        .fetch_one(pool)
-        .await?;
     let model = LearnedModel {
         weights: MatchWeights::from_slice(&w),
         bias: b,
@@ -218,7 +235,7 @@ pub async fn retrain(pool: &SqlitePool) -> AppResult<TrainOutcome> {
         cv_accuracy_baseline: cv.point_baseline,
         cv_rank_accuracy: cv.rank,
         cv_rank_accuracy_baseline: cv.rank_baseline,
-        feedback_rows_at_train: feedback_rows.0,
+        feedback_rows_at_train: feedback_rows,
     };
     settings::set(
         pool,
@@ -307,11 +324,19 @@ pub async fn maybe_retrain(pool: &SqlitePool) {
         .fetch_one(pool)
         .await;
     let Ok((count,)) = count else { return };
-    let baseline = match ScoreModel::load(pool).await {
+    let stored = match ScoreModel::load(pool).await {
         ScoreModel::Learned(m) => m.feedback_rows_at_train,
         ScoreModel::Handcrafted(_) => 0,
     };
-    if count - baseline < AUTO_RETRAIN_NEW_ROWS {
+    // A declined attempt counts too — otherwise a gate that keeps saying
+    // "no" would make every launch pay for a full training pass.
+    let attempted: i64 = settings::get(pool, settings::KEY_MATCH_TRAIN_ATTEMPT)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    if count - stored.max(attempted) < AUTO_RETRAIN_NEW_ROWS {
         return;
     }
     match retrain(pool).await {
@@ -356,6 +381,12 @@ async fn assemble_examples(pool: &SqlitePool) -> AppResult<Vec<Example>> {
 
     let aliases = load_aliases(pool).await?;
     let default_weights = MatchWeights::default();
+    // Confirmed listings cluster on a handful of drivers, and popular
+    // drivers have thousands of registry entries — cache the candidate
+    // lists so each driver's entries are pulled from SQLite once, not once
+    // per confirmed listing.
+    let mut candidate_cache: HashMap<i64, Vec<crate::sync::registry_auto_match::Candidate>> =
+        HashMap::new();
     let mut examples = Vec::new();
     for (listing_id, verdicts) in by_listing {
         let Some(listing) = load_listing_for_matching(pool, listing_id).await? else {
@@ -395,8 +426,10 @@ async fn assemble_examples(pool: &SqlitePool) -> AppResult<Vec<Example>> {
             continue;
         }
         let judged: HashSet<i64> = verdicts.iter().map(|(e, _)| *e).collect();
-        let mut rivals: Vec<(f64, MatchFeatures)> = load_candidates(pool, driver_id)
-            .await?
+        if !candidate_cache.contains_key(&driver_id) {
+            candidate_cache.insert(driver_id, load_candidates(pool, driver_id).await?);
+        }
+        let mut rivals: Vec<(f64, MatchFeatures)> = candidate_cache[&driver_id]
             .iter()
             .filter(|c| !judged.contains(&c.id))
             .map(|c| {
@@ -841,6 +874,12 @@ mod tests {
             ScoreModel::load(&pool).await,
             ScoreModel::Handcrafted(_)
         ));
+        // Even a declined run records the attempt, so the startup
+        // auto-retrain won't repeat it until new verdicts arrive.
+        let attempted = settings::get(&pool, settings::KEY_MATCH_TRAIN_ATTEMPT)
+            .await
+            .unwrap();
+        assert_eq!(attempted.as_deref(), Some("0"));
     }
 
     #[tokio::test]

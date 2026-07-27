@@ -29,6 +29,12 @@ pub const KEY_REGISTRY_SEARCH_MODE: &str = "registry.search_mode";
 /// `matcher_training::retrain`. Absent → hand-tuned default weights.
 pub const KEY_MATCH_MODEL: &str = "matcher.model";
 
+/// COUNT(match_feedback) at the last training *attempt*, stored even when
+/// the CV gate declined to activate a model. Without this, a declining
+/// gate would make the startup auto-retrain re-run its (expensive)
+/// training pass on every single launch.
+pub const KEY_MATCH_TRAIN_ATTEMPT: &str = "matcher.last_train_attempt_rows";
+
 pub const ENTRY_DCR_PASSWORD: &str = "diecastregistry.password";
 pub const ENTRY_EBAY_OAUTH: &str = "ebay.oauth_token";
 pub const ENTRY_EBAY_APP_ID: &str = "ebay.app_id";
