@@ -314,6 +314,10 @@ pub(crate) struct ListingAttrs {
     pub(crate) brand: Option<String>,
     pub(crate) finish: Option<String>,
     pub(crate) make: Option<String>,
+    /// User-entered production-run size (read off the production-tag
+    /// photo). Merges into the production-count signal, where it scores
+    /// exactly like a run parsed from the title.
+    pub(crate) production_count: Option<i64>,
 }
 
 /// Everything the scorer reads from a listing row.
@@ -331,7 +335,7 @@ pub(crate) async fn load_listing_for_matching(
     listing_id: i64,
 ) -> AppResult<Option<ListingForMatching>> {
     Ok(sqlx::query_as(
-        "SELECT title, driver_id, raw_json, oem, brand, finish, make
+        "SELECT title, driver_id, raw_json, oem, brand, finish, make, production_count
          FROM listings WHERE id = ?",
     )
     .bind(listing_id)
@@ -727,6 +731,9 @@ pub(crate) fn build_signals(
         attr_make: attrs.make.as_deref().and_then(norm_attr),
         ..Default::default()
     };
+    if let Some(pc) = attrs.production_count.filter(|v| *v > 0) {
+        sig.production_counts.insert(pc);
+    }
     merge_text_signals(&mut sig, title);
     if let Some(raw) = raw_json {
         merge_raw_json_signals(&mut sig, raw);
@@ -1222,6 +1229,21 @@ mod tests {
         let (f_with, _) = extract_features(&with, &c, true);
         let (f_without, _) = extract_features(&without, &c, true);
         assert!(f_with.scheme_overlap > f_without.scheme_overlap);
+    }
+
+    #[test]
+    fn manual_production_count_feeds_the_signal() {
+        let attrs = ListingAttrs {
+            production_count: Some(504),
+            ..Default::default()
+        };
+        let sig = build_signals("Jeff Gordon diecast", None, &AliasMap::new(), &attrs);
+        let right = full_cand(1, 2007, "1:24", "#24 Nicorette", Some(504));
+        let wrong = full_cand(2, 2007, "1:24", "#24 Nicorette", Some(2508));
+        let (f_right, _) = extract_features(&sig, &right, true);
+        let (f_wrong, _) = extract_features(&sig, &wrong, true);
+        assert_eq!(f_right.prod_count_match, 1.0);
+        assert_eq!(f_wrong.prod_count_conflict, 1.0);
     }
 
     #[test]

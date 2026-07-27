@@ -604,6 +604,9 @@ pub struct ListingRow {
     pub make: Option<String>,
     pub is_race_win: bool,
     pub is_autographed: bool,
+    /// Production-run size entered by the user from the listing's
+    /// production-tag photo (migration 0022). Manual-only.
+    pub production_count: Option<i64>,
     /// True when the user saved the attribute editor — auto-detection
     /// leaves the row alone until `reset_listing_attributes`.
     pub attributes_user_set: bool,
@@ -654,6 +657,7 @@ struct ListingRowRaw {
     make: Option<String>,
     is_race_win: i64,
     is_autographed: i64,
+    production_count: Option<i64>,
     attributes_user_set: i64,
 }
 
@@ -687,7 +691,7 @@ pub async fn list_listings(state: State<'_, AppState>) -> AppResult<Vec<ListingR
                    FROM listing_group_members
                   WHERE listing_id = l.id) AS group_ids_csv,
                 l.oem, l.brand, l.finish, l.make, l.is_race_win, l.is_autographed,
-                l.attributes_user_set
+                l.production_count, l.attributes_user_set
          FROM listings l
          JOIN sellers s ON s.id = l.seller_id
          LEFT JOIN listing_matches lm ON lm.listing_id = l.id
@@ -773,6 +777,7 @@ pub async fn list_listings(state: State<'_, AppState>) -> AppResult<Vec<ListingR
                 make: r.make,
                 is_race_win: r.is_race_win != 0,
                 is_autographed: r.is_autographed != 0,
+                production_count: r.production_count,
                 attributes_user_set: r.attributes_user_set != 0,
             }
         })
@@ -1087,6 +1092,7 @@ pub async fn set_listing_attributes(
     make: Option<String>,
     is_race_win: bool,
     is_autographed: bool,
+    production_count: Option<i64>,
 ) -> AppResult<()> {
     fn clean(s: Option<String>) -> Option<String> {
         s.map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
@@ -1094,7 +1100,8 @@ pub async fn set_listing_attributes(
     sqlx::query(
         "UPDATE listings
          SET oem = ?, brand = ?, finish = ?, make = ?,
-             is_race_win = ?, is_autographed = ?, attributes_user_set = 1
+             is_race_win = ?, is_autographed = ?, production_count = ?,
+             attributes_user_set = 1
          WHERE id = ?",
     )
     .bind(clean(oem))
@@ -1103,6 +1110,7 @@ pub async fn set_listing_attributes(
     .bind(clean(make))
     .bind(is_race_win as i64)
     .bind(is_autographed as i64)
+    .bind(production_count.filter(|v| *v > 0))
     .bind(listing_id)
     .execute(&state.db.pool)
     .await?;
@@ -1120,7 +1128,8 @@ pub async fn reset_listing_attributes(
     sqlx::query(
         "UPDATE listings
          SET oem = NULL, brand = NULL, finish = NULL, make = NULL,
-             is_race_win = 0, is_autographed = 0, attributes_user_set = 0
+             is_race_win = 0, is_autographed = 0, production_count = NULL,
+             attributes_user_set = 0
          WHERE id = ?",
     )
     .bind(listing_id)

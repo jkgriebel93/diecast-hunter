@@ -203,6 +203,7 @@ export const api = {
       make: attrs.make,
       isRaceWin: attrs.is_race_win,
       isAutographed: attrs.is_autographed,
+      productionCount: attrs.production_count,
     }),
   resetListingAttributes: (listingId: number) =>
     invoke<void>("reset_listing_attributes", { listingId }),
@@ -943,6 +944,8 @@ export interface ListingRow {
   make: string | null;
   is_race_win: boolean;
   is_autographed: boolean;
+  /** Production-run size, read off the listing's production-tag photo. */
+  production_count: number | null;
   /** True when the user saved the attribute editor — auto-fill skips the
    *  row until "Reset to auto". */
   attributes_user_set: boolean;
@@ -957,6 +960,8 @@ export interface ListingAttributes {
   make: string | null;
   is_race_win: boolean;
   is_autographed: boolean;
+  /** Production-run size, read off the listing's production-tag photo. */
+  production_count: number | null;
 }
 
 export interface DriverOption {

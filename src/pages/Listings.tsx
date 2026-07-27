@@ -2200,6 +2200,7 @@ function AttributesSection({
   const [make, setMake] = useState("");
   const [raceWin, setRaceWin] = useState(false);
   const [autographed, setAutographed] = useState(false);
+  const [prodCount, setProdCount] = useState("");
   const [options, setOptions] = useState<AttributeOptions>(
     EMPTY_ATTRIBUTE_OPTIONS,
   );
@@ -2211,6 +2212,7 @@ function AttributesSection({
     setMake(row.make ?? "");
     setRaceWin(row.is_race_win);
     setAutographed(row.is_autographed);
+    setProdCount(row.production_count?.toString() ?? "");
     setOpen(true);
     void loadAttributeOptions().then(setOptions);
   }
@@ -2218,6 +2220,7 @@ function AttributesSection({
   function submit(e: FormEvent) {
     e.preventDefault();
     setOpen(false);
+    const pc = parseInt(prodCount.replace(/[^0-9]/g, ""), 10);
     onSave({
       oem: oem.trim() || null,
       brand: brand.trim() || null,
@@ -2225,6 +2228,7 @@ function AttributesSection({
       make: make.trim() || null,
       is_race_win: raceWin,
       is_autographed: autographed,
+      production_count: Number.isFinite(pc) && pc > 0 ? pc : null,
     });
   }
 
@@ -2233,6 +2237,7 @@ function AttributesSection({
     row.brand !== null ||
     row.finish !== null ||
     row.make !== null ||
+    row.production_count !== null ||
     row.is_race_win ||
     row.is_autographed;
 
@@ -2255,6 +2260,17 @@ function AttributesSection({
                 <span className="text-fg">{value}</span>
               </span>
             ),
+        )}
+        {row.production_count !== null && (
+          <span
+            className="inline-flex items-center gap-1 rounded border border-border bg-bg-elevated px-1.5 py-0.5"
+            title="Production-run size from the tag photo — the matcher's strongest signal"
+          >
+            <span className="text-fg-muted">Run:</span>
+            <span className="text-fg">
+              {row.production_count.toLocaleString()}
+            </span>
+          </span>
         )}
         {row.is_race_win && (
           <span className="rounded border border-border bg-bg-elevated px-1.5 py-0.5 text-amber-300">
@@ -2330,6 +2346,15 @@ function AttributesSection({
           </datalist>
         </Fragment>
       ))}
+      <input
+        type="text"
+        inputMode="numeric"
+        className="input !py-1 !text-xs w-24"
+        value={prodCount}
+        onChange={(e) => setProdCount(e.target.value)}
+        placeholder="Run (1 of…)"
+        title="Production-run size from the tag photo, e.g. 5004"
+      />
       <label className="inline-flex items-center gap-1 cursor-pointer">
         <input
           type="checkbox"
