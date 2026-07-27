@@ -29,8 +29,9 @@ use sqlx::SqlitePool;
 use crate::error::AppResult;
 use crate::settings;
 use crate::sync::registry_auto_match::{
-    build_signals, extract_features, load_aliases, load_candidates, scheme_tokens, sigmoid,
-    tokenize, LearnedModel, MatchFeatures, MatchWeights, ScoreModel, FEATURE_NAMES, MIN_CONFIDENCE,
+    build_signals, extract_features, load_aliases, load_candidate, load_candidates,
+    load_listing_for_matching, scheme_tokens, sigmoid, tokenize, LearnedModel, MatchFeatures,
+    MatchWeights, ScoreModel, FEATURE_NAMES, MIN_CONFIDENCE,
 };
 
 /// Minimum labeled data before a learned model may replace the defaults.
@@ -321,65 +322,83 @@ pub async fn maybe_retrain(pool: &SqlitePool) {
 
 // ----- training-set assembly -----
 
-/// Explicit examples use the feature snapshot taken at verdict time (the
-/// append-only log is the ground truth of what the user saw). When the
-/// same pair was judged more than once, the latest verdict wins. Implicit
-/// negatives are computed fresh against today's registry data.
+/// Features are recomputed against today's data rather than read from the
+/// verdict-time snapshot in `features_json`, so features added after a
+/// verdict was recorded (and registry enrichment that happened since)
+/// apply to the whole history — no re-confirming needed. The snapshot
+/// stays in `match_feedback` purely as the historical record of what the
+/// user saw. When the same pair was judged more than once, the latest
+/// verdict wins. Pairs whose listing or entry has since been deleted are
+/// skipped (cascades normally remove their feedback rows anyway).
 async fn assemble_examples(pool: &SqlitePool) -> AppResult<Vec<Example>> {
-    let rows: Vec<(i64, i64, i64, String, String)> = sqlx::query_as(
-        "SELECT id, listing_id, registry_entry_id, label, features_json
+    let rows: Vec<(i64, i64, String)> = sqlx::query_as(
+        "SELECT listing_id, registry_entry_id, label
          FROM match_feedback
-         WHERE features_json IS NOT NULL AND registry_entry_id IS NOT NULL
+         WHERE registry_entry_id IS NOT NULL
          ORDER BY id",
     )
     .fetch_all(pool)
     .await?;
 
-    // Latest verdict per (listing, entry) pair.
-    let mut latest: HashMap<(i64, i64), (i64, String, String)> = HashMap::new();
-    for (id, listing_id, entry_id, label, features_json) in rows {
-        latest.insert((listing_id, entry_id), (id, label, features_json));
+    // Latest verdict per (listing, entry) pair, then grouped by listing so
+    // each listing's signals are built once.
+    let mut latest: HashMap<(i64, i64), String> = HashMap::new();
+    for (listing_id, entry_id, label) in rows {
+        latest.insert((listing_id, entry_id), label);
+    }
+    let mut by_listing: HashMap<i64, Vec<(i64, String)>> = HashMap::new();
+    for ((listing_id, entry_id), label) in &latest {
+        by_listing
+            .entry(*listing_id)
+            .or_default()
+            .push((*entry_id, label.clone()));
     }
 
-    let mut examples = Vec::new();
-    let mut confirmed_pairs: Vec<(i64, i64)> = Vec::new();
-    for ((listing_id, entry_id), (_, label, features_json)) in &latest {
-        let Ok(features) = serde_json::from_str::<MatchFeatures>(features_json) else {
-            tracing::warn!(
-                "matcher training: unreadable features for listing {listing_id} / entry {entry_id}; skipping"
-            );
-            continue;
-        };
-        let y = if label == "confirmed" { 1.0 } else { 0.0 };
-        if y > 0.5 {
-            confirmed_pairs.push((*listing_id, *entry_id));
-        }
-        examples.push(Example {
-            x: features.to_vec(),
-            y,
-            group: *listing_id,
-            implicit: false,
-        });
-    }
-
-    // Implicit negatives: the confirmed entry's strongest same-driver
-    // rivals, minus anything already explicitly judged.
     let aliases = load_aliases(pool).await?;
     let default_weights = MatchWeights::default();
-    for (listing_id, confirmed_entry) in confirmed_pairs {
-        let listing: Option<(String, Option<i64>, Option<String>)> =
-            sqlx::query_as("SELECT title, driver_id, raw_json FROM listings WHERE id = ?")
-                .bind(listing_id)
-                .fetch_optional(pool)
-                .await?;
-        let Some((title, Some(driver_id), raw_json)) = listing else {
+    let mut examples = Vec::new();
+    for (listing_id, verdicts) in by_listing {
+        let Some(listing) = load_listing_for_matching(pool, listing_id).await? else {
             continue;
         };
-        let sig = build_signals(&title, raw_json.as_deref(), &aliases);
+        let sig = build_signals(
+            &listing.title,
+            listing.raw_json.as_deref(),
+            &aliases,
+            &listing.attrs,
+        );
+
+        let mut any_confirmed = false;
+        for (entry_id, label) in &verdicts {
+            let Some(candidate) = load_candidate(pool, *entry_id).await? else {
+                continue;
+            };
+            let driver_match =
+                listing.driver_id.is_some() && listing.driver_id == candidate.driver_id;
+            let (features, _) = extract_features(&sig, &candidate, driver_match);
+            let confirmed = label == "confirmed";
+            any_confirmed |= confirmed;
+            examples.push(Example {
+                x: features.to_vec(),
+                y: if confirmed { 1.0 } else { 0.0 },
+                group: listing_id,
+                implicit: false,
+            });
+        }
+
+        // Implicit negatives: the confirmed entry's strongest same-driver
+        // rivals, minus anything already explicitly judged.
+        let Some(driver_id) = listing.driver_id else {
+            continue;
+        };
+        if !any_confirmed {
+            continue;
+        }
+        let judged: HashSet<i64> = verdicts.iter().map(|(e, _)| *e).collect();
         let mut rivals: Vec<(f64, MatchFeatures)> = load_candidates(pool, driver_id)
             .await?
             .iter()
-            .filter(|c| c.id != confirmed_entry && !latest.contains_key(&(listing_id, c.id)))
+            .filter(|c| !judged.contains(&c.id))
             .map(|c| {
                 let (f, _) = extract_features(&sig, c, true);
                 (f.score(&default_weights), f)
@@ -743,30 +762,52 @@ mod tests {
         pool
     }
 
-    async fn insert_listing(pool: &SqlitePool, title: &str) -> i64 {
+    async fn insert_driver(pool: &SqlitePool, name: &str, norm: &str) -> i64 {
+        sqlx::query("INSERT INTO drivers (name, normalized_name) VALUES (?, ?)")
+            .bind(name)
+            .bind(norm)
+            .execute(pool)
+            .await
+            .unwrap()
+            .last_insert_rowid()
+    }
+
+    async fn insert_listing(pool: &SqlitePool, title: &str, driver_id: Option<i64>) -> i64 {
         let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM listings")
             .fetch_one(pool)
             .await
             .unwrap();
         sqlx::query(
             "INSERT INTO listings
-                (seller_id, external_id, url, title, saved_at, last_seen_at)
-             VALUES (1, ?, 'https://example.com', ?, 0, 0)",
+                (seller_id, external_id, url, title, driver_id, saved_at, last_seen_at)
+             VALUES (1, ?, 'https://example.com', ?, ?, 0, 0)",
         )
         .bind(format!("v1|{n}|0"))
         .bind(title)
+        .bind(driver_id)
         .execute(pool)
         .await
         .unwrap()
         .last_insert_rowid()
     }
 
-    async fn insert_entry(pool: &SqlitePool, guid: &str, scheme: &str) -> i64 {
+    async fn insert_entry(
+        pool: &SqlitePool,
+        guid: &str,
+        driver_id: Option<i64>,
+        year: Option<i64>,
+        scale: Option<&str>,
+        scheme: &str,
+    ) -> i64 {
         sqlx::query(
-            "INSERT INTO registry_entries (external_id, scheme_text, fetched_at)
-             VALUES (?, ?, 0)",
+            "INSERT INTO registry_entries
+                (external_id, driver_id, year, scale, scheme_text, fetched_at)
+             VALUES (?, ?, ?, ?, ?, 0)",
         )
         .bind(guid)
+        .bind(driver_id)
+        .bind(year)
+        .bind(scale)
         .bind(scheme)
         .execute(pool)
         .await
@@ -774,22 +815,17 @@ mod tests {
         .last_insert_rowid()
     }
 
-    async fn insert_feedback(
-        pool: &SqlitePool,
-        listing_id: i64,
-        entry_id: i64,
-        label: &str,
-        features: &MatchFeatures,
-    ) {
+    /// The trainer recomputes features from the listing/entry rows, so the
+    /// snapshot is deliberately NULL here.
+    async fn insert_feedback(pool: &SqlitePool, listing_id: i64, entry_id: i64, label: &str) {
         sqlx::query(
             "INSERT INTO match_feedback
                 (listing_id, registry_entry_id, label, source, features_json, score, created_at)
-             VALUES (?, ?, ?, 'test', ?, 0.0, 0)",
+             VALUES (?, ?, ?, 'test', NULL, NULL, 0)",
         )
         .bind(listing_id)
         .bind(entry_id)
         .bind(label)
-        .bind(serde_json::to_string(features).unwrap())
         .execute(pool)
         .await
         .unwrap();
@@ -810,28 +846,36 @@ mod tests {
     #[tokio::test]
     async fn retrain_learns_and_activates_from_verdicts() {
         let pool = migrated_pool().await;
-        let entry = insert_entry(&pool, "guid-train", "#24 DuPont").await;
+        let driver = insert_driver(&pool, "Jeff Gordon", "jeff gordon").await;
+        let entry = insert_entry(
+            &pool,
+            "guid-train",
+            Some(driver),
+            Some(2007),
+            Some("1:24"),
+            "#24 Nicorette",
+        )
+        .await;
 
-        // Positives look like year+scale matches; negatives like conflicts.
-        let pos = MatchFeatures {
-            driver_match: 1.0,
-            year_match: 1.0,
-            scale_match: 1.0,
-            ..Default::default()
-        };
-        let neg = MatchFeatures {
-            driver_match: 1.0,
-            year_conflict: 1.0,
-            scale_conflict: 1.0,
-            ..Default::default()
-        };
+        // Features are recomputed from these rows at training time:
+        // positives match the entry's year/scale/scheme, negatives conflict.
         for i in 0..30 {
-            let l = insert_listing(&pool, &format!("pos listing {i}")).await;
-            insert_feedback(&pool, l, entry, "confirmed", &pos).await;
+            let l = insert_listing(
+                &pool,
+                &format!("2007 Jeff Gordon Nicorette 1:24 diecast {i}"),
+                Some(driver),
+            )
+            .await;
+            insert_feedback(&pool, l, entry, "confirmed").await;
         }
         for i in 0..15 {
-            let l = insert_listing(&pool, &format!("neg listing {i}")).await;
-            insert_feedback(&pool, l, entry, "rejected", &neg).await;
+            let l = insert_listing(
+                &pool,
+                &format!("1999 Jeff Gordon Bud 1:64 diecast {i}"),
+                Some(driver),
+            )
+            .await;
+            insert_feedback(&pool, l, entry, "rejected").await;
         }
 
         let outcome = retrain(&pool).await.unwrap();
@@ -840,8 +884,21 @@ mod tests {
         assert_eq!(outcome.explicit_negatives, 15);
         assert!(outcome.cv_accuracy.unwrap() > 0.9);
 
-        // The stored model now scores the two patterns on opposite sides
-        // of the 50 threshold.
+        // The stored model scores the two recomputed patterns on opposite
+        // sides of the 50 threshold.
+        let pos = MatchFeatures {
+            driver_match: 1.0,
+            year_match: 1.0,
+            scale_match: 1.0,
+            scheme_overlap: 1.0,
+            ..Default::default()
+        };
+        let neg = MatchFeatures {
+            driver_match: 1.0,
+            year_conflict: 1.0,
+            scale_conflict: 1.0,
+            ..Default::default()
+        };
         let model = ScoreModel::load(&pool).await;
         assert!(matches!(model, ScoreModel::Learned(_)));
         assert!(model.confidence(&pos) > MIN_CONFIDENCE);
@@ -861,8 +918,16 @@ mod tests {
         // "budcar" is seller slang: in titles, never in registry vocabulary.
         // "diecast" is stopworded even though it also co-occurs.
         for i in 0..3 {
-            let entry = insert_entry(&pool, &format!("guid-{i}"), "Budweiser Racing").await;
-            let l = insert_listing(&pool, &format!("Dale budcar diecast red {i}")).await;
+            let entry = insert_entry(
+                &pool,
+                &format!("guid-{i}"),
+                None,
+                None,
+                None,
+                "Budweiser Racing",
+            )
+            .await;
+            let l = insert_listing(&pool, &format!("Dale budcar diecast red {i}"), None).await;
             sqlx::query(
                 "INSERT INTO listing_matches
                     (listing_id, registry_entry_id, confidence, user_confirmed, matched_at)

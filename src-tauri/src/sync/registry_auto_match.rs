@@ -115,6 +115,14 @@ match_feature_fields!(
     aspect_year_match,
     aspect_scale_match,
     aspect_maker_match,
+    attr_oem_match,
+    attr_oem_conflict,
+    attr_brand_match,
+    attr_brand_conflict,
+    attr_finish_match,
+    attr_finish_conflict,
+    attr_make_match,
+    attr_make_conflict,
 );
 
 impl Default for MatchWeights {
@@ -135,6 +143,14 @@ impl Default for MatchWeights {
             aspect_year_match: 5.0,
             aspect_scale_match: 5.0,
             aspect_maker_match: 3.0,
+            attr_oem_match: 6.0,
+            attr_oem_conflict: -8.0,
+            attr_brand_match: 6.0,
+            attr_brand_conflict: -8.0,
+            attr_finish_match: 8.0,
+            attr_finish_conflict: -10.0,
+            attr_make_match: 4.0,
+            attr_make_conflict: -6.0,
         }
     }
 }
@@ -264,6 +280,8 @@ pub(crate) struct Candidate {
     pub(crate) car_number: Option<String>,
     pub(crate) scheme_text: Option<String>,
     pub(crate) production_qty: Option<i64>,
+    pub(crate) finish: Option<String>,
+    pub(crate) make: Option<String>,
 }
 
 /// Bidirectional token bridges from the `scheme_aliases` table: looking up
@@ -286,6 +304,55 @@ pub(crate) async fn load_aliases(pool: &SqlitePool) -> AppResult<AliasMap> {
     Ok(map)
 }
 
+/// Structured attribute columns on the listing row, auto-detected by
+/// `sync::attribute_assoc` from DCR vocabulary (or pinned by the user).
+/// Both sides of the comparison use the same canonical vocabulary, so a
+/// normalized string comparison against candidate columns is meaningful.
+#[derive(Debug, Default, Clone, sqlx::FromRow)]
+pub(crate) struct ListingAttrs {
+    pub(crate) oem: Option<String>,
+    pub(crate) brand: Option<String>,
+    pub(crate) finish: Option<String>,
+    pub(crate) make: Option<String>,
+}
+
+/// Everything the scorer reads from a listing row.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub(crate) struct ListingForMatching {
+    pub(crate) title: String,
+    pub(crate) driver_id: Option<i64>,
+    pub(crate) raw_json: Option<String>,
+    #[sqlx(flatten)]
+    pub(crate) attrs: ListingAttrs,
+}
+
+pub(crate) async fn load_listing_for_matching(
+    pool: &SqlitePool,
+    listing_id: i64,
+) -> AppResult<Option<ListingForMatching>> {
+    Ok(sqlx::query_as(
+        "SELECT title, driver_id, raw_json, oem, brand, finish, make
+         FROM listings WHERE id = ?",
+    )
+    .bind(listing_id)
+    .fetch_optional(pool)
+    .await?)
+}
+
+pub(crate) async fn load_candidate(
+    pool: &SqlitePool,
+    entry_id: i64,
+) -> AppResult<Option<Candidate>> {
+    Ok(sqlx::query_as(
+        "SELECT id, driver_id, year, year_raced, oem, brand, scale, car_number,
+                scheme_text, production_qty, finish, make
+         FROM registry_entries WHERE id = ?",
+    )
+    .bind(entry_id)
+    .fetch_optional(pool)
+    .await?)
+}
+
 /// Auto-match a single listing. `network` enables the pull-from-DCR
 /// fallback when the listing's driver has no local registry entries; pass
 /// `None` for the cheap local-only flavor used after listing add/refresh.
@@ -294,12 +361,7 @@ pub async fn auto_match_listing(
     listing_id: i64,
     network: Option<&ProgressEmitter>,
 ) -> AppResult<AutoMatchOutcome> {
-    let row: Option<(String, Option<i64>, Option<String>)> =
-        sqlx::query_as("SELECT title, driver_id, raw_json FROM listings WHERE id = ?")
-            .bind(listing_id)
-            .fetch_optional(pool)
-            .await?;
-    let Some((title, driver_id, raw_json)) = row else {
+    let Some(listing) = load_listing_for_matching(pool, listing_id).await? else {
         return Err(AppError::Parse(format!("listing {listing_id} not found")));
     };
 
@@ -308,7 +370,7 @@ pub async fn auto_match_listing(
             "you already confirmed a match (or no-match) for this listing",
         ));
     }
-    let Some(driver_id) = driver_id else {
+    let Some(driver_id) = listing.driver_id else {
         return Ok(AutoMatchOutcome::skipped(
             "no driver detected — tag a driver first, then retry",
         ));
@@ -330,7 +392,12 @@ pub async fn auto_match_listing(
 
     let aliases = load_aliases(pool).await?;
     let model = ScoreModel::load(pool).await;
-    let sig = build_signals(&title, raw_json.as_deref(), &aliases);
+    let sig = build_signals(
+        &listing.title,
+        listing.raw_json.as_deref(),
+        &aliases,
+        &listing.attrs,
+    );
     apply_best(pool, listing_id, &sig, &candidates, &model).await
 }
 
@@ -344,8 +411,8 @@ pub async fn auto_match_all(
     progress: &ProgressEmitter,
     allow_network: bool,
 ) -> AppResult<AutoMatchSummary> {
-    let rows: Vec<(i64, String, Option<i64>, Option<String>)> = sqlx::query_as(
-        "SELECT l.id, l.title, l.driver_id, l.raw_json
+    let rows: Vec<(i64,)> = sqlx::query_as(
+        "SELECT l.id
          FROM listings l
          LEFT JOIN listing_matches lm ON lm.listing_id = l.id
          WHERE COALESCE(lm.user_confirmed, 0) = 0
@@ -370,7 +437,7 @@ pub async fn auto_match_all(
     let mut prewarm_attempted: HashSet<i64> = HashSet::new();
     let mut network_ok = allow_network;
 
-    for (idx, (listing_id, title, driver_id, raw_json)) in rows.into_iter().enumerate() {
+    for (idx, (listing_id,)) in rows.into_iter().enumerate() {
         progress.check_cancelled()?;
         let done = (idx + 1) as u32;
         if done == 1 || done % 25 == 0 || done == total {
@@ -381,7 +448,10 @@ pub async fn auto_match_all(
             );
         }
 
-        let Some(driver_id) = driver_id else {
+        let Some(listing) = load_listing_for_matching(pool, listing_id).await? else {
+            continue;
+        };
+        let Some(driver_id) = listing.driver_id else {
             summary.no_driver += 1;
             continue;
         };
@@ -412,7 +482,12 @@ pub async fn auto_match_all(
             summary.no_candidates += 1;
             continue;
         }
-        let sig = build_signals(&title, raw_json.as_deref(), &aliases);
+        let sig = build_signals(
+            &listing.title,
+            listing.raw_json.as_deref(),
+            &aliases,
+            &listing.attrs,
+        );
         let outcome = apply_best(pool, listing_id, &sig, candidates, &model).await?;
         if outcome.matched {
             summary.matched += 1;
@@ -443,31 +518,22 @@ pub async fn features_for_pair(
     listing_id: i64,
     entry_id: i64,
 ) -> AppResult<Option<(MatchFeatures, f64)>> {
-    let listing: Option<(String, Option<i64>, Option<String>)> =
-        sqlx::query_as("SELECT title, driver_id, raw_json FROM listings WHERE id = ?")
-            .bind(listing_id)
-            .fetch_optional(pool)
-            .await?;
-    let Some((title, listing_driver, raw_json)) = listing else {
+    let Some(listing) = load_listing_for_matching(pool, listing_id).await? else {
         return Ok(None);
     };
-
-    let candidate: Option<Candidate> = sqlx::query_as(
-        "SELECT id, driver_id, year, year_raced, oem, brand, scale, car_number,
-                scheme_text, production_qty
-         FROM registry_entries WHERE id = ?",
-    )
-    .bind(entry_id)
-    .fetch_optional(pool)
-    .await?;
-    let Some(candidate) = candidate else {
+    let Some(candidate) = load_candidate(pool, entry_id).await? else {
         return Ok(None);
     };
 
     let aliases = load_aliases(pool).await?;
     let model = ScoreModel::load(pool).await;
-    let sig = build_signals(&title, raw_json.as_deref(), &aliases);
-    let driver_match = listing_driver.is_some() && listing_driver == candidate.driver_id;
+    let sig = build_signals(
+        &listing.title,
+        listing.raw_json.as_deref(),
+        &aliases,
+        &listing.attrs,
+    );
+    let driver_match = listing.driver_id.is_some() && listing.driver_id == candidate.driver_id;
     let (features, _reasons) = extract_features(&sig, &candidate, driver_match);
     let score = model.confidence(&features);
     Ok(Some((features, score)))
@@ -558,7 +624,7 @@ pub(crate) async fn load_candidates(
 ) -> AppResult<Vec<Candidate>> {
     let rows: Vec<Candidate> = sqlx::query_as(
         "SELECT id, driver_id, year, year_raced, oem, brand, scale, car_number,
-                scheme_text, production_qty
+                scheme_text, production_qty, finish, make
          FROM registry_entries WHERE driver_id = ?",
     )
     .bind(driver_id)
@@ -614,6 +680,12 @@ pub(crate) struct ListingSignals {
     aspect_scales: HashSet<String>,
     /// Tokens from Brand / Manufacturer / Make aspects.
     aspect_maker_tokens: HashSet<String>,
+    /// Normalized structured attribute columns from the listing row
+    /// ([`ListingAttrs`]), compared against the same columns on candidates.
+    attr_oem: Option<String>,
+    attr_brand: Option<String>,
+    attr_finish: Option<String>,
+    attr_make: Option<String>,
 }
 
 static SCALE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b1\s*[:/]\s*(18|24|32|64)\b").unwrap());
@@ -645,9 +717,14 @@ pub(crate) fn build_signals(
     title: &str,
     raw_json: Option<&str>,
     aliases: &AliasMap,
+    attrs: &ListingAttrs,
 ) -> ListingSignals {
     let mut sig = ListingSignals {
         tokens: tokenize(title).into_iter().collect(),
+        attr_oem: attrs.oem.as_deref().and_then(norm_attr),
+        attr_brand: attrs.brand.as_deref().and_then(norm_attr),
+        attr_finish: attrs.finish.as_deref().and_then(norm_attr),
+        attr_make: attrs.make.as_deref().and_then(norm_attr),
         ..Default::default()
     };
     merge_text_signals(&mut sig, title);
@@ -879,6 +956,58 @@ pub(crate) fn extract_features(
         reasons.push("maker confirmed by item specifics".to_string());
     }
 
+    // Structured attribute columns - a conflict is only scored when both
+    // sides carry a value.
+    let attr_cmp = |l: &Option<String>, r: &Option<String>| -> Option<bool> {
+        let l = l.as_deref()?;
+        let r = r.as_deref().and_then(norm_attr)?;
+        Some(l == r)
+    };
+    match attr_cmp(&sig.attr_oem, &c.oem) {
+        Some(true) => {
+            f.attr_oem_match = 1.0;
+            reasons.push("OEM attribute matches".to_string());
+        }
+        Some(false) => {
+            f.attr_oem_conflict = 1.0;
+            reasons.push("OEM attribute differs".to_string());
+        }
+        None => {}
+    }
+    match attr_cmp(&sig.attr_brand, &c.brand) {
+        Some(true) => {
+            f.attr_brand_match = 1.0;
+            reasons.push("brand attribute matches".to_string());
+        }
+        Some(false) => {
+            f.attr_brand_conflict = 1.0;
+            reasons.push("brand attribute differs".to_string());
+        }
+        None => {}
+    }
+    match attr_cmp(&sig.attr_finish, &c.finish) {
+        Some(true) => {
+            f.attr_finish_match = 1.0;
+            reasons.push("finish attribute matches".to_string());
+        }
+        Some(false) => {
+            f.attr_finish_conflict = 1.0;
+            reasons.push("finish attribute differs".to_string());
+        }
+        None => {}
+    }
+    match attr_cmp(&sig.attr_make, &c.make) {
+        Some(true) => {
+            f.attr_make_match = 1.0;
+            reasons.push("make attribute matches".to_string());
+        }
+        Some(false) => {
+            f.attr_make_conflict = 1.0;
+            reasons.push("make attribute differs".to_string());
+        }
+        None => {}
+    }
+
     (f, reasons)
 }
 
@@ -913,6 +1042,14 @@ fn pick_best(
     Some((best.id, confidence.clamp(0.0, MAX_CONFIDENCE), reasons))
 }
 
+/// Attribute values come from DCR vocabulary on both sides but can differ
+/// in spacing/punctuation ("Action / Lionel" vs "Action/Lionel") - compare
+/// them as normalized token strings.
+fn norm_attr(s: &str) -> Option<String> {
+    let t = tokenize(s).join(" ");
+    (!t.is_empty()).then_some(t)
+}
+
 pub(crate) fn tokenize(s: &str) -> Vec<String> {
     s.split(|c: char| !c.is_alphanumeric())
         .filter(|t| !t.is_empty())
@@ -925,7 +1062,7 @@ mod tests {
     use super::*;
 
     fn signals(title: &str) -> ListingSignals {
-        build_signals(title, None, &AliasMap::new())
+        build_signals(title, None, &AliasMap::new(), &ListingAttrs::default())
     }
 
     /// pick_best under the default hand-tuned model, which is what these
@@ -946,6 +1083,8 @@ mod tests {
             car_number: None,
             scheme_text: None,
             production_qty: None,
+            finish: None,
+            make: None,
         }
     }
 
@@ -961,6 +1100,8 @@ mod tests {
             car_number: None,
             scheme_text: Some(scheme.into()),
             production_qty: qty,
+            finish: None,
+            make: None,
         }
     }
 
@@ -1003,6 +1144,7 @@ mod tests {
             "Jeff Gordon Nicorette diecast",
             Some(&raw),
             &AliasMap::new(),
+            &ListingAttrs::default(),
         );
         assert!(sig.scales.contains("1:24"));
         assert!(sig.aspect_scales.contains("1:24"));
@@ -1019,7 +1161,12 @@ mod tests {
             "description": "1998 Chromalusion, 1/24 scale, limited edition of 5,004",
         })
         .to_string();
-        let sig = build_signals("Jeff Gordon DuPont diecast", Some(&raw), &AliasMap::new());
+        let sig = build_signals(
+            "Jeff Gordon DuPont diecast",
+            Some(&raw),
+            &AliasMap::new(),
+            &ListingAttrs::default(),
+        );
         assert!(sig.years.contains(&1998));
         assert!(sig.scales.contains("1:24"));
         assert!(sig.production_counts.contains(&5004));
@@ -1042,6 +1189,7 @@ mod tests {
             "2007 Jeff Gordon Nicorette 1:24",
             Some(&raw),
             &AliasMap::new(),
+            &ListingAttrs::default(),
         );
         let w = MatchWeights::default();
         let (tf, _) = extract_features(&title_sig, &c, true);
@@ -1059,11 +1207,44 @@ mod tests {
             scheme_text: Some("Budweiser 2001 Monte Carlo".into()),
             ..cand(1)
         };
-        let with = build_signals("Dale Jr #8 Bud 1:24", None, &aliases);
-        let without = build_signals("Dale Jr #8 Bud 1:24", None, &AliasMap::new());
+        let with = build_signals(
+            "Dale Jr #8 Bud 1:24",
+            None,
+            &aliases,
+            &ListingAttrs::default(),
+        );
+        let without = build_signals(
+            "Dale Jr #8 Bud 1:24",
+            None,
+            &AliasMap::new(),
+            &ListingAttrs::default(),
+        );
         let (f_with, _) = extract_features(&with, &c, true);
         let (f_without, _) = extract_features(&without, &c, true);
         assert!(f_with.scheme_overlap > f_without.scheme_overlap);
+    }
+
+    #[test]
+    fn attribute_columns_match_and_conflict() {
+        let c = Candidate {
+            oem: Some("Action / Lionel".into()),
+            finish: Some("Color Chrome".into()),
+            ..cand(1)
+        };
+        let attrs = ListingAttrs {
+            oem: Some("Action/Lionel".into()),
+            finish: Some("Standard".into()),
+            ..Default::default()
+        };
+        let sig = build_signals("Jeff Gordon diecast", None, &AliasMap::new(), &attrs);
+        let (f, reasons) = extract_features(&sig, &c, true);
+        assert_eq!(f.attr_oem_match, 1.0, "spacing-insensitive OEM match");
+        assert_eq!(f.attr_finish_conflict, 1.0);
+        assert_eq!(f.attr_brand_match, 0.0, "absent on one side is no signal");
+        assert!(reasons.iter().any(|r| r.contains("OEM attribute matches")));
+        assert!(reasons
+            .iter()
+            .any(|r| r.contains("finish attribute differs")));
     }
 
     #[test]
