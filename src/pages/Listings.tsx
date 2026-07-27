@@ -39,12 +39,17 @@ const IMG_CLASS: Record<ImageSize, string> = {
 };
 
 type ViewMode = "flat" | "byDriver" | "byGroup";
-type StatusFilter = "all" | "active" | "ended";
-type MatchFilter = "all" | "matched" | "unmatched";
-type OfferFilter = "all" | "unresponded" | "with" | "without";
+// The checkbox facets (status, match, offer, type) hold the set of checked
+// options. Empty set = facet off = show everything; multiple checks OR
+// together within the facet.
+type StatusOption = "active" | "ended";
+/** "confirmed"/"unconfirmed" split matched listings by user verification;
+ *  "unmatched" = no registry entry (including user-marked no-match rows). */
+type MatchOption = "confirmed" | "unconfirmed" | "unmatched";
+type OfferOption = "unresponded" | "with" | "without";
 /** Buying-format facet. "bin" = fixed price that does NOT take offers;
  *  "offers" = accepts Best Offers (fixed or auction). */
-type TypeFilter = "all" | "auction" | "bin" | "offers";
+type TypeOption = "auction" | "bin" | "offers";
 /** "all" = no group filter; "none" = listings with zero groups; otherwise the
  *  numeric group id as a string. */
 type GroupFilter = string;
@@ -119,10 +124,10 @@ function partitionGroupsByDrivers(
 interface ListingFilterState {
   /** Lower-cased, trimmed search text; empty = no text filter. */
   q: string;
-  status: StatusFilter;
-  match: MatchFilter;
-  offer: OfferFilter;
-  type: TypeFilter;
+  status: Set<StatusOption>;
+  match: Set<MatchOption>;
+  offer: Set<OfferOption>;
+  type: Set<TypeOption>;
   group: GroupFilter;
   excluded: Set<number>;
   /** "all", "none", or `d:<lowercased driver name>`. */
@@ -154,14 +159,29 @@ function listingPassesFilters(row: ListingRow, f: ListingFilterState): boolean {
       .toLowerCase();
     if (!hay.includes(f.q)) return false;
   }
-  if (f.status === "active" && row.status !== "active") return false;
-  if (f.status === "ended" && row.status !== "ended") return false;
-  if (f.match === "matched" && row.registry_entry_id === null) return false;
-  if (f.match === "unmatched" && row.registry_entry_id !== null) return false;
-  if (f.type === "auction" && row.listing_type !== "auction") return false;
-  if (f.type === "bin" && (row.listing_type !== "fixed" || row.accepts_offers))
-    return false;
-  if (f.type === "offers" && !row.accepts_offers) return false;
+  if (f.status.size > 0) {
+    const ok =
+      (f.status.has("active") && row.status === "active") ||
+      (f.status.has("ended") && row.status === "ended");
+    if (!ok) return false;
+  }
+  if (f.match.size > 0) {
+    const matched = row.registry_entry_id !== null;
+    const ok =
+      (f.match.has("confirmed") && matched && row.match_user_confirmed) ||
+      (f.match.has("unconfirmed") && matched && !row.match_user_confirmed) ||
+      (f.match.has("unmatched") && !matched);
+    if (!ok) return false;
+  }
+  if (f.type.size > 0) {
+    const ok =
+      (f.type.has("auction") && row.listing_type === "auction") ||
+      (f.type.has("bin") &&
+        row.listing_type === "fixed" &&
+        !row.accepts_offers) ||
+      (f.type.has("offers") && row.accepts_offers);
+    if (!ok) return false;
+  }
   if (f.driver !== "all") {
     const name = row.matched_driver_name ?? row.auto_driver_name;
     if (f.driver === "none") {
@@ -180,24 +200,37 @@ function listingPassesFilters(row: ListingRow, f: ListingFilterState): boolean {
   }
   if (f.excluded.size > 0 && row.group_ids.some((id) => f.excluded.has(id)))
     return false;
-  if (f.offer !== "all") {
+  if (f.offer.size > 0) {
     const offer = f.offersByItemId.get(legacyIdFromExternalId(row.external_id));
     const hasOffer = offer !== undefined;
-    if (f.offer === "with" && !hasOffer) return false;
-    if (f.offer === "without" && hasOffer) return false;
-    if (f.offer === "unresponded") {
-      if (!hasOffer) return false;
-      // Heuristic for "user already responded": either the notification
-      // was opened (eBay flips <Read> on the inbox UI when you open the
-      // message — which the web accept/decline flow does), or the
-      // underlying listing has ended (signal that the offer was accepted
-      // and the item sold). Conservative: a missing listing is treated as
-      // "still active" so users who haven't run watchlist sync still see
-      // their offers.
-      const responded = offer.is_read || row.status === "ended";
-      if (responded) return false;
-    }
+    // Heuristic for "user already responded": either the notification
+    // was opened (eBay flips <Read> on the inbox UI when you open the
+    // message — which the web accept/decline flow does), or the
+    // underlying listing has ended (signal that the offer was accepted
+    // and the item sold). Conservative: a missing listing is treated as
+    // "still active" so users who haven't run watchlist sync still see
+    // their offers.
+    const responded = hasOffer && (offer.is_read || row.status === "ended");
+    const ok =
+      (f.offer.has("with") && hasOffer) ||
+      (f.offer.has("without") && !hasOffer) ||
+      (f.offer.has("unresponded") && hasOffer && !responded);
+    if (!ok) return false;
   }
+  return true;
+}
+
+/** Fresh Set with `v` added or removed — checkbox-facet toggle. */
+function toggled<T>(set: Set<T>, v: T): Set<T> {
+  const next = new Set(set);
+  if (next.has(v)) next.delete(v);
+  else next.add(v);
+  return next;
+}
+
+function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
+  if (a.size !== b.size) return false;
+  for (const v of a) if (!b.has(v)) return false;
   return true;
 }
 
@@ -230,10 +263,18 @@ export function Listings() {
   >(null);
 
   const [searchText, setSearchText] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
-  const [matchFilter, setMatchFilter] = useState<MatchFilter>("all");
-  const [offerFilter, setOfferFilter] = useState<OfferFilter>("all");
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<Set<StatusOption>>(
+    () => new Set(["active"]),
+  );
+  const [matchFilter, setMatchFilter] = useState<Set<MatchOption>>(
+    () => new Set(),
+  );
+  const [offerFilter, setOfferFilter] = useState<Set<OfferOption>>(
+    () => new Set(),
+  );
+  const [typeFilter, setTypeFilter] = useState<Set<TypeOption>>(
+    () => new Set(),
+  );
   const [groupFilter, setGroupFilter] = useState<GroupFilter>("all");
   // Listings belonging to any of these groups are hidden. Independent of
   // `groupFilter` so you can e.g. show all listings except the "Purchased"
@@ -760,26 +801,23 @@ export function Listings() {
     };
     return {
       status: {
-        active: count({ status: "active" }),
-        ended: count({ status: "ended" }),
-        all: count({ status: "all" }),
+        active: count({ status: new Set(["active"]) }),
+        ended: count({ status: new Set(["ended"]) }),
       },
       match: {
-        all: count({ match: "all" }),
-        matched: count({ match: "matched" }),
-        unmatched: count({ match: "unmatched" }),
+        confirmed: count({ match: new Set(["confirmed"]) }),
+        unconfirmed: count({ match: new Set(["unconfirmed"]) }),
+        unmatched: count({ match: new Set(["unmatched"]) }),
       },
       offer: {
-        all: count({ offer: "all" }),
-        unresponded: count({ offer: "unresponded" }),
-        with: count({ offer: "with" }),
-        without: count({ offer: "without" }),
+        unresponded: count({ offer: new Set(["unresponded"]) }),
+        with: count({ offer: new Set(["with"]) }),
+        without: count({ offer: new Set(["without"]) }),
       },
       type: {
-        all: count({ type: "all" }),
-        auction: count({ type: "auction" }),
-        bin: count({ type: "bin" }),
-        offers: count({ type: "offers" }),
+        auction: count({ type: new Set(["auction"]) }),
+        bin: count({ type: new Set(["bin"]) }),
+        offers: count({ type: new Set(["offers"]) }),
       },
     };
   }, [rows, filterState]);
@@ -828,20 +866,20 @@ export function Listings() {
   // filters stay visible.
   const activeFilterCount =
     (searchText.trim() !== "" ? 1 : 0) +
-    (statusFilter !== "active" ? 1 : 0) +
-    (matchFilter !== "all" ? 1 : 0) +
-    (offerFilter !== "all" ? 1 : 0) +
-    (typeFilter !== "all" ? 1 : 0) +
+    (!setsEqual(statusFilter, new Set<StatusOption>(["active"])) ? 1 : 0) +
+    (matchFilter.size > 0 ? 1 : 0) +
+    (offerFilter.size > 0 ? 1 : 0) +
+    (typeFilter.size > 0 ? 1 : 0) +
     (groupFilter !== "all" ? 1 : 0) +
     (excludedGroupIds.size > 0 ? 1 : 0) +
     (driverFilter !== "all" ? 1 : 0);
 
   function clearAllFilters() {
     setSearchText("");
-    setStatusFilter("active");
-    setMatchFilter("all");
-    setOfferFilter("all");
-    setTypeFilter("all");
+    setStatusFilter(new Set(["active"]));
+    setMatchFilter(new Set());
+    setOfferFilter(new Set());
+    setTypeFilter(new Set());
     setGroupFilter("all");
     setExcludedGroupIds(new Set());
     setDriverFilter("all");
@@ -1006,7 +1044,7 @@ export function Listings() {
               />
               <FacetList
                 label="Status"
-                value={statusFilter}
+                selected={statusFilter}
                 options={[
                   {
                     value: "active",
@@ -1018,19 +1056,24 @@ export function Listings() {
                     label: "Ended",
                     count: facetCounts.status.ended,
                   },
-                  { value: "all", label: "All", count: facetCounts.status.all },
                 ]}
-                onChange={(v) => setStatusFilter(v as StatusFilter)}
+                onToggle={(v) =>
+                  setStatusFilter((prev) => toggled(prev, v as StatusOption))
+                }
               />
               <FacetList
                 label="Match"
-                value={matchFilter}
+                selected={matchFilter}
                 options={[
-                  { value: "all", label: "All", count: facetCounts.match.all },
                   {
-                    value: "matched",
-                    label: "Matched",
-                    count: facetCounts.match.matched,
+                    value: "confirmed",
+                    label: "Confirmed",
+                    count: facetCounts.match.confirmed,
+                  },
+                  {
+                    value: "unconfirmed",
+                    label: "Unconfirmed",
+                    count: facetCounts.match.unconfirmed,
                   },
                   {
                     value: "unmatched",
@@ -1038,13 +1081,14 @@ export function Listings() {
                     count: facetCounts.match.unmatched,
                   },
                 ]}
-                onChange={(v) => setMatchFilter(v as MatchFilter)}
+                onToggle={(v) =>
+                  setMatchFilter((prev) => toggled(prev, v as MatchOption))
+                }
               />
               <FacetList
                 label="Offer"
-                value={offerFilter}
+                selected={offerFilter}
                 options={[
-                  { value: "all", label: "All", count: facetCounts.offer.all },
                   {
                     value: "unresponded",
                     label: "Unresponded",
@@ -1061,13 +1105,14 @@ export function Listings() {
                     count: facetCounts.offer.without,
                   },
                 ]}
-                onChange={(v) => setOfferFilter(v as OfferFilter)}
+                onToggle={(v) =>
+                  setOfferFilter((prev) => toggled(prev, v as OfferOption))
+                }
               />
               <FacetList
                 label="Type"
-                value={typeFilter}
+                selected={typeFilter}
                 options={[
-                  { value: "all", label: "All", count: facetCounts.type.all },
                   {
                     value: "auction",
                     label: "Auction",
@@ -1084,7 +1129,9 @@ export function Listings() {
                     count: facetCounts.type.offers,
                   },
                 ]}
-                onChange={(v) => setTypeFilter(v as TypeFilter)}
+                onToggle={(v) =>
+                  setTypeFilter((prev) => toggled(prev, v as TypeOption))
+                }
               />
               <div>
                 <div className="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
@@ -1855,7 +1902,10 @@ function ListingCard({
         )}
       </div>
       <div className="text-right text-xs tabular-nums shrink-0 space-y-0.5">
-        <div className="text-base text-fg">{formatCents(total)}</div>
+        <div className="flex items-center justify-end gap-2">
+          {row.deal_score !== null && <DealBadge score={row.deal_score} />}
+          <div className="text-base text-fg">{formatCents(total)}</div>
+        </div>
         {!minimized && row.shipping_cents !== null && row.shipping_cents > 0 && (
           <div className="text-fg-subtle">
             {formatCents(row.price_cents)} + {formatCents(row.shipping_cents)}{" "}
@@ -1866,9 +1916,6 @@ function ListingCard({
           <div className="text-fg-subtle mt-1">
             retail {formatCents(row.matched_retail_cents)}
           </div>
-        )}
-        {row.deal_score !== null && (
-          <DealBadge score={row.deal_score} />
         )}
       </div>
     </li>
@@ -1924,7 +1971,7 @@ function DealBadge({ score }: { score: number }) {
   }
   return (
     <div
-      className={`inline-flex flex-col items-end mt-1 px-1.5 py-0.5 rounded border ${cls}`}
+      className={`inline-flex flex-col items-end px-1.5 py-0.5 rounded border ${cls}`}
       title={`${score.toFixed(0)}% of registry retail (${label})`}
     >
       <span className="font-medium">{score.toFixed(0)}% of retail</span>
@@ -5140,9 +5187,6 @@ function ExcludeGroupsMenu({
   );
 }
 
-/** One sidebar facet: a vertical list of mutually exclusive options with a
- *  live result count per option (computed by the caller against every other
- *  active filter — "what would I see if I picked this?"). */
 /** Collapse/expand chevron for the filters sidebar toggle. */
 function PanelChevronIcon({ direction }: { direction: "left" | "right" }) {
   return (
@@ -5165,41 +5209,64 @@ function PanelChevronIcon({ direction }: { direction: "left" | "right" }) {
   );
 }
 
+/** One sidebar facet: a vertical checkbox list. Checked options OR together;
+ *  none checked = no filtering. Each option shows a live result count
+ *  (computed by the caller against every other active filter — "what would
+ *  I see if only this were checked?"). */
 function FacetList({
   label,
-  value,
+  selected,
   options,
-  onChange,
+  onToggle,
 }: {
   label: string;
-  value: string;
+  selected: Set<string>;
   options: { value: string; label: string; count: number }[];
-  onChange: (v: string) => void;
+  onToggle: (v: string) => void;
 }) {
   return (
-    <div>
+    <div title="Check any combination — no boxes checked shows everything">
       <div className="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
         {label}
       </div>
       <div className="space-y-0.5">
         {options.map((opt) => {
-          const active = value === opt.value;
+          const active = selected.has(opt.value);
           return (
             <button
               key={opt.value}
               type="button"
+              role="checkbox"
+              aria-checked={active}
               className={`w-full flex items-center gap-2 px-1 py-0.5 rounded text-left text-xs ${
                 active
                   ? "text-fg font-medium"
                   : "text-fg-muted hover:text-fg hover:bg-bg-elevated"
               }`}
-              onClick={() => onChange(opt.value)}
+              onClick={() => onToggle(opt.value)}
             >
               <span
-                className={`w-2.5 h-2.5 rounded-full border shrink-0 ${
+                className={`w-2.5 h-2.5 rounded-sm border shrink-0 grid place-items-center ${
                   active ? "border-accent bg-accent" : "border-border"
                 }`}
-              />
+              >
+                {active && (
+                  <svg
+                    viewBox="0 0 10 10"
+                    className="w-2 h-2 text-bg"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M1.5 5.5 4 8l4.5-6"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                )}
+              </span>
               <span className="truncate">{opt.label}</span>
               <span className="ml-auto text-fg-subtle tabular-nums">
                 {opt.count}
