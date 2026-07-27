@@ -13,3 +13,4 @@
     - e.g. `Action / Lionel + 1:24 + Elite + CWC + (Standard)`
 - Improve Saved Seller browsing
 - Year ranges for filters
+- Make error messages look nicer
