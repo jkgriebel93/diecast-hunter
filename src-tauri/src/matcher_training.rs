@@ -52,8 +52,11 @@ const AUTO_RETRAIN_NEW_ROWS: i64 = 25;
 /// needs at least this many supporting confirmed matches, and the scheme
 /// token must appear in at least this fraction of the matches whose titles
 /// carry the token.
-const ALIAS_MIN_SUPPORT: u32 = 3;
+const ALIAS_MIN_SUPPORT: u32 = 5;
 const ALIAS_MIN_RATIO: f64 = 0.8;
+/// Short tokens ("rfo", "din") are almost always fragments or codes, not
+/// seller vocabulary worth bridging.
+const ALIAS_MIN_TOKEN_LEN: usize = 4;
 
 /// Listing-title words too generic to ever become aliases.
 const ALIAS_STOPWORDS: &[&str] = &[
@@ -379,9 +382,7 @@ pub async fn maybe_retrain(pool: &SqlitePool, app: Option<&tauri::AppHandle>) {
         app,
         TrainingEvent {
             phase: "started".to_string(),
-            message: format!(
-                "Training the auto-match model on {count} recorded match verdicts…"
-            ),
+            message: format!("Training the auto-match model on {count} recorded match verdicts…"),
             activated: None,
         },
     );
@@ -692,7 +693,7 @@ pub async fn mine_aliases(pool: &SqlitePool) -> AppResult<u32> {
         let title_tokens: HashSet<String> = tokenize(title)
             .into_iter()
             .filter(|t| {
-                t.len() >= 3
+                t.len() >= ALIAS_MIN_TOKEN_LEN
                     && !t.chars().all(|c| c.is_ascii_digit())
                     && !registry_vocab.contains(t)
                     && !stop.contains(t.as_str())
@@ -1022,7 +1023,7 @@ mod tests {
         let pool = migrated_pool().await;
         // "budcar" is seller slang: in titles, never in registry vocabulary.
         // "diecast" is stopworded even though it also co-occurs.
-        for i in 0..3 {
+        for i in 0..5 {
             let entry = insert_entry(
                 &pool,
                 &format!("guid-{i}"),

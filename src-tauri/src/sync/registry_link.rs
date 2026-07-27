@@ -151,6 +151,13 @@ pub async fn link_listing_to_registry(
         .await;
     }
 
+    // 6. The confirmed entry is now the authority on this car's
+    //    attributes — copy them onto the listing (provenance-marked).
+    if let Err(e) = crate::sync::attribute_assoc::backfill_attrs_from_match(pool, listing_id).await
+    {
+        tracing::warn!("attr backfill after linking listing {listing_id} failed: {e}");
+    }
+
     Ok(LinkResult {
         registry_entry_id: entry_id,
         enriched,

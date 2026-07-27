@@ -22,6 +22,25 @@ async fn main() {
         .await
         .expect("open db");
 
+    // The copy may trail the working tree's schema.
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("migrations");
+
+    // With DRYRUN_BACKFILL set, run the attribute pipeline first — the
+    // wider-text auto-fill, then the copy-from-confirmed-match pass.
+    if std::env::var("DRYRUN_BACKFILL").is_ok() {
+        let s = diecast_hunter_lib::dev_attr_autofill(&pool)
+            .await
+            .expect("attr autofill");
+        println!("auto-fill: detected on {} of {}", s.detected, s.considered);
+        let n = diecast_hunter_lib::dev_attr_backfill(&pool)
+            .await
+            .expect("attr backfill");
+        println!("backfill from matches: {n} listings");
+    }
+
     let outcome = diecast_hunter_lib::dev_retrain(&pool)
         .await
         .expect("retrain");

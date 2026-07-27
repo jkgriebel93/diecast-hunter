@@ -1,0 +1,12 @@
+-- Provenance for listing attributes copied from a user-confirmed registry
+-- match (sync::attribute_assoc::backfill_attrs_from_match). A confirmed
+-- match establishes the truth about the physical car, so its oem / brand /
+-- make / finish / production_qty are copied onto the listing — but the
+-- matcher must not use those values when scoring the listing against this
+-- specific entry (the comparison would be tautological: the values came
+-- from it). Against every OTHER candidate entry they count fully, which is
+-- what turns past rejections into explainable training examples.
+-- NULL = attributes originate from the listing itself (auto-detected or
+-- user-entered). Cleared when the match is cleared/rejected or the user
+-- pins the attributes manually.
+ALTER TABLE listings ADD COLUMN attrs_from_entry_id INTEGER REFERENCES registry_entries(id);

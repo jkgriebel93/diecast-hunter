@@ -318,6 +318,10 @@ pub(crate) struct ListingAttrs {
     /// photo). Merges into the production-count signal, where it scores
     /// exactly like a run parsed from the title.
     pub(crate) production_count: Option<i64>,
+    /// When set, oem/brand/finish/make/production_count were copied from
+    /// this confirmed registry entry — real facts about the car, but
+    /// tautological when compared against that same entry.
+    pub(crate) attrs_from_entry_id: Option<i64>,
 }
 
 /// Everything the scorer reads from a listing row.
@@ -335,7 +339,8 @@ pub(crate) async fn load_listing_for_matching(
     listing_id: i64,
 ) -> AppResult<Option<ListingForMatching>> {
     Ok(sqlx::query_as(
-        "SELECT title, driver_id, raw_json, oem, brand, finish, make, production_count
+        "SELECT title, driver_id, raw_json, oem, brand, finish, make, production_count,
+                attrs_from_entry_id
          FROM listings WHERE id = ?",
     )
     .bind(listing_id)
@@ -690,6 +695,11 @@ pub(crate) struct ListingSignals {
     attr_brand: Option<String>,
     attr_finish: Option<String>,
     attr_make: Option<String>,
+    /// Production count carried by borrowed (match-copied) attributes;
+    /// kept out of `production_counts` so it can be suppressed per pair.
+    attr_production_count: Option<i64>,
+    /// Source entry of borrowed attributes — see [`ListingAttrs`].
+    attrs_from_entry_id: Option<i64>,
 }
 
 static SCALE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b1\s*[:/]\s*(18|24|32|64)\b").unwrap());
@@ -729,10 +739,17 @@ pub(crate) fn build_signals(
         attr_brand: attrs.brand.as_deref().and_then(norm_attr),
         attr_finish: attrs.finish.as_deref().and_then(norm_attr),
         attr_make: attrs.make.as_deref().and_then(norm_attr),
+        attrs_from_entry_id: attrs.attrs_from_entry_id,
         ..Default::default()
     };
     if let Some(pc) = attrs.production_count.filter(|v| *v > 0) {
-        sig.production_counts.insert(pc);
+        if attrs.attrs_from_entry_id.is_some() {
+            // Borrowed from a confirmed match — usable against every
+            // entry except the one it came from.
+            sig.attr_production_count = Some(pc);
+        } else {
+            sig.production_counts.insert(pc);
+        }
     }
     merge_text_signals(&mut sig, title);
     if let Some(raw) = raw_json {
@@ -876,12 +893,28 @@ pub(crate) fn extract_features(
         reasons.push("driver matches".to_string());
     }
 
-    // Production run — the strongest signal a listing can carry.
+    // Attributes copied from a confirmed match ("borrowed") are facts
+    // about the car, but they may only ever *contradict* a candidate,
+    // never endorse one: against their own source entry a match is a
+    // tautology, and against sibling entries (which often share OEM /
+    // brand / finish with the source) rewarding agreement teaches the
+    // trainer exactly backwards. Conflicts are real evidence either way.
+    // Attributes derived from the listing itself keep both directions.
+    let borrowed = sig.attrs_from_entry_id.is_some();
+    let borrowed_self = sig.attrs_from_entry_id == Some(c.id);
+    let attr_pc = if borrowed_self {
+        None
+    } else {
+        sig.attr_production_count
+    };
+
+    // Production run — the strongest signal a listing can carry. Borrowed
+    // counts follow the conflict-only rule above.
     if let Some(qty) = c.production_qty {
         if sig.production_counts.contains(&qty) {
             f.prod_count_match = 1.0;
             reasons.push(format!("production run of {qty} in listing"));
-        } else if !sig.production_counts.is_empty() {
+        } else if !sig.production_counts.is_empty() || attr_pc.is_some_and(|p| p != qty) {
             f.prod_count_conflict = 1.0;
             reasons.push("production count in listing differs".to_string());
         }
@@ -964,11 +997,19 @@ pub(crate) fn extract_features(
     }
 
     // Structured attribute columns - a conflict is only scored when both
-    // sides carry a value.
+    // sides carry a value; never any feature against the borrow source,
+    // and no match features from borrowed values (see above).
     let attr_cmp = |l: &Option<String>, r: &Option<String>| -> Option<bool> {
+        if borrowed_self {
+            return None;
+        }
         let l = l.as_deref()?;
         let r = r.as_deref().and_then(norm_attr)?;
-        Some(l == r)
+        let equal = l == r;
+        if equal && borrowed {
+            return None;
+        }
+        Some(equal)
     };
     match attr_cmp(&sig.attr_oem, &c.oem) {
         Some(true) => {
@@ -1229,6 +1270,45 @@ mod tests {
         let (f_with, _) = extract_features(&with, &c, true);
         let (f_without, _) = extract_features(&without, &c, true);
         assert!(f_with.scheme_overlap > f_without.scheme_overlap);
+    }
+
+    #[test]
+    fn borrowed_attrs_count_against_rivals_but_not_their_source() {
+        let source = Candidate {
+            finish: Some("Color Chrome".into()),
+            production_qty: Some(504),
+            ..full_cand(1, 2007, "1:24", "#24 Nicorette", Some(504))
+        };
+        let rival = Candidate {
+            finish: Some("(Standard)".into()),
+            ..full_cand(2, 2007, "1:24", "#24 Nicorette", Some(2508))
+        };
+        // Attributes copied from entry 1 (the confirmed match).
+        let attrs = ListingAttrs {
+            finish: Some("Color Chrome".into()),
+            production_count: Some(504),
+            attrs_from_entry_id: Some(1),
+            ..Default::default()
+        };
+        let sig = build_signals("Jeff Gordon Nicorette 1:24", None, &AliasMap::new(), &attrs);
+        let (f_src, _) = extract_features(&sig, &source, true);
+        assert_eq!(f_src.attr_finish_match, 0.0, "tautological pair suppressed");
+        assert_eq!(f_src.prod_count_match, 0.0);
+        let (f_rival, _) = extract_features(&sig, &rival, true);
+        assert_eq!(f_rival.attr_finish_conflict, 1.0);
+        assert_eq!(f_rival.prod_count_conflict, 1.0);
+
+        // A sibling sharing the borrowed finish gets no endorsement from
+        // it — borrowed values only ever contradict.
+        let twin = Candidate {
+            finish: Some("Color Chrome".into()),
+            production_qty: Some(504),
+            ..full_cand(3, 2007, "1:24", "#24 Nicorette", Some(504))
+        };
+        let (f_twin, _) = extract_features(&sig, &twin, true);
+        assert_eq!(f_twin.attr_finish_match, 0.0);
+        assert_eq!(f_twin.prod_count_match, 0.0);
+        assert_eq!(f_twin.prod_count_conflict, 0.0);
     }
 
     #[test]

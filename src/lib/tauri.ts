@@ -944,8 +944,12 @@ export interface ListingRow {
   make: string | null;
   is_race_win: boolean;
   is_autographed: boolean;
-  /** Production-run size, read off the listing's production-tag photo. */
+  /** Production-run size, read off the listing's production-tag photo
+   *  or copied from the confirmed match. */
   production_count: number | null;
+  /** True when the attributes were copied from the confirmed registry
+   *  match rather than derived from the listing itself. */
+  attrs_from_match: boolean;
   /** True when the user saved the attribute editor — auto-fill skips the
    *  row until "Reset to auto". */
   attributes_user_set: boolean;

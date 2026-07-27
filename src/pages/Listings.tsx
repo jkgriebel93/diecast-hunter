@@ -2285,15 +2285,25 @@ function AttributesSection({
         {hasAny && (
           <span
             className={`text-[10px] uppercase tracking-wide ${
-              row.attributes_user_set ? "text-accent" : "text-fg-faint"
+              row.attributes_user_set
+                ? "text-accent"
+                : row.attrs_from_match
+                  ? "text-sky-400"
+                  : "text-fg-faint"
             }`}
             title={
               row.attributes_user_set
                 ? "You saved these manually — auto-detection won't change them"
-                : "Detected automatically from the listing title"
+                : row.attrs_from_match
+                  ? "Copied from the confirmed registry match"
+                  : "Detected automatically from the listing text"
             }
           >
-            {row.attributes_user_set ? "manual" : "auto"}
+            {row.attributes_user_set
+              ? "manual"
+              : row.attrs_from_match
+                ? "from match"
+                : "auto"}
           </span>
         )}
         <button

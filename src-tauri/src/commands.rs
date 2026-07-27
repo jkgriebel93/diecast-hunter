@@ -605,8 +605,13 @@ pub struct ListingRow {
     pub is_race_win: bool,
     pub is_autographed: bool,
     /// Production-run size entered by the user from the listing's
-    /// production-tag photo (migration 0022). Manual-only.
+    /// production-tag photo (migration 0022), or copied from a confirmed
+    /// match by the attribute backfill.
     pub production_count: Option<i64>,
+    /// True when the attributes were copied from the confirmed registry
+    /// match (`attrs_from_entry_id` set) rather than derived from the
+    /// listing itself.
+    pub attrs_from_match: bool,
     /// True when the user saved the attribute editor — auto-detection
     /// leaves the row alone until `reset_listing_attributes`.
     pub attributes_user_set: bool,
@@ -658,6 +663,7 @@ struct ListingRowRaw {
     is_race_win: i64,
     is_autographed: i64,
     production_count: Option<i64>,
+    attrs_from_entry_id: Option<i64>,
     attributes_user_set: i64,
 }
 
@@ -691,7 +697,7 @@ pub async fn list_listings(state: State<'_, AppState>) -> AppResult<Vec<ListingR
                    FROM listing_group_members
                   WHERE listing_id = l.id) AS group_ids_csv,
                 l.oem, l.brand, l.finish, l.make, l.is_race_win, l.is_autographed,
-                l.production_count, l.attributes_user_set
+                l.production_count, l.attrs_from_entry_id, l.attributes_user_set
          FROM listings l
          JOIN sellers s ON s.id = l.seller_id
          LEFT JOIN listing_matches lm ON lm.listing_id = l.id
@@ -778,6 +784,7 @@ pub async fn list_listings(state: State<'_, AppState>) -> AppResult<Vec<ListingR
                 is_race_win: r.is_race_win != 0,
                 is_autographed: r.is_autographed != 0,
                 production_count: r.production_count,
+                attrs_from_match: r.attrs_from_entry_id.is_some(),
                 attributes_user_set: r.attributes_user_set != 0,
             }
         })
@@ -791,6 +798,11 @@ pub async fn clear_listing_match(state: State<'_, AppState>, listing_id: i64) ->
         .bind(listing_id)
         .execute(&state.db.pool)
         .await?;
+    // Attributes copied from the now-removed match lose their basis.
+    if let Err(e) = sync::attribute_assoc::clear_backfilled_attrs(&state.db.pool, listing_id).await
+    {
+        tracing::warn!("clearing backfilled attrs for listing {listing_id} failed: {e}");
+    }
     Ok(())
 }
 
@@ -848,6 +860,10 @@ pub async fn reject_listing_match(state: State<'_, AppState>, listing_id: i64) -
         )
         .await;
     }
+    if let Err(e) = sync::attribute_assoc::clear_backfilled_attrs(&state.db.pool, listing_id).await
+    {
+        tracing::warn!("clearing backfilled attrs for listing {listing_id} failed: {e}");
+    }
     Ok(())
 }
 
@@ -885,6 +901,11 @@ pub async fn confirm_listing_match(state: State<'_, AppState>, listing_id: i64) 
             "confirm_button",
         )
         .await;
+    }
+    if let Err(e) =
+        sync::attribute_assoc::backfill_attrs_from_match(&state.db.pool, listing_id).await
+    {
+        tracing::warn!("attr backfill after confirm of listing {listing_id} failed: {e}");
     }
     Ok(())
 }
@@ -1101,7 +1122,7 @@ pub async fn set_listing_attributes(
         "UPDATE listings
          SET oem = ?, brand = ?, finish = ?, make = ?,
              is_race_win = ?, is_autographed = ?, production_count = ?,
-             attributes_user_set = 1
+             attributes_user_set = 1, attrs_from_entry_id = NULL
          WHERE id = ?",
     )
     .bind(clean(oem))
@@ -1129,7 +1150,7 @@ pub async fn reset_listing_attributes(
         "UPDATE listings
          SET oem = NULL, brand = NULL, finish = NULL, make = NULL,
              is_race_win = 0, is_autographed = 0, production_count = NULL,
-             attributes_user_set = 0
+             attributes_user_set = 0, attrs_from_entry_id = NULL
          WHERE id = ?",
     )
     .bind(listing_id)

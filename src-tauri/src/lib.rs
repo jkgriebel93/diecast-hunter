@@ -17,6 +17,10 @@ mod wishlist;
 /// Dev-harness entry points (used by `examples/retrain_dryrun.rs`); not
 /// part of the app's command surface.
 pub use matcher_training::{retrain as dev_retrain, status as dev_matcher_status};
+pub use sync::attribute_assoc::{
+    associate_all_listing_attributes as dev_attr_autofill,
+    backfill_all_attrs_from_matches as dev_attr_backfill,
+};
 
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -100,6 +104,19 @@ pub fn run() {
                     }
                     Ok(_) => {}
                     Err(e) => tracing::warn!("attribute auto-fill backfill failed: {e}"),
+                }
+
+                // Copy authoritative attributes from confirmed matches
+                // onto their listings (provenance-marked; pinned rows
+                // skipped). Re-running refreshes values from re-enriched
+                // entries.
+                match sync::attribute_assoc::backfill_all_attrs_from_matches(&backfill_pool).await
+                {
+                    Ok(n) if n > 0 => {
+                        tracing::info!("attr-from-match backfill: {n} listings updated");
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!("attr-from-match backfill failed: {e}"),
                 }
 
                 // Auto-retrain the match scorer when enough new verdicts
