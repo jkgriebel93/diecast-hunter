@@ -9,7 +9,12 @@ import {
 } from "@/lib/tauri";
 import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
-import { setManyMinimized, useMinimized, useMinimizedSet } from "@/lib/minimized";
+import {
+  MinimizeToggle,
+  setManyMinimized,
+  useMinimized,
+  useMinimizedSet,
+} from "@/lib/minimized";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-24 h-24",
@@ -34,13 +39,38 @@ interface DriverGroupView {
   wholesale_total_cents: number;
 }
 
+/**
+ * Expand/Collapse-all for the flat (ungrouped) view. This component — not
+ * Collection() — subscribes to the shared minimized store: the store emits
+ * on every card toggle on every page, and pages stay mounted in hidden
+ * workspace tabs, so a page-level subscription would re-render the entire
+ * collection list (images and all) on each toggle anywhere in the app.
+ */
+function FlatExpandAllButton({ items }: { items: CollectionRow[] }) {
+  const minimizedSet = useMinimizedSet();
+  const allExpanded =
+    items.length > 0 &&
+    items.every((i) => !minimizedSet.has(`collection:${i.collection_id}`));
+  return (
+    <button
+      type="button"
+      className="text-xs text-fg-subtle hover:text-fg"
+      onClick={() =>
+        setManyMinimized(
+          items.map((i) => `collection:${i.collection_id}`),
+          allExpanded,
+        )
+      }
+    >
+      {allExpanded ? "Collapse all" : "Expand all"}
+    </button>
+  );
+}
+
 export function Collection() {
   const [items, setItems] = useState<CollectionRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number | string>>(new Set());
-  // Per-item minimize state lives in the shared, persisted store
-  // (keyed "collection:<collection_id>"); rows default to expanded.
-  const minimizedSet = useMinimizedSet();
   const [syncing, setSyncing] = useState(false);
   const [removingId, setRemovingId] = useState<number | null>(null);
   /** Neutral informational banner (e.g. "wasn't on DCR") — not an error. */
@@ -316,27 +346,18 @@ export function Collection() {
     });
   }
 
-  // Whether every entry in the active view is currently expanded — drives the
-  // Expand all / Collapse all button's label and action.
-  const allExpanded = groupByDriver
-    ? (groups?.length ?? 0) > 0 &&
-      (groups ?? []).every((g) => expanded.has(groupKey(g)))
-    : (flatItems?.length ?? 0) > 0 &&
-      (flatItems ?? []).every(
-        (i) => !minimizedSet.has(`collection:${i.collection_id}`),
-      );
+  // Whether every group section is currently expanded — drives the grouped
+  // view's Expand all / Collapse all button. The flat view's equivalent
+  // lives in FlatExpandAllButton, which owns the minimized-store
+  // subscription (see that component's comment).
+  const allGroupsExpanded =
+    (groups?.length ?? 0) > 0 &&
+    (groups ?? []).every((g) => expanded.has(groupKey(g)));
 
-  function toggleAll() {
-    if (groupByDriver) {
-      setExpanded(
-        allExpanded ? new Set() : new Set((groups ?? []).map(groupKey)),
-      );
-    } else {
-      setManyMinimized(
-        (flatItems ?? []).map((i) => `collection:${i.collection_id}`),
-        allExpanded,
-      );
-    }
+  function toggleAllGroups() {
+    setExpanded(
+      allGroupsExpanded ? new Set() : new Set((groups ?? []).map(groupKey)),
+    );
   }
 
   const totalItems = items?.length ?? 0;
@@ -525,13 +546,17 @@ export function Collection() {
       ) : (
         <div className="space-y-2">
           <div className="flex justify-between items-center">
-            <button
-              type="button"
-              className="text-xs text-fg-subtle hover:text-fg"
-              onClick={toggleAll}
-            >
-              {allExpanded ? "Collapse all" : "Expand all"}
-            </button>
+            {groupByDriver ? (
+              <button
+                type="button"
+                className="text-xs text-fg-subtle hover:text-fg"
+                onClick={toggleAllGroups}
+              >
+                {allGroupsExpanded ? "Collapse all" : "Expand all"}
+              </button>
+            ) : (
+              <FlatExpandAllButton items={flatItems ?? []} />
+            )}
             <ImageSizeToggle size={imgSize} onChange={setImgSize} />
           </div>
           {groupByDriver ? (
@@ -658,10 +683,17 @@ function CollectionItemRow({
 
   return (
     <li className={`${isCollapsed ? "px-4 py-2" : "p-4"} flex gap-4`}>
+      <MinimizeToggle
+        minimized={isCollapsed}
+        onToggle={onToggle}
+        className="self-start -mt-0.5"
+      />
       {!isCollapsed && item.image_url && (
         <img
           src={resolveImage(item.image_url)}
           alt=""
+          loading="lazy"
+          decoding="async"
           className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
         />
       )}
@@ -673,13 +705,6 @@ function CollectionItemRow({
           title={isCollapsed ? "Expand" : "Minimize"}
           aria-expanded={!isCollapsed}
         >
-          <span
-            className={`inline-block mt-0.5 text-xs transition-transform ${
-              isCollapsed ? "" : "rotate-90"
-            }`}
-          >
-            ▶
-          </span>
           <div className="min-w-0">
             {driverLine}
             {title}

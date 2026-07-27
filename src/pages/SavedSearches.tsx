@@ -11,6 +11,7 @@ import {
 } from "@/lib/tauri";
 import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
+import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-12 h-12",
@@ -355,18 +356,23 @@ function ResultRow({
     item.price_cents !== null
       ? item.price_cents + (item.shipping_cents ?? 0)
       : null;
+  const [minimized, toggleMinimized] = useMinimized(
+    `ebay-item:${item.item_id}`,
+  );
   return (
     <li className="py-2 flex items-center gap-3">
-      {item.image_url ? (
-        <img
-          src={item.image_url}
-          alt=""
-          loading="lazy"
-          className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
-        />
-      ) : (
-        <div className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`} />
-      )}
+      <MinimizeToggle minimized={minimized} onToggle={toggleMinimized} />
+      {!minimized &&
+        (item.image_url ? (
+          <img
+            src={item.image_url}
+            alt=""
+            loading="lazy"
+            className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
+          />
+        ) : (
+          <div className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`} />
+        ))}
       <div className="flex-1 min-w-0">
         <a
           href={item.web_url}
@@ -378,15 +384,18 @@ function ResultRow({
         >
           {item.title}
         </a>
-        <div className="text-xs text-fg-subtle truncate">
-          {[item.condition, item.listing_type, item.seller_username]
-            .filter(Boolean)
-            .join(" · ")}
-        </div>
+        {!minimized && (
+          <div className="text-xs text-fg-subtle truncate">
+            {[item.condition, item.listing_type, item.seller_username]
+              .filter(Boolean)
+              .join(" · ")}
+          </div>
+        )}
       </div>
       <div className="text-right text-xs tabular-nums shrink-0">
         <div className="text-sm">{formatCents(item.price_cents)}</div>
-        {total !== null &&
+        {!minimized &&
+          total !== null &&
           item.shipping_cents !== null &&
           item.shipping_cents > 0 && (
             <div className="text-fg-subtle">total {formatCents(total)}</div>

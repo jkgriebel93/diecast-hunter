@@ -649,6 +649,11 @@ function WishlistCard({
             <ToLineIcon direction="down" />
           </button>
         </div>
+        <MinimizeToggle
+          minimized={minimized}
+          onToggle={toggleMinimized}
+          className="-mt-0.5"
+        />
         {!minimized &&
           (entry.image_url ? (
             <img
@@ -668,11 +673,6 @@ function WishlistCard({
           ))}
         <div className="flex-1 min-w-0">
           <div className="flex items-start gap-2">
-            <MinimizeToggle
-              minimized={minimized}
-              onToggle={toggleMinimized}
-              className="mt-0.5"
-            />
             <div className="min-w-0 flex-1">
               <div className="text-sm font-medium truncate">
                 {entry.driver_name ?? "(unknown driver)"}

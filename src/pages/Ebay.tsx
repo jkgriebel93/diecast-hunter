@@ -11,6 +11,7 @@ import {
 } from "@/lib/tauri";
 import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
+import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-12 h-12",
@@ -301,17 +302,24 @@ function ListingPreview({
     row.price_cents !== null
       ? row.price_cents + (row.shipping_cents ?? 0)
       : null;
+  const [minimized, toggleMinimized] = useMinimized(
+    `listing:${row.listing_id}`,
+  );
   return (
     <li className="px-4 py-2 flex items-center gap-3">
-      {row.image_url ? (
-        <img
-          src={row.image_url}
-          alt=""
-          className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
-        />
-      ) : (
-        <div className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`} />
-      )}
+      <MinimizeToggle minimized={minimized} onToggle={toggleMinimized} />
+      {!minimized &&
+        (row.image_url ? (
+          <img
+            src={row.image_url}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
+          />
+        ) : (
+          <div className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`} />
+        ))}
       <div className="flex-1 min-w-0">
         <a
           href={row.url}
@@ -323,19 +331,21 @@ function ListingPreview({
         >
           {row.title}
         </a>
-        <div className="text-xs text-fg-subtle truncate">
-          {row.matched_driver_name ?? "(unmatched)"}
-          {row.end_time && row.status === "active" && (
-            <span>
-              {" · ends "}
-              {new Date(row.end_time * 1000).toLocaleString()}
-            </span>
-          )}
-        </div>
+        {!minimized && (
+          <div className="text-xs text-fg-subtle truncate">
+            {row.matched_driver_name ?? "(unmatched)"}
+            {row.end_time && row.status === "active" && (
+              <span>
+                {" · ends "}
+                {new Date(row.end_time * 1000).toLocaleString()}
+              </span>
+            )}
+          </div>
+        )}
       </div>
       <div className="text-right text-xs tabular-nums shrink-0">
         <div className="text-sm text-fg">{formatCents(total)}</div>
-        {row.deal_score !== null && (
+        {!minimized && row.deal_score !== null && (
           <div className="text-fg-subtle">
             {row.deal_score.toFixed(0)}% of retail
           </div>

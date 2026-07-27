@@ -477,6 +477,11 @@ function SearchCard({
   return (
     <li className={`card flex flex-col gap-2 ${minimized ? "!py-2" : ""}`}>
       <div className="flex gap-3">
+        <MinimizeToggle
+          minimized={minimized}
+          onToggle={toggleMinimized}
+          className="self-start -mt-0.5"
+        />
         {!minimized &&
           (item.image_url ? (
             <img
@@ -488,11 +493,6 @@ function SearchCard({
           ) : (
             <div className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`} />
           ))}
-        <MinimizeToggle
-          minimized={minimized}
-          onToggle={toggleMinimized}
-          className="mt-0.5"
-        />
         <div className="min-w-0 flex-1">
           <div
             className={`text-sm font-medium ${minimized ? "truncate" : "line-clamp-2"}`}

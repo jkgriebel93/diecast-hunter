@@ -1610,16 +1610,22 @@ function ListingCard({
           />
         </label>
       )}
+      <MinimizeToggle
+        minimized={minimized}
+        onToggle={toggleMinimized}
+        className="self-start -mt-0.5"
+      />
       {!minimized && row.image_url && (
         <img
           src={row.image_url}
           alt=""
+          loading="lazy"
+          decoding="async"
           className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
         />
       )}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <MinimizeToggle minimized={minimized} onToggle={toggleMinimized} />
           <div className="text-sm font-medium truncate flex-1 min-w-0">
             {row.title}
           </div>

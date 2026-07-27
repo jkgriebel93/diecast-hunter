@@ -702,6 +702,11 @@ function RegistryResultCard({
     <li
       className={`card flex items-start gap-4 ${minimized ? "!py-2" : ""}`}
     >
+      <MinimizeToggle
+        minimized={minimized}
+        onToggle={toggleMinimized}
+        className="-mt-0.5"
+      />
       {!minimized &&
         (r.image_url ? (
           <img
@@ -721,11 +726,6 @@ function RegistryResultCard({
         ))}
       <div className="flex-1 min-w-0">
         <div className="flex items-start gap-2">
-          <MinimizeToggle
-            minimized={minimized}
-            onToggle={toggleMinimized}
-            className="mt-0.5"
-          />
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium truncate">
               {r.driver_name}

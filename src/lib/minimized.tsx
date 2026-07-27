@@ -83,7 +83,13 @@ export function useMinimizedSet(): ReadonlySet<string> {
   return useSyncExternalStore(subscribe, () => minimized);
 }
 
-/** Rotating-chevron button matching the app's existing collapse idiom. */
+/**
+ * Rotating-chevron button matching the app's existing collapse idiom.
+ * Renders a fixed 24×24 hit target (the glyph alone is ~10px — too easy to
+ * miss) with hover feedback, so every card offers the same click area.
+ * Callers only add alignment classes (e.g. `self-start -mt-0.5` in
+ * top-aligned cards); size stays uniform.
+ */
 export function MinimizeToggle({
   minimized,
   onToggle,
@@ -96,7 +102,7 @@ export function MinimizeToggle({
   return (
     <button
       type="button"
-      className={`shrink-0 text-xs text-fg-subtle hover:text-fg leading-none ${className}`}
+      className={`shrink-0 w-6 h-6 flex items-center justify-center rounded text-xs leading-none text-fg-subtle hover:text-fg hover:bg-bg-elevated ${className}`}
       onClick={onToggle}
       title={minimized ? "Expand" : "Minimize"}
       aria-expanded={!minimized}
