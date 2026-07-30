@@ -2954,10 +2954,13 @@ function GroupChipRow({
     const ids = new Set(row.group_ids);
     return groups.filter((g) => ids.has(g.id));
   }, [row.group_ids, groups]);
-  const available = useMemo(() => {
-    const ids = new Set(row.group_ids);
-    return groups.filter((g) => !ids.has(g.id) && !g.archived);
-  }, [row.group_ids, groups]);
+  const memberIds = useMemo(() => new Set(row.group_ids), [row.group_ids]);
+  // The picker lists members too (with a check) rather than removing them, so
+  // rows don't reshuffle under the cursor while multi-adding.
+  const available = useMemo(
+    () => groups.filter((g) => !g.archived),
+    [groups],
+  );
   const filteredAvailable = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return available;
@@ -3004,59 +3007,35 @@ function GroupChipRow({
   const total =
     row.price_cents !== null ? row.price_cents + (row.shipping_cents ?? 0) : null;
 
-  const renderOption = (g: ListingGroup) => (
-    <button
-      key={g.id}
-      type="button"
-      className="block w-full text-left px-2 py-1 text-xs hover:bg-bg"
-      onClick={() => {
-        setPickerOpen(false);
-        onAddToGroup(g.id);
-      }}
-    >
-      {g.name}
-      {g.member_count > 0 && (
-        <span className="text-fg-subtle ml-1">({g.member_count})</span>
-      )}
-    </button>
-  );
+  const renderOption = (g: ListingGroup) => {
+    const isMember = memberIds.has(g.id);
+    return (
+      <button
+        key={g.id}
+        type="button"
+        className="flex w-full items-center text-left px-2 py-1 text-xs hover:bg-bg"
+        // Deliberately keeps the picker open so several groups can be added in
+        // one sitting; the click-away catcher is the way out.
+        onClick={() =>
+          isMember ? onRemoveFromGroup(g.id) : onAddToGroup(g.id)
+        }
+        title={isMember ? "Remove from this group" : "Add to this group"}
+      >
+        <span className="w-4 shrink-0 text-accent">{isMember ? "✓" : ""}</span>
+        <span className={isMember ? "" : "text-fg-muted"}>
+          {g.name}
+          {g.member_count > 0 && (
+            <span className="text-fg-subtle ml-1">({g.member_count})</span>
+          )}
+        </span>
+      </button>
+    );
+  };
 
   return (
     <div className="mt-1 flex flex-wrap items-center gap-1">
-      {memberOf.map((g) => {
-        const overTarget =
-          g.target_price_cents !== null &&
-          total !== null &&
-          total > g.target_price_cents;
-        return (
-          <span
-            key={g.id}
-            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] ${
-              overTarget
-                ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
-                : "border-border bg-bg-elevated text-fg-muted"
-            }`}
-            title={
-              g.target_price_cents !== null
-                ? `target ≤ ${formatCents(g.target_price_cents)}${overTarget ? " — this listing is over target" : ""}`
-                : "in this group"
-            }
-          >
-            {g.name}
-            <button
-              type="button"
-              className="text-fg-subtle hover:text-red-300 leading-none"
-              onClick={(e) => {
-                e.stopPropagation();
-                onRemoveFromGroup(g.id);
-              }}
-              title="Remove from this group"
-            >
-              ×
-            </button>
-          </span>
-        );
-      })}
+      {/* The button leads the row so the popover anchored to it doesn't move
+          as chips get added after it. */}
       <div className="relative">
         <button
           type="button"
@@ -3124,6 +3103,40 @@ function GroupChipRow({
           </>
         )}
       </div>
+      {memberOf.map((g) => {
+        const overTarget =
+          g.target_price_cents !== null &&
+          total !== null &&
+          total > g.target_price_cents;
+        return (
+          <span
+            key={g.id}
+            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] ${
+              overTarget
+                ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                : "border-border bg-bg-elevated text-fg-muted"
+            }`}
+            title={
+              g.target_price_cents !== null
+                ? `target ≤ ${formatCents(g.target_price_cents)}${overTarget ? " — this listing is over target" : ""}`
+                : "in this group"
+            }
+          >
+            {g.name}
+            <button
+              type="button"
+              className="text-fg-subtle hover:text-red-300 leading-none"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemoveFromGroup(g.id);
+              }}
+              title="Remove from this group"
+            >
+              ×
+            </button>
+          </span>
+        );
+      })}
     </div>
   );
 }

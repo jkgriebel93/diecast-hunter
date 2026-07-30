@@ -544,15 +544,42 @@ fn sample_weights(examples: &[&Example]) -> Vec<f64> {
         .collect()
 }
 
-/// Full-batch gradient descent, zero-initialized (deterministic), L2 on
-/// weights but not bias. Returns (weights, bias).
+/// The hand-tuned weights are in "points" (50 ≈ the decision threshold);
+/// dividing by this maps them into logit units comparable to what the
+/// regression learns (observed data-rich weights land at roughly
+/// default/4–default/6).
+const PRIOR_SCALE: f64 = 5.0;
+/// Pull strength toward the prior. Strong enough that a feature with no
+/// evidence converges to its prior within the epoch budget, weak enough
+/// that real gradient signal dominates wherever data exists.
+const L2_TO_PRIOR: f64 = 0.005;
+
+/// Full-batch gradient descent, deterministic, with two pieces of domain
+/// knowledge baked in:
+///
+/// - **Priors instead of zero**: weights start at (and are regularized
+///   toward) the hand-tuned defaults scaled into logit units. A feature
+///   the data says nothing about keeps its sensible built-in value — an
+///   OEM conflict stays a real penalty even before the user has ever
+///   judged a cross-OEM pair — instead of decaying to "irrelevant".
+/// - **Sign constraints**: match features can never learn a negative
+///   weight, conflict features never a positive one. Sampling artifacts
+///   (e.g. attribute agreement showing up mostly on rejected pairs) can
+///   push a weight to zero but not through it into a perverse direction.
+///
+/// L2 is applied to weights (toward the prior), not bias. Returns
+/// (weights, bias).
 fn fit(examples: &[&Example]) -> (Vec<f64>, f64) {
     let dims = FEATURE_NAMES.len();
     let sw = sample_weights(examples);
-    let mut w = vec![0.0; dims];
+    let priors: Vec<f64> = MatchWeights::default()
+        .to_vec()
+        .iter()
+        .map(|d| d / PRIOR_SCALE)
+        .collect();
+    let mut w = priors.clone();
     let mut b = 0.0;
     let lr = 0.5;
-    let l2 = 0.001;
     let n = examples.len() as f64;
     for _ in 0..2000 {
         let mut gw = vec![0.0; dims];
@@ -565,8 +592,15 @@ fn fit(examples: &[&Example]) -> (Vec<f64>, f64) {
             }
             gb += err;
         }
-        for (wi, gi) in w.iter_mut().zip(&gw) {
-            *wi -= lr * (gi / n + l2 * *wi);
+        for i in 0..dims {
+            w[i] -= lr * (gw[i] / n + L2_TO_PRIOR * (w[i] - priors[i]));
+            // Sign constraint: never cross zero against the feature's
+            // known direction (the prior's sign).
+            if priors[i] >= 0.0 {
+                w[i] = w[i].max(0.0);
+            } else {
+                w[i] = w[i].min(0.0);
+            }
         }
         b -= lr * gb / n;
     }
@@ -813,6 +847,44 @@ mod tests {
         assert!(pos > 0.9, "positive pattern scored {pos}");
         assert!(neg < 0.1, "negative pattern scored {neg}");
         assert!(w[1] > 0.0 && w[2] < 0.0);
+    }
+
+    #[test]
+    fn match_features_cannot_learn_negative_weights() {
+        // Rig a match-type feature (index 1 = prod_count_match, prior +6)
+        // to appear only on negatives — the sampling artifact that
+        // produced a perverse negative OEM-match weight on real data. The
+        // constraint must clamp it at zero, not let it go negative.
+        let mut examples = Vec::new();
+        for i in 0..30 {
+            examples.push(ex(padded(&[1.0]), 1.0, i));
+            examples.push(ex(padded(&[1.0, 1.0]), 0.0, i + 100));
+        }
+        let (w, _) = fit(&examples.iter().collect::<Vec<_>>());
+        assert!(w[1] >= 0.0, "match weight went perverse: {}", w[1]);
+        assert!(w[1] < 0.5, "should be clamped near zero, got {}", w[1]);
+    }
+
+    #[test]
+    fn unobserved_features_keep_their_prior() {
+        // No example ever exercises attr_oem_conflict; its weight must
+        // stay at the scaled default instead of decaying toward zero.
+        let mut examples = Vec::new();
+        for i in 0..30 {
+            examples.push(ex(padded(&[1.0, 1.0]), 1.0, i));
+            examples.push(ex(padded(&[1.0, 0.0, 1.0]), 0.0, i + 100));
+        }
+        let (w, _) = fit(&examples.iter().collect::<Vec<_>>());
+        let idx = FEATURE_NAMES
+            .iter()
+            .position(|n| *n == "attr_oem_conflict")
+            .unwrap();
+        let prior = MatchWeights::default().to_vec()[idx] / PRIOR_SCALE;
+        assert!(
+            (w[idx] - prior).abs() < 0.05,
+            "expected ~{prior}, got {}",
+            w[idx]
+        );
     }
 
     #[test]
