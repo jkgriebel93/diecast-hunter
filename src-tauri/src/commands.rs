@@ -1160,6 +1160,93 @@ pub async fn reset_listing_attributes(
     Ok(())
 }
 
+// ----- Listing receiver (browser-extension backend) -----
+
+#[derive(Serialize)]
+pub struct ListingReceiverStatus {
+    pub url: String,
+    pub port: u16,
+    pub has_secret: bool,
+}
+
+#[tauri::command]
+pub async fn get_listing_receiver_status(
+    state: State<'_, AppState>,
+) -> AppResult<ListingReceiverStatus> {
+    let port = crate::listing_receiver::configured_port(&state.db.pool).await?;
+    let has_secret = settings::secret_get(settings::ENTRY_LISTING_RECEIVER_SECRET)?.is_some();
+    Ok(ListingReceiverStatus {
+        url: format!("http://localhost:{port}"),
+        port,
+        has_secret,
+    })
+}
+
+#[tauri::command]
+pub fn get_listing_receiver_secret() -> AppResult<String> {
+    crate::listing_receiver::ensure_secret()
+}
+
+#[tauri::command]
+pub fn regenerate_listing_receiver_secret() -> AppResult<String> {
+    crate::listing_receiver::regenerate_secret()
+}
+
+// ----- Background mode (tray + autostart) -----
+
+#[derive(Serialize)]
+pub struct BackgroundSettings {
+    pub run_in_background: bool,
+    pub autostart: bool,
+}
+
+#[tauri::command]
+pub async fn get_background_settings(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<BackgroundSettings> {
+    use tauri_plugin_autostart::ManagerExt;
+    Ok(BackgroundSettings {
+        run_in_background: state.run_in_background.load(Ordering::Relaxed),
+        autostart: app.autolaunch().is_enabled().unwrap_or(false),
+    })
+}
+
+#[tauri::command]
+pub async fn set_background_settings(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    run_in_background: bool,
+    autostart: bool,
+) -> AppResult<()> {
+    use tauri_plugin_autostart::ManagerExt;
+    settings::set(
+        &state.db.pool,
+        settings::KEY_RUN_IN_BACKGROUND,
+        if run_in_background { "true" } else { "false" },
+    )
+    .await?;
+    state
+        .run_in_background
+        .store(run_in_background, Ordering::Relaxed);
+    let autolaunch = app.autolaunch();
+    let result = if autostart {
+        autolaunch.enable()
+    } else {
+        autolaunch.disable()
+    };
+    if let Err(e) = result {
+        // disable() can fail when autostart was never registered — only
+        // surface failures to actually enable it.
+        if autostart {
+            return Err(AppError::Config(format!(
+                "couldn't register start-at-login: {e}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 // ----- eBay listing filter -----
 
 #[tauri::command]

@@ -40,7 +40,17 @@ pub const KEY_MATCH_TRAIN_ATTEMPT: &str = "matcher.last_train_attempt_rows";
 /// page as "Last training run".
 pub const KEY_MATCH_TRAIN_LAST_AT: &str = "matcher.last_train_at";
 
+/// Keep the app (and its embedded listing receiver) running in the
+/// background when the window is closed — the tray icon reopens it.
+pub const KEY_RUN_IN_BACKGROUND: &str = "app.run_in_background";
+
+pub const KEY_LISTING_RECEIVER_PORT: &str = "listing_receiver.port";
+/// Default localhost port the embedded listing-receiver binds to. Picked at
+/// random in the user-port range; configurable via settings if it conflicts.
+pub const DEFAULT_LISTING_RECEIVER_PORT: u16 = 17381;
+
 pub const ENTRY_DCR_PASSWORD: &str = "diecastregistry.password";
+pub const ENTRY_LISTING_RECEIVER_SECRET: &str = "listing_receiver.shared_secret";
 pub const ENTRY_EBAY_OAUTH: &str = "ebay.oauth_token";
 pub const ENTRY_EBAY_APP_ID: &str = "ebay.app_id";
 pub const ENTRY_EBAY_CERT_ID: &str = "ebay.cert_id";

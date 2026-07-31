@@ -177,6 +177,16 @@ export const api = {
   autoMatchAllListings: () =>
     invoke<AutoMatchSummary>("auto_match_all_listings"),
   retrainMatcher: () => invoke<TrainOutcome>("retrain_matcher"),
+  getListingReceiverStatus: () =>
+    invoke<ListingReceiverStatus>("get_listing_receiver_status"),
+  getListingReceiverSecret: () =>
+    invoke<string>("get_listing_receiver_secret"),
+  regenerateListingReceiverSecret: () =>
+    invoke<string>("regenerate_listing_receiver_secret"),
+  getBackgroundSettings: () =>
+    invoke<BackgroundSettings>("get_background_settings"),
+  setBackgroundSettings: (runInBackground: boolean, autostart: boolean) =>
+    invoke<void>("set_background_settings", { runInBackground, autostart }),
   matcherStatus: () => invoke<MatcherStatus>("matcher_status"),
   resetMatcherModel: () => invoke<void>("reset_matcher_model"),
   listDrivers: () => invoke<DriverOption[]>("list_drivers"),
@@ -713,6 +723,19 @@ export interface AutoMatchSummary {
   no_candidates: number;
   below_threshold: number;
   prewarmed_drivers: number;
+}
+
+export interface ListingReceiverStatus {
+  url: string;
+  port: number;
+  has_secret: boolean;
+}
+
+export interface BackgroundSettings {
+  /** Closing the window hides to the tray instead of exiting. */
+  run_in_background: boolean;
+  /** Launch at login (minimized when combined with the above). */
+  autostart: boolean;
 }
 
 export interface TrainOutcome {

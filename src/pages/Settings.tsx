@@ -5,12 +5,14 @@ import {
   driverListingCounts,
   sortDriverOptions,
   type AutoSyncSettings,
+  type BackgroundSettings,
   type CredentialState,
   type DetailUrlBackfillSummary,
   type EbayCredentialsState,
   type EbayOauthStatus,
   type EnrichSummary,
   type FormOptionRow,
+  type ListingReceiverStatus,
   type MatcherStatus,
   type PrewarmedDriver,
   type PrewarmSummary,
@@ -1328,11 +1330,183 @@ export function Settings() {
 
       <MatcherLearningSection />
 
+      <ExtensionSection />
+
       {message && (
         <div className="text-sm text-emerald-400">{message}</div>
       )}
       {error && <div className="text-sm text-red-400">{error}</div>}
     </div>
+  );
+}
+
+/** Browser extension + background mode: the embedded localhost receiver's
+ *  endpoint/secret for the eBay extension, and the tray/autostart toggles
+ *  that keep it available while the window is closed. */
+function ExtensionSection() {
+  const [status, setStatus] = useState<ListingReceiverStatus | null>(null);
+  const [bg, setBg] = useState<BackgroundSettings | null>(null);
+  const [secret, setSecret] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    try {
+      setStatus(await api.getListingReceiverStatus());
+      setBg(await api.getBackgroundSettings());
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const onToggle = async (patch: Partial<BackgroundSettings>) => {
+    if (!bg) return;
+    const next = { ...bg, ...patch };
+    setBg(next);
+    setError(null);
+    try {
+      await api.setBackgroundSettings(next.run_in_background, next.autostart);
+    } catch (e) {
+      setError(String(e));
+      void load();
+    }
+  };
+
+  const onReveal = async () => {
+    setError(null);
+    try {
+      setSecret(await api.getListingReceiverSecret());
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const onCopy = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setMessage(`${label} copied.`);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const onRegenerate = async () => {
+    if (
+      !window.confirm(
+        "Regenerate the shared secret? The browser extension will stop " +
+          "working until you paste the new secret into its options page.",
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    try {
+      setSecret(await api.regenerateListingReceiverSecret());
+      setMessage("Secret regenerated — update the extension's options.");
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  return (
+    <section className="card space-y-4">
+      <div>
+        <h3 className="text-base font-medium">
+          Browser extension &amp; background
+        </h3>
+        <p className="text-xs text-fg-subtle mt-1">
+          The eBay browser extension talks to a local server inside this app
+          to show registry matches and valuations while you browse. Copy the
+          endpoint and secret into the extension&apos;s options page. The
+          toggles below keep that server available when the window is
+          closed.
+        </p>
+      </div>
+
+      {status && (
+        <div className="text-sm space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="text-fg-subtle">Endpoint:</span>
+            <code className="text-xs bg-bg-elevated border border-border rounded px-1.5 py-0.5">
+              {status.url}
+            </code>
+            <button
+              className="text-xs text-accent hover:underline"
+              type="button"
+              onClick={() => onCopy(status.url, "Endpoint")}
+            >
+              Copy
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-fg-subtle">Shared secret:</span>
+            {secret ? (
+              <>
+                <code className="text-xs bg-bg-elevated border border-border rounded px-1.5 py-0.5">
+                  {secret}
+                </code>
+                <button
+                  className="text-xs text-accent hover:underline"
+                  type="button"
+                  onClick={() => onCopy(secret, "Secret")}
+                >
+                  Copy
+                </button>
+              </>
+            ) : (
+              <button
+                className="text-xs text-accent hover:underline"
+                type="button"
+                onClick={onReveal}
+              >
+                Reveal
+              </button>
+            )}
+            <button
+              className="text-xs text-fg-subtle hover:text-fg"
+              type="button"
+              onClick={onRegenerate}
+            >
+              Regenerate
+            </button>
+          </div>
+        </div>
+      )}
+
+      {bg && (
+        <div className="space-y-2 text-sm">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              className="w-4 h-4 accent-accent"
+              checked={bg.run_in_background}
+              onChange={(e) =>
+                onToggle({ run_in_background: e.target.checked })
+              }
+            />
+            Keep running in the background when the window is closed (tray
+            icon reopens it)
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              className="w-4 h-4 accent-accent"
+              checked={bg.autostart}
+              onChange={(e) => onToggle({ autostart: e.target.checked })}
+            />
+            Start Diecast Hunter at login
+          </label>
+        </div>
+      )}
+
+      {message && <div className="text-xs text-emerald-400">{message}</div>}
+      {error && <div className="text-xs text-red-400">{error}</div>}
+    </section>
   );
 }
 

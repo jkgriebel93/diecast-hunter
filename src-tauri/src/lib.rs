@@ -5,6 +5,7 @@ mod ebay;
 mod error;
 mod export;
 mod listing_groups;
+mod listing_receiver;
 mod match_feedback;
 mod matcher_training;
 mod progress;
@@ -37,6 +38,18 @@ pub struct AppState {
     /// Cached logged-in diecastregistry.com session, reused across registry
     /// searches so each one doesn't pay the login round trips.
     pub dcr_session: dcr::DcrSession,
+    /// Mirror of settings::KEY_RUN_IN_BACKGROUND, cached so the
+    /// close-requested handler can read it synchronously. When true,
+    /// closing the window hides to the tray instead of exiting.
+    pub run_in_background: AtomicBool,
+}
+
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -46,19 +59,76 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let state = window.app_handle().state::<AppState>();
+                if state
+                    .run_in_background
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .setup(|app| {
             let handle = app.handle().clone();
             let pool = tauri::async_runtime::block_on(async move {
                 let data_dir = db::default_data_dir()?;
                 let database = db::Db::open(&data_dir).await?;
                 let pool = database.pool.clone();
+                let run_in_background =
+                    settings::get(&pool, settings::KEY_RUN_IN_BACKGROUND).await?.as_deref()
+                        == Some("true");
                 handle.manage(AppState {
                     db: database,
                     active_op_cancel: Mutex::new(None),
                     dcr_session: dcr::DcrSession::new(),
+                    run_in_background: AtomicBool::new(run_in_background),
                 });
                 Ok::<_, error::AppError>(pool)
             })?;
+
+            // Embedded listing receiver for the browser extension. Failures
+            // are non-fatal — the rest of the app works without it.
+            let receiver_pool = pool.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = listing_receiver::run(receiver_pool).await {
+                    tracing::error!("listing receiver: {e}");
+                }
+            });
+
+            // System tray, so background mode has a way back to the window
+            // (and an explicit Quit that bypasses hide-on-close).
+            {
+                use tauri::menu::{Menu, MenuItem};
+                use tauri::tray::TrayIconBuilder;
+                let show =
+                    MenuItem::with_id(app, "show", "Open Diecast Hunter", true, None::<&str>)?;
+                let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&show, &quit])?;
+                let mut tray = TrayIconBuilder::with_id("main")
+                    .menu(&menu)
+                    .tooltip("Diecast Hunter")
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "show" => show_main_window(app),
+                        "quit" => app.exit(0),
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let tauri::tray::TrayIconEvent::DoubleClick { .. } = event {
+                            show_main_window(tray.app_handle());
+                        }
+                    });
+                if let Some(icon) = app.default_window_icon() {
+                    tray = tray.icon(icon.clone());
+                }
+                tray.build(app)?;
+            }
 
             // One-shot driver auto-association backfill: any listing whose
             // driver_id is still NULL (legacy rows from before this feature,
@@ -169,6 +239,11 @@ pub fn run() {
             commands::retrain_matcher,
             commands::matcher_status,
             commands::reset_matcher_model,
+            commands::get_listing_receiver_status,
+            commands::get_listing_receiver_secret,
+            commands::regenerate_listing_receiver_secret,
+            commands::get_background_settings,
+            commands::set_background_settings,
             commands::list_drivers,
             commands::set_listing_driver,
             commands::clear_listing_driver,

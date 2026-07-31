@@ -39,3 +39,6 @@ yarn-error.log*
 # Tauri build artifacts that aren't checked in
 src-tauri/gen/
 .claude/
+
+# packaged browser extension (built by pnpm ext:package)
+extension/diecast-hunter-ebay.zip

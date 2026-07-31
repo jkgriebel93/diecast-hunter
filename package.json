@@ -12,7 +12,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "ext:package": "powershell -NoProfile -Command \"Compress-Archive -Force -Path extension/manifest.json,extension/background.js,extension/content.js,extension/options.html,extension/options.js,extension/options.css,extension/icons -DestinationPath extension/diecast-hunter-ebay.zip\""
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",

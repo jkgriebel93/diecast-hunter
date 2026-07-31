@@ -516,6 +516,138 @@ pub async fn auto_match_all(
     Ok(summary)
 }
 
+/// Non-persisting match preview for a listing the app has never saved —
+/// backs the browser extension's `/match/preview` endpoint. Same driver
+/// detection, signals, and scorer as the real auto-match path, but nothing
+/// is written and only the title is available (no stored payload or
+/// attribute columns).
+#[derive(Debug, Serialize)]
+pub struct MatchPreview {
+    pub driver_name: Option<String>,
+    /// True when the top candidate clears `MIN_CONFIDENCE`. The entry is
+    /// still returned below the threshold so the panel can show a
+    /// "best guess" state.
+    pub matched: bool,
+    pub confidence: Option<f64>,
+    pub reasons: Vec<String>,
+    pub entry: Option<PreviewEntry>,
+    pub skipped_reason: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PreviewEntry {
+    pub registry_entry_id: i64,
+    pub scheme_text: Option<String>,
+    pub year: Option<i64>,
+    pub oem: Option<String>,
+    pub brand: Option<String>,
+    pub finish: Option<String>,
+    pub scale: Option<String>,
+    pub production_qty: Option<i64>,
+    pub retail_value_cents: Option<i64>,
+    pub wholesale_value_cents: Option<i64>,
+    pub detail_url: Option<String>,
+}
+
+impl MatchPreview {
+    fn skipped(driver_name: Option<String>, reason: impl Into<String>) -> Self {
+        MatchPreview {
+            driver_name,
+            matched: false,
+            confidence: None,
+            reasons: Vec::new(),
+            entry: None,
+            skipped_reason: Some(reason.into()),
+        }
+    }
+}
+
+pub async fn preview_match(pool: &SqlitePool, title: &str) -> AppResult<MatchPreview> {
+    let Some((driver_id, driver_name)) =
+        crate::sync::driver_assoc::detect_driver_for_title(pool, title).await?
+    else {
+        return Ok(MatchPreview::skipped(
+            None,
+            "no driver recognized in the title",
+        ));
+    };
+
+    let candidates = load_candidates(pool, driver_id).await?;
+    if candidates.is_empty() {
+        return Ok(MatchPreview::skipped(
+            Some(driver_name.clone()),
+            format!(
+                "no cached registry entries for {driver_name} — pre-warm the driver on the Registry page"
+            ),
+        ));
+    }
+
+    let aliases = load_aliases(pool).await?;
+    let model = ScoreModel::load(pool).await;
+    let sig = build_signals(title, None, &aliases, &ListingAttrs::default());
+    let Some((entry_id, confidence, reasons)) = pick_best(&sig, &candidates, &model) else {
+        return Ok(MatchPreview::skipped(
+            Some(driver_name),
+            "no candidate scored at all",
+        ));
+    };
+
+    type EntryRow = (
+        Option<String>,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<i64>,
+        Option<i64>,
+        Option<i64>,
+        Option<String>,
+    );
+    let row: Option<EntryRow> = sqlx::query_as(
+        "SELECT scheme_text, year, oem, brand, finish, scale, production_qty,
+                retail_value_cents, wholesale_value_cents, raw_json
+         FROM registry_entries WHERE id = ?",
+    )
+    .bind(entry_id)
+    .fetch_optional(pool)
+    .await?;
+    let entry = row.map(
+        |(scheme_text, year, oem, brand, finish, scale, production_qty, retail, wholesale, raw)| {
+            let detail_url = raw
+                .as_deref()
+                .and_then(|r| serde_json::from_str::<serde_json::Value>(r).ok())
+                .and_then(|v| {
+                    v.get("detail_url")
+                        .and_then(|u| u.as_str())
+                        .map(str::to_string)
+                });
+            PreviewEntry {
+                registry_entry_id: entry_id,
+                scheme_text,
+                year,
+                oem,
+                brand,
+                finish,
+                scale,
+                production_qty,
+                retail_value_cents: retail,
+                wholesale_value_cents: wholesale,
+                detail_url,
+            }
+        },
+    );
+
+    Ok(MatchPreview {
+        driver_name: Some(driver_name),
+        matched: confidence >= MIN_CONFIDENCE,
+        confidence: Some(confidence),
+        reasons,
+        entry,
+        skipped_reason: None,
+    })
+}
+
 /// Compute the feature vector and raw score for an arbitrary
 /// (listing, registry entry) pair — the hook `match_feedback` uses to
 /// snapshot *why* a pairing looked the way it did when the user passed a
@@ -1472,5 +1604,70 @@ mod tests {
     #[test]
     fn empty_candidates_returns_none() {
         assert!(pick(&signals("anything"), &[]).is_none());
+    }
+
+    // --- DB-backed preview test ------------------------------------------
+
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+    use std::str::FromStr;
+
+    #[tokio::test]
+    async fn preview_match_scores_without_persisting() {
+        let opts = SqliteConnectOptions::from_str("sqlite::memory:")
+            .unwrap()
+            .foreign_keys(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(opts)
+            .await
+            .expect("open in-memory db");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+
+        sqlx::query(
+            "INSERT INTO drivers (name, normalized_name) VALUES ('Jeff Gordon', 'jeff gordon')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let driver: (i64,) = sqlx::query_as("SELECT id FROM drivers")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO registry_entries
+                (external_id, driver_id, year, scale, scheme_text,
+                 retail_value_cents, fetched_at, raw_json)
+             VALUES ('guid-p', ?, 2007, '1:24', '#24 Nicorette', 8500, 0,
+                     '{\"detail_url\": \"/Production/x\"}')",
+        )
+        .bind(driver.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let p = preview_match(&pool, "2007 Jeff Gordon Nicorette 1:24 Action diecast")
+            .await
+            .unwrap();
+        assert_eq!(p.driver_name.as_deref(), Some("Jeff Gordon"));
+        assert!(p.matched, "reasons: {:?}", p.reasons);
+        let entry = p.entry.expect("entry");
+        assert_eq!(entry.retail_value_cents, Some(8500));
+        assert_eq!(entry.detail_url.as_deref(), Some("/Production/x"));
+
+        // Nothing was persisted.
+        let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM listing_matches")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(n, 0);
+
+        // Unknown driver → graceful skip.
+        let p2 = preview_match(&pool, "Some Unknown Person 1:24")
+            .await
+            .unwrap();
+        assert!(p2.skipped_reason.is_some());
     }
 }

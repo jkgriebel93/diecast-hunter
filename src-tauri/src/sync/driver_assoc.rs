@@ -44,15 +44,32 @@ struct DriverRow {
     tokens: Vec<String>,
 }
 
+/// Detect the driver for an arbitrary title without touching any listing
+/// row — backs the browser extension's non-persisting /match/preview flow.
+/// Returns (driver_id, display name).
+pub(crate) async fn detect_driver_for_title(
+    pool: &SqlitePool,
+    title: &str,
+) -> AppResult<Option<(i64, String)>> {
+    let drivers = load_drivers(pool).await?;
+    let Some(driver_id) = detect_driver(title, &drivers) else {
+        return Ok(None);
+    };
+    let name: Option<(String,)> = sqlx::query_as("SELECT name FROM drivers WHERE id = ?")
+        .bind(driver_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(name.map(|(n,)| (driver_id, n)))
+}
+
 /// Update `listings.driver_id` for a single listing. Looks up the title,
 /// runs detection, and writes the result. Non-fatal at the call site if
 /// this fails — auto-association is a soft hint.
 pub async fn associate_listing_driver(pool: &SqlitePool, listing_id: i64) -> AppResult<()> {
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT title FROM listings WHERE id = ?")
-            .bind(listing_id)
-            .fetch_optional(pool)
-            .await?;
+    let row: Option<(String,)> = sqlx::query_as("SELECT title FROM listings WHERE id = ?")
+        .bind(listing_id)
+        .fetch_optional(pool)
+        .await?;
     let Some((title,)) = row else {
         return Ok(());
     };
@@ -146,12 +163,11 @@ async fn apply_detail(
     detected: Option<i64>,
     force: bool,
 ) -> AppResult<ApplyOutcome> {
-    let row: Option<(Option<i64>, i64)> = sqlx::query_as(
-        "SELECT driver_id, driver_id_user_set FROM listings WHERE id = ?",
-    )
-    .bind(listing_id)
-    .fetch_optional(pool)
-    .await?;
+    let row: Option<(Option<i64>, i64)> =
+        sqlx::query_as("SELECT driver_id, driver_id_user_set FROM listings WHERE id = ?")
+            .bind(listing_id)
+            .fetch_optional(pool)
+            .await?;
     let (current, user_set) = match row {
         Some((c, u)) => (c, u != 0),
         None => return Ok(ApplyOutcome::Unchanged),
@@ -185,10 +201,9 @@ async fn apply_detail(
 }
 
 async fn load_drivers(pool: &SqlitePool) -> AppResult<Vec<DriverRow>> {
-    let rows: Vec<(i64, String)> =
-        sqlx::query_as("SELECT id, name FROM drivers")
-            .fetch_all(pool)
-            .await?;
+    let rows: Vec<(i64, String)> = sqlx::query_as("SELECT id, name FROM drivers")
+        .fetch_all(pool)
+        .await?;
     Ok(rows
         .into_iter()
         .map(|(id, name)| DriverRow {
@@ -202,8 +217,7 @@ async fn load_drivers(pool: &SqlitePool) -> AppResult<Vec<DriverRow>> {
 /// Pick the most-specific driver whose every name-token appears in the
 /// title. Returns None when nothing matches.
 fn detect_driver(title: &str, drivers: &[DriverRow]) -> Option<i64> {
-    let title_tokens: std::collections::HashSet<String> =
-        tokenize(title).into_iter().collect();
+    let title_tokens: std::collections::HashSet<String> = tokenize(title).into_iter().collect();
     if title_tokens.is_empty() {
         return None;
     }
