@@ -14,3 +14,6 @@
 - Improve Saved Seller browsing
 - Year ranges for filters
 - Make error messages look nicer
+- Include commas in monetary (and other numerical) displays
+- Learned tagging
+- FF extension option to correct a match
