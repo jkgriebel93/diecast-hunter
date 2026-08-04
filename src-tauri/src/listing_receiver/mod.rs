@@ -11,6 +11,11 @@
 //!   candidate, confidence, reasons, entry valuation, and a deal score.
 //! - `POST /listings/watch` — add the item to the eBay watchlist and save
 //!   it locally via the same flow as the in-app Watch button.
+//! - `POST /match/confirm` — persist the previewed match as user-confirmed
+//!   (watching/saving the listing first if it isn't local yet). Each
+//!   confirm is a labeled positive example for the learned matcher.
+//! - `POST /match/reject` — lock the listing as explicitly unmatched
+//!   (same save-first behavior); a labeled negative example.
 //!
 //! The server runs for the life of the app; it's spawned from lib.rs::run
 //! after the DB pool is ready. Auto-generates the shared secret on first
@@ -77,6 +82,8 @@ pub async fn run(pool: SqlitePool) -> AppResult<()> {
     let app = Router::new()
         .route("/health", get(health))
         .route("/match/preview", post(match_preview))
+        .route("/match/confirm", post(match_confirm))
+        .route("/match/reject", post(match_reject))
         .route("/listings/watch", post(watch_listing))
         .layer(
             // Permissive CORS — the bearer token gates everything that
@@ -135,6 +142,13 @@ struct PreviewResponse {
     deal_score: Option<f64>,
     /// Set when this eBay item is already saved locally.
     already_listing_id: Option<i64>,
+    /// For an already-saved listing: the registry entry its match row
+    /// points at (None also covers a confirmed "no match").
+    already_matched_entry_id: Option<i64>,
+    /// For an already-saved listing: whether its match row (or explicit
+    /// no-match) is user-confirmed. The overlay uses this to show a
+    /// "already confirmed" state instead of the confirm/reject buttons.
+    already_user_confirmed: bool,
 }
 
 async fn match_preview(
@@ -166,6 +180,10 @@ async fn match_preview(
         Some(u) => find_saved_ebay_listing(&state.pool, u).await,
         None => None,
     };
+    let match_state = match already_listing_id {
+        Some(id) => load_match_state(&state.pool, id).await,
+        None => None,
+    };
 
     (
         StatusCode::OK,
@@ -173,9 +191,171 @@ async fn match_preview(
             preview,
             deal_score,
             already_listing_id,
+            already_matched_entry_id: match_state.and_then(|(e, _)| e),
+            already_user_confirmed: match_state.is_some_and(|(_, c)| c),
         }),
     )
         .into_response()
+}
+
+/// (registry_entry_id, user_confirmed) of a listing's match row, if any.
+async fn load_match_state(pool: &SqlitePool, listing_id: i64) -> Option<(Option<i64>, bool)> {
+    sqlx::query_as::<_, (Option<i64>, i64)>(
+        "SELECT registry_entry_id, user_confirmed
+         FROM listing_matches WHERE listing_id = ?",
+    )
+    .bind(listing_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .map(|(e, c)| (e, c != 0))
+}
+
+#[derive(Deserialize)]
+struct ConfirmRequest {
+    /// eBay item URL or bare legacy item id.
+    input: String,
+    /// Local registry entry id from the preview response.
+    registry_entry_id: i64,
+}
+
+#[derive(Serialize)]
+struct ConfirmResponse {
+    listing_id: i64,
+    registry_entry_id: i64,
+    /// True when the listing wasn't saved locally yet and this request
+    /// watched + saved it first.
+    saved_now: bool,
+}
+
+async fn match_confirm(
+    State(state): State<Arc<ServerState>>,
+    headers: HeaderMap,
+    body: String,
+) -> Response {
+    if let Err(resp) = check_auth(&headers) {
+        return resp;
+    }
+    let req: ConfirmRequest = match serde_json::from_str(&body) {
+        Ok(p) => p,
+        Err(e) => return bad_request(format!("invalid JSON: {e}")),
+    };
+
+    // The previewed entry always exists locally (preview scores the local
+    // cache), but guard anyway — a stale overlay could reference a pruned
+    // row.
+    let entry_exists: Option<(i64,)> =
+        match sqlx::query_as("SELECT id FROM registry_entries WHERE id = ?")
+            .bind(req.registry_entry_id)
+            .fetch_optional(&state.pool)
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => return internal_error(e.into()),
+        };
+    if entry_exists.is_none() {
+        return bad_request(format!(
+            "registry entry {} not found — refresh the page and try again",
+            req.registry_entry_id
+        ));
+    }
+
+    let (listing_id, saved_now) = match resolve_or_save_listing(&state.pool, &req.input).await {
+        Ok(pair) => pair,
+        Err(resp) => return resp,
+    };
+
+    if let Err(e) = sync::registry_link::link_listing_to_local_entry(
+        &state.pool,
+        listing_id,
+        req.registry_entry_id,
+        "extension_confirm",
+    )
+    .await
+    {
+        return internal_error(e);
+    }
+
+    (
+        StatusCode::OK,
+        Json(ConfirmResponse {
+            listing_id,
+            registry_entry_id: req.registry_entry_id,
+            saved_now,
+        }),
+    )
+        .into_response()
+}
+
+#[derive(Deserialize)]
+struct RejectRequest {
+    /// eBay item URL or bare legacy item id.
+    input: String,
+}
+
+#[derive(Serialize)]
+struct RejectResponse {
+    listing_id: i64,
+    saved_now: bool,
+}
+
+async fn match_reject(
+    State(state): State<Arc<ServerState>>,
+    headers: HeaderMap,
+    body: String,
+) -> Response {
+    if let Err(resp) = check_auth(&headers) {
+        return resp;
+    }
+    let req: RejectRequest = match serde_json::from_str(&body) {
+        Ok(p) => p,
+        Err(e) => return bad_request(format!("invalid JSON: {e}")),
+    };
+
+    let (listing_id, saved_now) = match resolve_or_save_listing(&state.pool, &req.input).await {
+        Ok(pair) => pair,
+        Err(resp) => return resp,
+    };
+
+    if let Err(e) =
+        sync::registry_link::mark_no_match(&state.pool, listing_id, "extension_reject").await
+    {
+        return internal_error(e);
+    }
+
+    (
+        StatusCode::OK,
+        Json(RejectResponse {
+            listing_id,
+            saved_now,
+        }),
+    )
+        .into_response()
+}
+
+/// The listing a confirm/reject verdict lands on: the already-saved local
+/// row when there is one, otherwise watch + save it first (same flow as
+/// the Watch button — training verdicts need a listings row to attach to,
+/// and a listing worth a verdict is worth tracking). Returns
+/// (listing_id, saved_now) or a ready-to-return error response — notably
+/// when the non-diecast filter rejects the save.
+async fn resolve_or_save_listing(pool: &SqlitePool, input: &str) -> Result<(i64, bool), Response> {
+    if let Some(id) = find_saved_ebay_listing(pool, input).await {
+        return Ok((id, false));
+    }
+    match sync::watch_and_save(pool, input).await {
+        Ok(result) => match result.listing_id {
+            Some(id) => Ok((id, true)),
+            None => Err(bad_request(format!(
+                "listing was filtered, not saved: {}",
+                result
+                    .filtered_reason
+                    .unwrap_or_else(|| "unknown reason".into())
+            ))),
+        },
+        Err(e) => Err(internal_error(e)),
+    }
 }
 
 #[derive(Deserialize)]

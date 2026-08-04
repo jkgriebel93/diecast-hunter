@@ -820,61 +820,7 @@ pub async fn clear_listing_match(state: State<'_, AppState>, listing_id: i64) ->
 /// no registry entry).
 #[tauri::command]
 pub async fn reject_listing_match(state: State<'_, AppState>, listing_id: i64) -> AppResult<()> {
-    // What is the user rejecting? An unconfirmed auto-suggestion is a
-    // labeled negative for that specific entry; otherwise it's a bare
-    // "nothing matches". Read it before the upsert erases it.
-    let previous: Option<(Option<i64>, i64, Option<String>)> = sqlx::query_as(
-        "SELECT registry_entry_id, user_confirmed, matched_by
-         FROM listing_matches WHERE listing_id = ?",
-    )
-    .bind(listing_id)
-    .fetch_optional(&state.db.pool)
-    .await?;
-    let already_rejected = previous
-        .as_ref()
-        .is_some_and(|(e, c, _)| *c != 0 && e.is_none());
-    let rejected_entry = previous.as_ref().and_then(|(e, c, m)| {
-        if *c == 0 && m.as_deref() == Some("auto") {
-            *e
-        } else {
-            None
-        }
-    });
-
-    let now = chrono::Utc::now().timestamp();
-    sqlx::query(
-        "INSERT INTO listing_matches
-            (listing_id, registry_entry_id, confidence, user_confirmed,
-             matched_at, matched_by, match_reasons)
-         VALUES (?, NULL, 0.0, 1, ?, NULL, NULL)
-         ON CONFLICT(listing_id) DO UPDATE SET
-            registry_entry_id = NULL,
-            confidence = 0.0,
-            user_confirmed = 1,
-            matched_at = excluded.matched_at,
-            matched_by = NULL,
-            match_reasons = NULL",
-    )
-    .bind(listing_id)
-    .bind(now)
-    .execute(&state.db.pool)
-    .await?;
-
-    if !already_rejected {
-        match_feedback::record_best_effort(
-            &state.db.pool,
-            listing_id,
-            rejected_entry,
-            FeedbackLabel::Rejected,
-            "reject_button",
-        )
-        .await;
-    }
-    if let Err(e) = sync::attribute_assoc::clear_backfilled_attrs(&state.db.pool, listing_id).await
-    {
-        tracing::warn!("clearing backfilled attrs for listing {listing_id} failed: {e}");
-    }
-    Ok(())
+    sync::registry_link::mark_no_match(&state.db.pool, listing_id, "reject_button").await
 }
 
 /// Promote an auto-match to a user-confirmed one. The confidence value is

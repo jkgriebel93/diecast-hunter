@@ -87,8 +87,33 @@ pub async fn link_listing_to_registry(
             false
         });
 
-    // 3. Snapshot what this link is replacing, so the verdict log can tell
-    //    "user agreed with the auto-suggestion" from "user overrode it".
+    // 3–6 are shared with the extension's confirm path.
+    link_listing_to_local_entry(pool, listing_id, entry_id, "manual_link").await?;
+
+    Ok(LinkResult {
+        registry_entry_id: entry_id,
+        enriched,
+    })
+}
+
+/// Lock in a user-confirmed match against a registry entry that already
+/// exists locally — the shared core of the registry-search dialog link
+/// (after its ensure/enrich steps) and the extension's confirm button
+/// (the previewed entry always came from the local cache, so no DCR
+/// round-trip is needed or wanted on a click). Writes the match row,
+/// logs training verdicts, and copies the entry's attributes onto the
+/// listing. `source` labels the verdicts ('manual_link',
+/// 'extension_confirm', …).
+pub async fn link_listing_to_local_entry(
+    pool: &SqlitePool,
+    listing_id: i64,
+    entry_id: i64,
+    source: &str,
+) -> AppResult<()> {
+    let now = Utc::now().timestamp();
+
+    // Snapshot what this link is replacing, so the verdict log can tell
+    // "user agreed with the auto-suggestion" from "user overrode it".
     let previous: Option<(Option<i64>, i64, Option<String>)> = sqlx::query_as(
         "SELECT registry_entry_id, user_confirmed, matched_by
          FROM listing_matches WHERE listing_id = ?",
@@ -97,7 +122,7 @@ pub async fn link_listing_to_registry(
     .fetch_optional(pool)
     .await?;
 
-    // 4. Lock in the manual match.
+    // Lock in the manual match.
     sqlx::query(
         "INSERT INTO listing_matches
             (listing_id, registry_entry_id, confidence, user_confirmed,
@@ -117,9 +142,9 @@ pub async fn link_listing_to_registry(
     .execute(pool)
     .await?;
 
-    // 5. Log the verdicts. An auto-suggestion the user linked away from is
-    //    a negative example for that entry; the linked entry is a positive
-    //    one (unless this is a no-op re-link of an already-confirmed pair).
+    // Log the verdicts. An auto-suggestion the user linked away from is
+    // a negative example for that entry; the linked entry is a positive
+    // one (unless this is a no-op re-link of an already-confirmed pair).
     let prev_auto_entry = previous.as_ref().and_then(|(e, _, m)| {
         if m.as_deref() == Some("auto") {
             *e
@@ -136,7 +161,7 @@ pub async fn link_listing_to_registry(
             listing_id,
             Some(old),
             FeedbackLabel::CorrectedAway,
-            "manual_link",
+            source,
         )
         .await;
     }
@@ -146,22 +171,273 @@ pub async fn link_listing_to_registry(
             listing_id,
             Some(entry_id),
             FeedbackLabel::Confirmed,
-            "manual_link",
+            source,
         )
         .await;
     }
 
-    // 6. The confirmed entry is now the authority on this car's
-    //    attributes — copy them onto the listing (provenance-marked).
+    // The confirmed entry is now the authority on this car's
+    // attributes — copy them onto the listing (provenance-marked).
     if let Err(e) = crate::sync::attribute_assoc::backfill_attrs_from_match(pool, listing_id).await
     {
         tracing::warn!("attr backfill after linking listing {listing_id} failed: {e}");
     }
 
-    Ok(LinkResult {
-        registry_entry_id: entry_id,
-        enriched,
-    })
+    Ok(())
+}
+
+/// Lock the listing as explicitly unmatched (user has reviewed and found
+/// no registry entry). Shared core of the desktop reject button and the
+/// extension's "not this car" action; `source` labels the training
+/// verdict ('reject_button', 'extension_reject', …).
+pub async fn mark_no_match(pool: &SqlitePool, listing_id: i64, source: &str) -> AppResult<()> {
+    // What is the user rejecting? An unconfirmed auto-suggestion is a
+    // labeled negative for that specific entry; otherwise it's a bare
+    // "nothing matches". Read it before the upsert erases it.
+    let previous: Option<(Option<i64>, i64, Option<String>)> = sqlx::query_as(
+        "SELECT registry_entry_id, user_confirmed, matched_by
+         FROM listing_matches WHERE listing_id = ?",
+    )
+    .bind(listing_id)
+    .fetch_optional(pool)
+    .await?;
+    let already_rejected = previous
+        .as_ref()
+        .is_some_and(|(e, c, _)| *c != 0 && e.is_none());
+    let rejected_entry = previous.as_ref().and_then(|(e, c, m)| {
+        if *c == 0 && m.as_deref() == Some("auto") {
+            *e
+        } else {
+            None
+        }
+    });
+
+    let now = Utc::now().timestamp();
+    sqlx::query(
+        "INSERT INTO listing_matches
+            (listing_id, registry_entry_id, confidence, user_confirmed,
+             matched_at, matched_by, match_reasons)
+         VALUES (?, NULL, 0.0, 1, ?, NULL, NULL)
+         ON CONFLICT(listing_id) DO UPDATE SET
+            registry_entry_id = NULL,
+            confidence = 0.0,
+            user_confirmed = 1,
+            matched_at = excluded.matched_at,
+            matched_by = NULL,
+            match_reasons = NULL",
+    )
+    .bind(listing_id)
+    .bind(now)
+    .execute(pool)
+    .await?;
+
+    if !already_rejected {
+        match_feedback::record_best_effort(
+            pool,
+            listing_id,
+            rejected_entry,
+            FeedbackLabel::Rejected,
+            source,
+        )
+        .await;
+    }
+    if let Err(e) = crate::sync::attribute_assoc::clear_backfilled_attrs(pool, listing_id).await {
+        tracing::warn!("clearing backfilled attrs for listing {listing_id} failed: {e}");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    //! Tests for the shared verdict-persistence cores used by both the
+    //! desktop UI and the extension routes: match rows land correctly and
+    //! the training-feedback log gets exactly the right labels.
+    use super::*;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+    use std::str::FromStr;
+
+    async fn migrated_pool() -> SqlitePool {
+        let opts = SqliteConnectOptions::from_str("sqlite::memory:")
+            .unwrap()
+            .foreign_keys(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(opts)
+            .await
+            .expect("open in-memory db");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+        pool
+    }
+
+    async fn insert_listing(pool: &SqlitePool) -> i64 {
+        sqlx::query(
+            "INSERT INTO listings (seller_id, external_id, url, title, saved_at, last_seen_at)
+             VALUES ((SELECT id FROM sellers WHERE code = 'ebay'),
+                     'v1|111111111111|0', 'https://example.com', 'test listing', 1, 1)",
+        )
+        .execute(pool)
+        .await
+        .unwrap()
+        .last_insert_rowid()
+    }
+
+    async fn insert_entry(pool: &SqlitePool, guid: &str) -> i64 {
+        sqlx::query("INSERT INTO registry_entries (external_id, fetched_at) VALUES (?, 1)")
+            .bind(guid)
+            .execute(pool)
+            .await
+            .unwrap()
+            .last_insert_rowid()
+    }
+
+    async fn match_row(pool: &SqlitePool, listing_id: i64) -> Option<(Option<i64>, f64, i64)> {
+        sqlx::query_as(
+            "SELECT registry_entry_id, confidence, user_confirmed
+             FROM listing_matches WHERE listing_id = ?",
+        )
+        .bind(listing_id)
+        .fetch_optional(pool)
+        .await
+        .unwrap()
+    }
+
+    async fn feedback_rows(
+        pool: &SqlitePool,
+        listing_id: i64,
+    ) -> Vec<(Option<i64>, String, String)> {
+        sqlx::query_as(
+            "SELECT registry_entry_id, label, source
+             FROM match_feedback WHERE listing_id = ? ORDER BY id",
+        )
+        .bind(listing_id)
+        .fetch_all(pool)
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn link_local_entry_confirms_and_logs() {
+        let pool = migrated_pool().await;
+        let listing = insert_listing(&pool).await;
+        let entry = insert_entry(&pool, "guid-a").await;
+
+        link_listing_to_local_entry(&pool, listing, entry, "extension_confirm")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            match_row(&pool, listing).await,
+            Some((Some(entry), 100.0, 1))
+        );
+        assert_eq!(
+            feedback_rows(&pool, listing).await,
+            vec![(Some(entry), "confirmed".into(), "extension_confirm".into())]
+        );
+
+        // Re-confirming the already-confirmed pair must not duplicate the
+        // verdict.
+        link_listing_to_local_entry(&pool, listing, entry, "extension_confirm")
+            .await
+            .unwrap();
+        assert_eq!(feedback_rows(&pool, listing).await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn link_over_auto_suggestion_logs_corrected_away() {
+        let pool = migrated_pool().await;
+        let listing = insert_listing(&pool).await;
+        let suggested = insert_entry(&pool, "guid-auto").await;
+        let actual = insert_entry(&pool, "guid-real").await;
+        sqlx::query(
+            "INSERT INTO listing_matches
+                (listing_id, registry_entry_id, confidence, user_confirmed,
+                 matched_at, matched_by)
+             VALUES (?, ?, 70.0, 0, 1, 'auto')",
+        )
+        .bind(listing)
+        .bind(suggested)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        link_listing_to_local_entry(&pool, listing, actual, "extension_confirm")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            match_row(&pool, listing).await,
+            Some((Some(actual), 100.0, 1))
+        );
+        assert_eq!(
+            feedback_rows(&pool, listing).await,
+            vec![
+                (
+                    Some(suggested),
+                    "corrected_away".into(),
+                    "extension_confirm".into()
+                ),
+                (Some(actual), "confirmed".into(), "extension_confirm".into()),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn mark_no_match_rejects_auto_suggestion() {
+        let pool = migrated_pool().await;
+        let listing = insert_listing(&pool).await;
+        let suggested = insert_entry(&pool, "guid-auto").await;
+        sqlx::query(
+            "INSERT INTO listing_matches
+                (listing_id, registry_entry_id, confidence, user_confirmed,
+                 matched_at, matched_by)
+             VALUES (?, ?, 70.0, 0, 1, 'auto')",
+        )
+        .bind(listing)
+        .bind(suggested)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        mark_no_match(&pool, listing, "extension_reject")
+            .await
+            .unwrap();
+
+        assert_eq!(match_row(&pool, listing).await, Some((None, 0.0, 1)));
+        // The rejected auto-suggestion is the labeled negative.
+        assert_eq!(
+            feedback_rows(&pool, listing).await,
+            vec![(
+                Some(suggested),
+                "rejected".into(),
+                "extension_reject".into()
+            )]
+        );
+
+        // Rejecting again is a no-op for the log.
+        mark_no_match(&pool, listing, "extension_reject")
+            .await
+            .unwrap();
+        assert_eq!(feedback_rows(&pool, listing).await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn mark_no_match_without_suggestion_logs_bare_reject() {
+        let pool = migrated_pool().await;
+        let listing = insert_listing(&pool).await;
+
+        mark_no_match(&pool, listing, "reject_button")
+            .await
+            .unwrap();
+
+        assert_eq!(match_row(&pool, listing).await, Some((None, 0.0, 1)));
+        assert_eq!(
+            feedback_rows(&pool, listing).await,
+            vec![(None, "rejected".into(), "reject_button".into())]
+        );
+    }
 }
 
 async fn run_targeted_enrichment(
