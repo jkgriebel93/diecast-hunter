@@ -13,7 +13,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "ext:package": "powershell -NoProfile -Command \"Compress-Archive -Force -Path extension/manifest.json,extension/background.js,extension/content.js,extension/options.html,extension/options.js,extension/options.css,extension/icons -DestinationPath extension/diecast-hunter-ebay.zip\""
+    "ext:package": "powershell -NoProfile -Command \"Compress-Archive -Force -Path extension/manifest.json,extension/background.js,extension/content.js,extension/options.html,extension/options.js,extension/options.css,extension/icons -DestinationPath extension/diecast-hunter-ebay.zip\"",
+    "test": "vitest run"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",
@@ -33,7 +34,8 @@
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.14",
     "typescript": "~5.6.3",
-    "vite": "^5.4.10"
+    "vite": "^5.4.10",
+    "vitest": "^2.1.9"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

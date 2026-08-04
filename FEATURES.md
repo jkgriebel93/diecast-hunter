@@ -15,6 +15,6 @@
 - Improve Saved Seller browsing
 - Year ranges for filters
 - Make error messages look nicer
-- Include commas in monetary (and other numerical) displays
+- ~~Include commas in monetary (and other numerical) displays~~ (DCH-17: shared `formatCents`/`formatCount` helpers in `src/lib/format.ts` (Intl.NumberFormat, unit-tested via the new `pnpm test` vitest setup); extension overlay formatter updated to match)
 - Learned tagging
 - FF extension option to correct a match

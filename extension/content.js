@@ -46,7 +46,10 @@ function extractPriceCents() {
 
 function fmtCents(cents) {
   if (cents === null || cents === undefined) return "—";
-  return `$${(cents / 100).toFixed(2)}`;
+  return (cents / 100).toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+  });
 }
 
 function esc(s) {
