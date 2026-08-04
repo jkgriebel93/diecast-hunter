@@ -64,15 +64,13 @@ pub fn parse_search_url(url: &str) -> ParsedSearchUrl {
     // _sop is eBay's numeric sort code. Common values:
     //   10 = ending soonest, 15 = price low→high, 16 = price high→low,
     //   12 = newly listed (default), 1 = best match.
-    let sort = params
-        .get("_sop")
-        .and_then(|s| match s.as_str() {
-            "10" => Some("endingSoonest".to_string()),
-            "15" => Some("price".to_string()),
-            "16" => Some("-price".to_string()),
-            "12" => Some("newlyListed".to_string()),
-            _ => None,
-        });
+    let sort = params.get("_sop").and_then(|s| match s.as_str() {
+        "10" => Some("endingSoonest".to_string()),
+        "15" => Some("price".to_string()),
+        "16" => Some("-price".to_string()),
+        "12" => Some("newlyListed".to_string()),
+        _ => None,
+    });
 
     ParsedSearchUrl {
         keywords,

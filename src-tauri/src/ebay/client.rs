@@ -81,13 +81,9 @@ impl EbayClient {
             .unwrap_or_else(|| "sandbox".to_string());
         let env = EbayEnvironment::from_str(&env_str);
         let app_id = settings::secret_get(settings::ENTRY_EBAY_APP_ID)?
-            .ok_or_else(|| {
-                AppError::NotConfigured("eBay App ID not set in Settings".into())
-            })?;
+            .ok_or_else(|| AppError::NotConfigured("eBay App ID not set in Settings".into()))?;
         let cert_id = settings::secret_get(settings::ENTRY_EBAY_CERT_ID)?
-            .ok_or_else(|| {
-                AppError::NotConfigured("eBay Cert ID not set in Settings".into())
-            })?;
+            .ok_or_else(|| AppError::NotConfigured("eBay Cert ID not set in Settings".into()))?;
 
         let mut headers = HeaderMap::new();
         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
@@ -234,16 +230,9 @@ impl EbayClient {
             }
             // Treat 401 specially: invalidate cache so the next call refreshes.
             if status.as_u16() == 401 {
-                let _ = settings::delete(
-                    &self.inner.pool,
-                    self.inner.env.token_setting_key(),
-                )
-                .await;
-                let _ = settings::delete(
-                    &self.inner.pool,
-                    self.inner.env.token_expiry_key(),
-                )
-                .await;
+                let _ =
+                    settings::delete(&self.inner.pool, self.inner.env.token_setting_key()).await;
+                let _ = settings::delete(&self.inner.pool, self.inner.env.token_expiry_key()).await;
             }
             return Err(AppError::Network(format!(
                 "ebay api {url} returned {status}: {body}"

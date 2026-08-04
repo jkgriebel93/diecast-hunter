@@ -1,5 +1,6 @@
 - Auto sync overnight
   - Auto refresh pre-warmed drivers
+- ~~Archive Saved Listings that ended or were removed~~ (DCH-8: watchlist sync flags ended listings archived instead of deleting them — raw_json, final price, history, and matches all kept; `end_reason` records sold / ended unsold / removed-from-eBay (Browse 404); Listings page grew an "Archived" status facet (excluded by default) and shows the end reason on archived rows)
 - ~~Wishlist feature~~ (Wishlist page with multiple named lists (tabs; create/rename/delete, move entries between lists); "♡ Add to wishlist" on registry search results; per-wish notes, drag-and-drop stack ranking + linked saved listings via the "Link listing…" picker)
     - ~~Select DCR entries~~
     - ~~Link saved eBay listings~~

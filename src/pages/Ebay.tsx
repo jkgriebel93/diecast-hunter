@@ -70,7 +70,10 @@ export function Ebay() {
     if (!rows) return null;
     const ebay = rows.filter((r) => r.seller_code === "ebay");
     const active = ebay.filter((r) => r.status === "active");
-    const ended = ebay.filter((r) => r.status === "ended");
+    // Archived rows (ended listings kept as history) get their own bucket;
+    // "ended" is the transient not-yet-archived state.
+    const ended = ebay.filter((r) => r.status === "ended" && !r.is_archived);
+    const archived = ebay.filter((r) => r.is_archived);
     const matched = ebay.filter((r) => r.registry_entry_id !== null);
     const unmatched = ebay.filter(
       (r) => r.registry_entry_id === null && !r.match_user_confirmed,
@@ -98,6 +101,7 @@ export function Ebay() {
       total: ebay.length,
       active: active.length,
       ended: ended.length,
+      archived: archived.length,
       matched: matched.length,
       unmatched: unmatched.length,
       trackedValue,
@@ -182,6 +186,7 @@ export function Ebay() {
               <Stat label="Total" value={summary.total} />
               <Stat label="Active" value={summary.active} />
               <Stat label="Ended" value={summary.ended} />
+              <Stat label="Archived" value={summary.archived} />
               <Stat label="Matched" value={summary.matched} />
               <Stat label="Unmatched" value={summary.unmatched} />
               <Stat

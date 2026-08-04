@@ -180,8 +180,7 @@ pub async fn fetch_watchlist_page(
     parse_watchlist_response(&xml)
 }
 
-static ITEM_ID_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"<ItemID>(\d{6,})</ItemID>").unwrap());
+static ITEM_ID_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"<ItemID>(\d{6,})</ItemID>").unwrap());
 static FAILURE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"<Ack>Failure</Ack>").unwrap());
 static LONG_MESSAGE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"<LongMessage>([^<]+)</LongMessage>").unwrap());
@@ -194,9 +193,8 @@ static FAVORITE_SEARCH_RE: Lazy<Regex> = Lazy::new(|| {
     // multi-line in real responses.
     Regex::new(r"(?s)<FavoriteSearch>(.*?)</FavoriteSearch>").unwrap()
 });
-static FAVORITE_SELLER_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?s)<FavoriteSeller>(.*?)</FavoriteSeller>").unwrap()
-});
+static FAVORITE_SELLER_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?s)<FavoriteSeller>(.*?)</FavoriteSeller>").unwrap());
 static SEARCH_ID_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"<SearchID>([^<]+)</SearchID>").unwrap());
 static SEARCH_NAME_RE: Lazy<Regex> =
@@ -205,8 +203,7 @@ static SEARCH_QUERY_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"<SearchQuery>([^<]+)</SearchQuery>").unwrap());
 static QUERY_KEYWORDS_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"<QueryKeywords>([^<]+)</QueryKeywords>").unwrap());
-static USER_ID_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"<UserID>([^<]+)</UserID>").unwrap());
+static USER_ID_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"<UserID>([^<]+)</UserID>").unwrap());
 static SELLER_USER_ID_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"<SellerID>([^<]+)</SellerID>").unwrap());
 static STORE_NAME_RE: Lazy<Regex> =
@@ -228,15 +225,16 @@ pub fn parse_watchlist_mutation_response(xml: &str, call_name: &str) -> AppResul
     // Forgiving: treat "already on watchlist" / "not on watchlist" as benign
     // — the caller's intent is satisfied either way.
     let already_on = lower.contains("already") && lower.contains("watch");
-    let not_on = (lower.contains("not on") || lower.contains("not in"))
-        && lower.contains("watch");
+    let not_on = (lower.contains("not on") || lower.contains("not in")) && lower.contains("watch");
     if (call_name == "AddToWatchList" && already_on)
         || (call_name == "RemoveFromWatchList" && not_on)
     {
         tracing::info!("trading api {call_name}: benign no-op ({detail})");
         return Ok(());
     }
-    Err(AppError::Network(format!("trading api {call_name}: {detail}")))
+    Err(AppError::Network(format!(
+        "trading api {call_name}: {detail}"
+    )))
 }
 
 pub fn parse_watchlist_response(xml: &str) -> AppResult<WatchlistPage> {
@@ -373,8 +371,7 @@ pub fn parse_my_ebay_favorites(xml: &str) -> AppResult<MyEbayFavorites> {
     for cap in FAVORITE_SELLER_RE.captures_iter(xml) {
         let inner = cap.get(1).map(|m| m.as_str()).unwrap_or("");
         // eBay sometimes emits <UserID> and sometimes <SellerID>; accept either.
-        let username = capture(&USER_ID_RE, inner)
-            .or_else(|| capture(&SELLER_USER_ID_RE, inner));
+        let username = capture(&USER_ID_RE, inner).or_else(|| capture(&SELLER_USER_ID_RE, inner));
         let Some(username) = username else { continue };
         sellers.push(FavoriteSeller {
             user_id: username,
@@ -386,10 +383,14 @@ pub fn parse_my_ebay_favorites(xml: &str) -> AppResult<MyEbayFavorites> {
 }
 
 fn capture(re: &Regex, hay: &str) -> Option<String> {
-    re.captures(hay).and_then(|c| c.get(1).map(|m| {
-        let s = m.as_str().trim();
-        s.to_string()
-    })).filter(|s| !s.is_empty())
+    re.captures(hay)
+        .and_then(|c| {
+            c.get(1).map(|m| {
+                let s = m.as_str().trim();
+                s.to_string()
+            })
+        })
+        .filter(|s| !s.is_empty())
 }
 
 fn map_reqwest(e: reqwest::Error) -> AppError {

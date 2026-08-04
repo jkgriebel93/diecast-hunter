@@ -42,7 +42,14 @@ type ViewMode = "flat" | "byDriver" | "byGroup";
 // The checkbox facets (status, match, offer, type) hold the set of checked
 // options. Empty set = facet off = show everything; multiple checks OR
 // together within the facet.
-type StatusOption = "active" | "ended";
+type StatusOption = "active" | "ended" | "archived";
+
+/** Human labels for `listings.end_reason` on archived rows. */
+const END_REASON_LABELS: Record<string, string> = {
+  sold: "sold",
+  ended: "ended unsold",
+  removed: "removed from eBay",
+};
 /** "confirmed"/"unconfirmed" split matched listings by user verification;
  *  "unmatched" = no registry entry (including user-marked no-match rows). */
 type MatchOption = "confirmed" | "unconfirmed" | "unmatched";
@@ -160,9 +167,14 @@ function listingPassesFilters(row: ListingRow, f: ListingFilterState): boolean {
     if (!hay.includes(f.q)) return false;
   }
   if (f.status.size > 0) {
+    // Archived is its own bucket: "Ended" means ended-but-not-yet-archived
+    // (a transient state between enrichment and the sync's archive pass),
+    // so the default active-only filter keeps archived history out of the
+    // deal-hunting views until explicitly requested.
     const ok =
       (f.status.has("active") && row.status === "active") ||
-      (f.status.has("ended") && row.status === "ended");
+      (f.status.has("ended") && row.status === "ended" && !row.is_archived) ||
+      (f.status.has("archived") && row.is_archived);
     if (!ok) return false;
   }
   if (f.match.size > 0) {
@@ -637,6 +649,7 @@ export function Listings() {
           `${s.skipped_fresh} fresh (skipped), ` +
           `${s.filtered} filtered (non-diecasts), ${s.failed} failed, ` +
           `${s.archived} archived (${s.unwatched} unwatched on eBay), ` +
+          `${s.removed} removed from eBay, ` +
           `${s.pruned} pruned (no longer watched) across ${s.pages_fetched} ` +
           `page${s.pages_fetched === 1 ? "" : "s"} (${s.items_seen} items total).`,
       );
@@ -803,6 +816,7 @@ export function Listings() {
       status: {
         active: count({ status: new Set(["active"]) }),
         ended: count({ status: new Set(["ended"]) }),
+        archived: count({ status: new Set(["archived"]) }),
       },
       match: {
         confirmed: count({ match: new Set(["confirmed"]) }),
@@ -1055,6 +1069,11 @@ export function Listings() {
                     value: "ended",
                     label: "Ended",
                     count: facetCounts.status.ended,
+                  },
+                  {
+                    value: "archived",
+                    label: "Archived",
+                    count: facetCounts.status.archived,
                   },
                 ]}
                 onToggle={(v) =>
@@ -1688,7 +1707,10 @@ function ListingCard({
               (row.accepts_offers
                 ? `${row.listing_type} + offers`
                 : row.listing_type),
-            row.is_archived && "archived",
+            row.is_archived &&
+              (row.end_reason
+                ? `archived · ${END_REASON_LABELS[row.end_reason] ?? row.end_reason}`
+                : "archived"),
             row.seller_username && `seller: ${row.seller_username}`,
             row.seller_rating !== null &&
               row.seller_rating !== undefined &&

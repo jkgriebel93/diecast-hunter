@@ -24,9 +24,7 @@ const TOKEN_REFRESH_BUFFER: i64 = 600;
 /// use with the Trading API (GetMyeBayBuying for watchlist sync). Other
 /// scopes (buy.item.feed, buy.order.readonly, etc.) require separate eBay
 /// approvals and are added on demand if/when we use them.
-pub const DEFAULT_SCOPES: &[&str] = &[
-    "https://api.ebay.com/oauth/api_scope",
-];
+pub const DEFAULT_SCOPES: &[&str] = &["https://api.ebay.com/oauth/api_scope"];
 
 #[derive(Debug, Serialize, Clone)]
 pub struct OauthStatus {
@@ -91,10 +89,9 @@ pub async fn refresh_access_token(
     cert_id: &str,
     scopes: &[&str],
 ) -> AppResult<()> {
-    let refresh_token = settings::secret_get(&settings::ebay_user_refresh_token_entry(
-        env.as_str(),
-    ))?
-    .ok_or_else(|| AppError::NotConfigured("eBay account not connected".into()))?;
+    let refresh_token =
+        settings::secret_get(&settings::ebay_user_refresh_token_entry(env.as_str()))?
+            .ok_or_else(|| AppError::NotConfigured("eBay account not connected".into()))?;
 
     let body = format!(
         "grant_type=refresh_token\
@@ -123,10 +120,7 @@ pub async fn refresh_access_token(
     .await?;
     if let Some(rt) = token.refresh_token {
         // eBay may issue a new refresh token; update if so.
-        settings::secret_set(
-            &settings::ebay_user_refresh_token_entry(env.as_str()),
-            &rt,
-        )?;
+        settings::secret_set(&settings::ebay_user_refresh_token_entry(env.as_str()), &rt)?;
     }
     Ok(())
 }
@@ -182,10 +176,7 @@ pub async fn user_iaf_token(pool: &SqlitePool) -> AppResult<(EbayEnvironment, St
 /// returns "IAF token supplied is expired" — our local expiry guess
 /// must have drifted from theirs (clock skew or a token revoked
 /// upstream).
-pub async fn invalidate_user_token_cache(
-    pool: &SqlitePool,
-    env: EbayEnvironment,
-) -> AppResult<()> {
+pub async fn invalidate_user_token_cache(pool: &SqlitePool, env: EbayEnvironment) -> AppResult<()> {
     settings::delete(pool, &settings::ebay_user_access_token_key(env.as_str())).await?;
     settings::delete(
         pool,
@@ -217,8 +208,7 @@ pub async fn disconnect(pool: &SqlitePool, env: EbayEnvironment) -> AppResult<()
 
 pub async fn status(pool: &SqlitePool, env: EbayEnvironment) -> AppResult<OauthStatus> {
     let has_refresh =
-        settings::secret_get(&settings::ebay_user_refresh_token_entry(env.as_str()))?
-            .is_some();
+        settings::secret_get(&settings::ebay_user_refresh_token_entry(env.as_str()))?.is_some();
     let has_ru_name = settings::get(pool, &settings::ebay_ru_name_key(env.as_str()))
         .await?
         .is_some();
@@ -253,8 +243,7 @@ async fn post_token_endpoint(
     body: &str,
 ) -> AppResult<TokenResponse> {
     let url = format!("{}/identity/v1/oauth2/token", env.api_host());
-    let basic = base64::engine::general_purpose::STANDARD
-        .encode(format!("{app_id}:{cert_id}"));
+    let basic = base64::engine::general_purpose::STANDARD.encode(format!("{app_id}:{cert_id}"));
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
@@ -279,9 +268,8 @@ async fn post_token_endpoint(
             "ebay oauth token endpoint returned {status}: {text}"
         )));
     }
-    serde_json::from_str(&text).map_err(|e| {
-        AppError::Parse(format!("ebay token response unparseable: {e}: {text}"))
-    })
+    serde_json::from_str(&text)
+        .map_err(|e| AppError::Parse(format!("ebay token response unparseable: {e}: {text}")))
 }
 
 async fn persist_tokens(
@@ -311,10 +299,7 @@ async fn persist_tokens(
         .await?;
     }
     if let Some(rt) = &token.refresh_token {
-        settings::secret_set(
-            &settings::ebay_user_refresh_token_entry(env.as_str()),
-            rt,
-        )?;
+        settings::secret_set(&settings::ebay_user_refresh_token_entry(env.as_str()), rt)?;
     } else {
         return Err(AppError::Parse(
             "eBay didn't return a refresh_token — nothing to persist for future use".into(),
@@ -367,10 +352,10 @@ mod tests {
     #[test]
     fn other_errors_not_token_expired() {
         assert!(!is_iaf_token_expired_error("network timed out"));
-        assert!(!is_iaf_token_expired_error("trading api: rate limit exceeded"));
         assert!(!is_iaf_token_expired_error(
-            "your watchlist is empty"
+            "trading api: rate limit exceeded"
         ));
+        assert!(!is_iaf_token_expired_error("your watchlist is empty"));
         // "expired" without "iaf token" — could be the listing, not the token.
         assert!(!is_iaf_token_expired_error("offer has expired"));
     }

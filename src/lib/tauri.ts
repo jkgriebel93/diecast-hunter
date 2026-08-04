@@ -813,6 +813,9 @@ export interface WatchlistSyncSummary {
   skipped_fresh: number;
   /** Ended listings newly archived this run (kept locally as history). */
   archived: number;
+  /** Watched listings that vanished from eBay entirely (Browse 404),
+   *  archived this run with end_reason 'removed'. */
+  removed: number;
   /** Archived listings removed from the eBay watchlist this run. */
   unwatched: number;
   filtered: number;
@@ -922,6 +925,12 @@ export interface ListingRow {
   /** Ended listing kept locally as history after the sync removed it from
    *  the eBay watchlist. Exempt from watchlist pruning. */
   is_archived: boolean;
+  /** Why an archived listing ended: 'sold', 'ended' (unsold), or 'removed'
+   *  (vanished from eBay). null for active rows and pre-migration archives
+   *  not yet backfilled by a sync. */
+  end_reason: string | null;
+  /** When the sync archived the listing (Unix seconds). */
+  archived_at: number | null;
   end_time: number | null;
   seller_username: string | null;
   seller_rating: number | null;
