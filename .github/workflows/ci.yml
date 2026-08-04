@@ -1,0 +1,115 @@
+name: CI
+
+# Gates every PR and every commit to main on the checks that were previously
+# only run by hand, then builds the Windows installers for main.
+#
+# Why the Rust job runs on Windows rather than ubuntu: this app ships Windows
+# installers only (tauri.conf.json bundles msi + nsis), Windows runners have
+# WebView2 preinstalled so there's no apt dance for webkit2gtk, and the
+# keyring crate resolves to its windows-native backend — the same code path
+# users run. The repo is public, so runner minutes are free either way.
+#
+# Deliberately NOT gated (would fail on main today, see DCH-22 PR):
+#   - `cargo fmt --check`   — the tree isn't rustfmt-clean (~100 files differ)
+#   - `cargo clippy`        — never run against this tree; unknown baseline
+#   - worker/ tests         — one stale test fails (DCH-28). Those are already
+#                             gated by deploy-worker.yml on worker/** changes.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+
+# One run per branch; a newer push cancels an in-flight run of the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend (typecheck, build, tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `pnpm build` is `tsc -b && vite build` — typecheck and bundle in one.
+      - name: Typecheck and build
+        run: pnpm build
+
+      - name: Test
+        run: pnpm test
+
+  rust:
+    name: Rust (cargo test)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Caches ~/.cargo and src-tauri/target keyed on the lockfile. Without
+      # it every run recompiles the full Tauri dependency tree.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Test
+        working-directory: src-tauri
+        run: cargo test
+
+  installer:
+    name: Windows installers (msi + nsis)
+    # Only for commits that land on main (and manual runs) — PRs stop at the
+    # gates above. Both must pass before we spend ~10 minutes on a bundle.
+    if: github.event_name != 'pull_request'
+    needs: [frontend, rust]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `tauri build` runs `pnpm build` itself via beforeBuildCommand.
+      - name: Build installers
+        run: pnpm tauri build
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: diecast-hunter-installers-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
