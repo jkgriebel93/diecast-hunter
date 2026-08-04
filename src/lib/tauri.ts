@@ -1067,7 +1067,7 @@ export async function driverListingCounts(): Promise<Map<string, number>> {
   }
 }
 
-export function formatCents(cents: number | null): string {
-  if (cents === null || cents === undefined) return "—";
-  return `$${(cents / 100).toFixed(2)}`;
-}
+// Re-exported so the many existing `import { formatCents } from "@/lib/tauri"`
+// sites keep working; the implementation lives in format.ts (Tauri-free,
+// unit-testable).
+export { formatCents, formatCount } from "./format";

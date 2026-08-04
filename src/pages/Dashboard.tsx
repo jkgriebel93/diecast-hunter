@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type AppStatus } from "@/lib/tauri";
+import { api, formatCount, type AppStatus } from "@/lib/tauri";
 
 export function Dashboard() {
   const [status, setStatus] = useState<AppStatus | null>(null);
@@ -47,7 +47,9 @@ function Stat({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="card">
       <div className="label">{label}</div>
-      <div className="text-3xl font-semibold tabular-nums">{value}</div>
+      <div className="text-3xl font-semibold tabular-nums">
+        {typeof value === "number" ? formatCount(value) : value}
+      </div>
     </div>
   );
 }

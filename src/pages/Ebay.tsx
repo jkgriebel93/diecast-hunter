@@ -4,6 +4,7 @@ import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
   api,
   formatCents,
+  formatCount,
   type EbaySyncAllSummary,
   type ListingRow,
   type SavedSearch,
@@ -291,7 +292,9 @@ function Stat({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="card !p-3">
       <div className="label">{label}</div>
-      <div className="text-xl font-semibold tabular-nums">{value}</div>
+      <div className="text-xl font-semibold tabular-nums">
+        {typeof value === "number" ? formatCount(value) : value}
+      </div>
     </div>
   );
 }
