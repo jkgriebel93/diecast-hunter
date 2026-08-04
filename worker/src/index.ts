@@ -260,41 +260,80 @@ export async function handleNotification(
   const data =
     (notification.data as Record<string, unknown> | undefined) ?? {};
 
-  // Deliberately swallow store failures and still return 200. eBay treats any
-  // non-2xx as a failed delivery and retries indefinitely — a *permanent*
-  // misconfiguration (e.g. an unbound store, which once turned a dead KV
-  // binding into an infinite retry storm) would otherwise hammer this endpoint
-  // forever and trip eBay's "endpoint down" alerts. For a single-user app a
-  // dropped deletion notification on a genuine failure is acceptable; the
-  // structured error log below makes it visible in Worker observability.
-  try {
-    await env.DB.prepare(
-      `INSERT INTO marketplace_deletions
-         (notification_id, received_at, user_id, username, eias_token, raw)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(notification_id) DO NOTHING`,
-    )
-      .bind(
-        id,
-        Date.now(),
-        (data.userId as string | undefined) ?? null,
-        (data.username as string | undefined) ?? null,
-        (data.eiasToken as string | undefined) ?? null,
-        JSON.stringify(notification),
-      )
-      .run();
-  } catch (err) {
-    console.error(
-      JSON.stringify({
-        event: "deletion_insert_failed",
-        notification_id: id,
-        error: err instanceof Error ? err.message : String(err),
-      }),
-    );
-  }
+  // Answer 200 even when the write ultimately fails — see the "Deletion
+  // write contract" section of README.md. Short version: any non-2xx makes
+  // eBay retry indefinitely, and a *permanent* fault (unbound binding,
+  // schema drift, exhausted quota) fails identically on every retry, so the
+  // retries become a storm that trips eBay's endpoint-down detection and
+  // puts the whole subscription at risk. Losing one record is the lesser
+  // harm.
+  //
+  // It is still harm, and D1 is the only store, so transient blips get a
+  // bounded retry here first. That recovers the failure class eBay's retry
+  // would have covered, without giving eBay a reason to retry.
+  const stored = await insertDeletion(env, id, notification, data);
 
-  logPost(meta, "stored");
+  logPost(meta, stored ? "stored" : "store_failed");
   return new Response("ok", { status: 200 });
+}
+
+/** Attempts before giving up on the insert and answering 200 anyway. */
+const INSERT_ATTEMPTS = 3;
+/** Backoff base; attempt N waits N × this. Worst case adds ~150ms. */
+const INSERT_RETRY_MS = 50;
+
+/**
+ * Insert one deletion notification, retrying a failed write a couple of
+ * times before conceding. Returns whether the row actually landed.
+ *
+ * Safe to retry: the statement is `ON CONFLICT(notification_id) DO NOTHING`,
+ * so a retry after a write that partially succeeded can't duplicate.
+ */
+async function insertDeletion(
+  env: Env,
+  id: string,
+  notification: Record<string, unknown>,
+  data: Record<string, unknown>,
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= INSERT_ATTEMPTS; attempt++) {
+    try {
+      await env.DB.prepare(
+        `INSERT INTO marketplace_deletions
+           (notification_id, received_at, user_id, username, eias_token, raw)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(notification_id) DO NOTHING`,
+      )
+        .bind(
+          id,
+          Date.now(),
+          (data.userId as string | undefined) ?? null,
+          (data.username as string | undefined) ?? null,
+          (data.eiasToken as string | undefined) ?? null,
+          JSON.stringify(notification),
+        )
+        .run();
+      return true;
+    } catch (err) {
+      const giving_up = attempt === INSERT_ATTEMPTS;
+      // `deletion_insert_failed` is the alertable event — it means a
+      // notification was accepted by eBay and then lost. The retry line is
+      // informational.
+      console.error(
+        JSON.stringify({
+          event: giving_up ? "deletion_insert_failed" : "deletion_insert_retry",
+          notification_id: id,
+          attempt,
+          attempts: INSERT_ATTEMPTS,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+      if (giving_up) return false;
+      await new Promise((resolve) =>
+        setTimeout(resolve, INSERT_RETRY_MS * attempt),
+      );
+    }
+  }
+  return false;
 }
 
 interface PendingRow {

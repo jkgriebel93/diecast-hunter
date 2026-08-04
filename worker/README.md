@@ -175,6 +175,42 @@ Not yet implemented — that's a follow-up commit. The plan:
   signature verification: each `POST /marketplace-deletion` carrying an
   `x-ebay-signature` header costs one KV read to look up `pubkey:${kid}`.
 
+## Deletion write contract
+
+**A verified notification always gets `200`, even if the D1 write fails.**
+That is deliberate, and it is not the obvious choice, so here is the
+reasoning (DCH-28).
+
+eBay treats any non-2xx as a failed delivery and retries indefinitely.
+Retrying only helps a *transient* failure. A **permanent** one — an unbound
+binding, schema drift, exhausted quota — fails identically on every attempt,
+so the retries become a storm rather than eventual delivery. That has
+happened here before: a dead KV binding produced exactly that. A storm
+trips eBay's endpoint-down detection, which can get the notification
+subscription disabled and the production keyset locked. Risking the whole
+subscription to save one record is the worse trade.
+
+Since D1 is the only store, a swallowed failure is unrecoverable — so the
+handler does not simply give up:
+
+1. The insert is retried up to **3 attempts** with a short backoff
+   (~150 ms worst case). This is what recovers transient blips, and it does
+   so without giving eBay a reason to retry. Retrying is safe because the
+   statement is `ON CONFLICT(notification_id) DO NOTHING`.
+2. If every attempt fails, the Worker answers `200` and logs
+   **`deletion_insert_failed`** with the `notification_id`, attempt count,
+   and error.
+
+`deletion_insert_failed` means a notification was accepted by eBay and then
+lost — it is the event worth alerting on. The per-request outcome line
+(`event: "deletion_post"`) reports `outcome: "store_failed"` in that case
+rather than `"stored"`, so the two logs agree.
+
+> **Not yet configured:** an actual alert on `deletion_insert_failed`. Until
+> one exists in the Cloudflare dashboard (Workers Observability → alerts, or
+> a Logpush job), a lost notification is only visible to someone reading
+> logs. Set this up before treating the compliance story as complete.
+
 ## Signature verification & abuse
 
 Inbound notifications are authenticated: the `x-ebay-signature` header carries
