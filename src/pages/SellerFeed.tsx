@@ -14,6 +14,7 @@ import {
 import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
+import { ErrorBanner } from "@/components/ErrorBanner";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-24 h-24",
@@ -491,11 +492,7 @@ export function SellerFeed() {
         onDelete={onDeleteSeller}
       />
 
-      {error && (
-        <div className="card border-red-500/40 text-red-300 text-sm">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner error={error} />}
       {actionMessage && (
         <div className="text-xs text-emerald-400">{actionMessage}</div>
       )}
@@ -510,7 +507,9 @@ export function SellerFeed() {
           page.
         </div>
       ) : page === null ? (
-        <div className="card text-sm text-fg-muted">Loading…</div>
+        // A failed load leaves `page` null forever; the error banner above
+        // is the state, not "still loading".
+        error ? null : <div className="card text-sm text-fg-muted">Loading…</div>
       ) : page.items.length === 0 ? (
         <div className="card text-sm text-fg-muted">
           No recent listings match the current filters.

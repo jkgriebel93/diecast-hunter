@@ -13,6 +13,7 @@ import {
 import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
+import { ErrorBanner } from "@/components/ErrorBanner";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-12 h-12",
@@ -161,14 +162,12 @@ export function Ebay() {
         </div>
       )}
 
-      {error && (
-        <div className="card border-red-500/40 text-red-300 text-sm">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner error={error} />}
 
       {rows === null ? (
-        <div className="card text-sm text-fg-muted">Loading…</div>
+        // A failed load leaves this null forever; the error banner above
+        // is the state, not "still loading".
+        error ? null : <div className="card text-sm text-fg-muted">Loading…</div>
       ) : summary === null ? null : (
         <>
           <section className="space-y-3">

@@ -12,6 +12,7 @@ import {
 import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
+import { ErrorBanner } from "@/components/ErrorBanner";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-12 h-12",
@@ -162,14 +163,12 @@ export function SavedSearches() {
         <div className="text-xs text-emerald-400">{syncMessage}</div>
       )}
 
-      {error && (
-        <div className="card border-red-500/40 text-red-300 text-sm">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner error={error} />}
 
       {rows === null ? (
-        <div className="card text-sm text-fg-muted">Loading…</div>
+        // A failed load leaves this null forever; the error banner above
+        // is the state, not "still loading".
+        error ? null : <div className="card text-sm text-fg-muted">Loading…</div>
       ) : rows.length === 0 ? (
         <div className="card text-sm text-fg-muted">
           No saved searches yet. Click "New saved search", or save one from the{" "}

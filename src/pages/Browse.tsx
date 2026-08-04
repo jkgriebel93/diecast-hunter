@@ -11,6 +11,7 @@ import { ViewLink } from "@/components/ViewLink";
 import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
+import { ErrorBanner } from "@/components/ErrorBanner";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-24 h-24",
@@ -366,11 +367,7 @@ export function Browse() {
         </div>
       </form>
 
-      {error && (
-        <div className="card border-red-500/40 text-red-300 text-sm">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner error={error} />}
       {actionMessage && (
         <div className="text-xs text-emerald-400">{actionMessage}</div>
       )}
