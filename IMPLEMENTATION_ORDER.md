@@ -1,8 +1,9 @@
 # Implementation order for open DCH tickets
 
-As of 2026-08-04 (rev 2: DCH-11 shipped, DCH-17 in review, DCH-28 added). DCH-8 (archiving)
-and DCH-11 (extension match verdicts) are merged; DCH-9 (sold-data spike) delivered, pending
-review. Key departure from the roadmap buckets: **DCH-10 moves down a few slots** — the spike
+As of 2026-08-04 (rev 3: DCH-17 and DCH-18 shipped; DCH-28 demoted after reading the code —
+its 200-on-D1-failure turned out to be deliberate, so the failing test is the defect, not the
+handler). DCH-8, DCH-11, DCH-17, and DCH-18 are merged; DCH-9 (sold-data spike) delivered,
+pending review. Key departure from the roadmap buckets: **DCH-10 moves down a few slots** — the spike
 concluded comps build on the DCH-8 archive, which only started accumulating sold prices on
 2026-08-03. A few weeks of watchlist syncs make comps v1 immediately useful instead of empty.
 Compounding tickets (training data, CI safety) go first.
@@ -12,17 +13,17 @@ Compounding tickets (training data, CI safety) go first.
 | # | Ticket | What | Why here |
 | --- | --- | --- | --- |
 | ~~1~~ | ~~DCH-11~~ | Confirm/correct registry match from the extension | ✅ Shipped (PR #15, merged 2026-08-04). |
-| ~~2~~ | ~~DCH-17~~ | Thousands separators | ✅ In review (PR #16). |
-| 3 | DCH-18 | Nicer error messages | Quick win; `AppError` already structured — presentation only. |
-| 4 | DCH-28 | Worker Bug: deletion notification acknowledged with 200 when the D1 write fails | Small fix, real data-loss/compliance exposure in prod — eBay never redelivers an acknowledged notification. Surfaced by DCH-17's test-harness work. |
-| 5 | DCH-22 | Build pipeline (installer + `cargo test` / `tsc -b` / `pnpm test` gates on main) | Cheap insurance that protects every later ticket; earlier = more payback. Now that vitest exists (DCH-17), gate on it too. |
-| 6 | DCH-10 | Completed-auction comps | By now the archive has weeks of sold data with registry links. ~2–4 days per spike estimate. |
+| ~~2~~ | ~~DCH-17~~ | Thousands separators | ✅ Shipped (PR #16, merged 2026-08-04). |
+| ~~3~~ | ~~DCH-18~~ | Nicer error messages | ✅ Shipped (PR #17, merged 2026-08-04). |
+| 4 | DCH-22 | Build pipeline (installer + `cargo test` / `tsc -b` / `pnpm test` gates on main) | Cheap insurance that protects every later ticket; earlier = more payback. Now that vitest exists (DCH-17), gate on it too. |
+| 5 | DCH-10 | Completed-auction comps | By now the archive has weeks of sold data with registry links. ~2–4 days per spike estimate. |
 
 ## Contained features
 
 | # | Ticket | What | Notes |
 | --- | --- | --- | --- |
-| 7 | DCH-15 | Year-range filters | Small, no dependencies. |
+| 6 | DCH-15 | Year-range filters | Small, no dependencies. |
+| 7 | DCH-28 | Worker: D1 write failures swallowed; stale test asserts the opposite | Demoted from #4. The 200 is a deliberate, documented anti-retry-storm tradeoff, not a regression — the *test* is the stale artifact. Decide the contract (classify errors / absorb retries / keep + alert) before coding. |
 | 8 | DCH-12 | My Collection entries not in DCR | Needs value-basis decision + DCR-sync-prune safety. |
 | 9 | DCH-14 | Saved pre-searches, cached & filtered live | Rides the pre-warm machinery. |
 | 10 | DCH-16 | Improve Saved Seller browsing | Write the problem statement first — currently a one-liner. |
