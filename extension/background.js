@@ -36,6 +36,10 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         sendResponse(await post(cfg, "/match/preview", msg.payload));
       } else if (msg.type === "watch") {
         sendResponse(await post(cfg, "/listings/watch", msg.payload));
+      } else if (msg.type === "confirm") {
+        sendResponse(await post(cfg, "/match/confirm", msg.payload));
+      } else if (msg.type === "reject") {
+        sendResponse(await post(cfg, "/match/reject", msg.payload));
       } else {
         sendResponse({ ok: false, error: `unknown message type ${msg.type}` });
       }

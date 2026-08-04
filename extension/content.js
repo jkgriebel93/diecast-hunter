@@ -81,6 +81,12 @@ const CSS = `
     color: #e6e8ec; padding: 4px 10px; border-radius: 7px; font-size: 12px; }
   .dh-btn:hover { background: #303748; }
   .dh-btn[disabled] { opacity: .5; cursor: default; }
+  .dh-btn.confirm { border-color: #1e5c40; color: #4ade80; }
+  .dh-btn.confirm:hover { background: #123b2a; }
+  .dh-btn.reject { border-color: #5c1e1e; color: #f87171; }
+  .dh-btn.reject:hover { background: #3b1212; }
+  .dh-verdict { color: #4ade80; font-size: 12px; }
+  .dh-note { margin-top: 6px; font-size: 11px; color: #9aa2b1; }
   .dh-link { color: #7ab8ff; text-decoration: none; font-size: 12px; }
   .dh-link:hover { text-decoration: underline; }
 `;
@@ -200,7 +206,11 @@ async function main() {
       }
       ${dcrLink}
     </div>
+    <div class="dh-actions" id="dh-verdict-row"></div>
+    <div class="dh-note" id="dh-note"></div>
   `);
+
+  renderVerdictRow(panel, p, already);
 
   const watchBtn = panel.querySelector("#dh-watch");
   if (watchBtn) {
@@ -226,6 +236,79 @@ async function main() {
       }
     });
   }
+}
+
+// The confirm / "not this car" verdict row under the actions. Each verdict
+// is a labeled training example for the app's matcher, so the buttons are
+// worth their space even when the user doesn't plan to bid. Confirming (or
+// rejecting) an item that isn't saved yet watches + saves it first — the
+// note under the buttons says so.
+function renderVerdictRow(panel, p, alreadySaved) {
+  const row = panel.querySelector("#dh-verdict-row");
+  const note = panel.querySelector("#dh-note");
+  if (!row || !p.entry) return;
+
+  const confirmedSame =
+    p.already_user_confirmed &&
+    p.already_matched_entry_id === p.entry.registry_entry_id;
+  const confirmedNoMatch =
+    p.already_user_confirmed && p.already_matched_entry_id === null;
+
+  if (confirmedSame) {
+    row.innerHTML = `<span class="dh-verdict">✓ match confirmed</span>`;
+    return;
+  }
+
+  row.innerHTML = `
+    <button class="dh-btn confirm" id="dh-confirm">✓ Confirm match</button>
+    <button class="dh-btn reject" id="dh-reject">✗ Not this car</button>
+  `;
+  if (confirmedNoMatch) {
+    note.textContent = "Currently marked “no match” in the app — confirming overrides that.";
+  } else if (!alreadySaved) {
+    note.textContent = "Confirming also watches the listing and saves it to the app.";
+  }
+
+  const done = (text) => {
+    row.innerHTML = `<span class="dh-verdict">${text}</span>`;
+    note.textContent = "";
+  };
+  const fail = (r, verb) => {
+    const err = (r.body && r.body.error) || r.error || `HTTP ${r.status}`;
+    note.textContent = `${verb} failed: ${err}`;
+  };
+  const busy = (disabled) => {
+    for (const b of row.querySelectorAll("button")) b.disabled = disabled;
+  };
+
+  row.querySelector("#dh-confirm").addEventListener("click", async () => {
+    busy(true);
+    const r = await sendMessage({
+      type: "confirm",
+      payload: {
+        input: location.href,
+        registry_entry_id: p.entry.registry_entry_id,
+      },
+    });
+    if (r.ok) done(r.body && r.body.saved_now ? "✓ watched + confirmed" : "✓ match confirmed");
+    else {
+      busy(false);
+      fail(r, "Confirm");
+    }
+  });
+
+  row.querySelector("#dh-reject").addEventListener("click", async () => {
+    busy(true);
+    const r = await sendMessage({
+      type: "reject",
+      payload: { input: location.href },
+    });
+    if (r.ok) done(r.body && r.body.saved_now ? "watched + marked no match" : "marked no match");
+    else {
+      busy(false);
+      fail(r, "Reject");
+    }
+  });
 }
 
 main().catch(() => {});
