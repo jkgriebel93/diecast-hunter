@@ -43,7 +43,8 @@ export function makeKv(): FakeKv {
  * Minimal D1 mock that mirrors the `prepare().bind().run()` chain we use.
  * Captures every successful insert in `_rows` keyed by notification_id so
  * tests can assert on the write. Honors `ON CONFLICT DO NOTHING` by only
- * inserting when the key is new. `_failNextRun` causes the next `run()` or
+ * inserting when the key is new. `_failNextRun` / `_failRuns` /
+ * `_failAllRuns` cause the next `run()` or
  * `all()` to reject, used to exercise failure paths.
  */
 export interface FakeD1Row {
@@ -59,6 +60,10 @@ export interface FakeD1Row {
 export type FakeD1 = D1Database & {
   _rows: Map<string, FakeD1Row>;
   _failNextRun: boolean;
+  /** Fail this many subsequent runs, then succeed. For retry paths. */
+  _failRuns: number;
+  /** Fail every run — a permanent fault rather than a transient blip. */
+  _failAllRuns: boolean;
 };
 
 /**
@@ -78,6 +83,8 @@ export function makeD1(): FakeD1 {
   const db = {
     _rows: rows,
     _failNextRun: false,
+    _failRuns: 0,
+    _failAllRuns: false,
     prepare(sql: string): D1PreparedStatement {
       const isInsert = /INSERT\s+INTO\s+marketplace_deletions/i.test(sql);
       const isOnConflictNothing = /ON\s+CONFLICT.*DO\s+NOTHING/is.test(sql);
@@ -102,6 +109,13 @@ export function makeD1(): FakeD1 {
         async run(): Promise<unknown> {
           if (db._failNextRun) {
             db._failNextRun = false;
+            throw new Error("simulated d1 failure");
+          }
+          if (db._failAllRuns) {
+            throw new Error("simulated d1 failure");
+          }
+          if (db._failRuns > 0) {
+            db._failRuns--;
             throw new Error("simulated d1 failure");
           }
           if (isInsert) {
@@ -155,6 +169,13 @@ export function makeD1(): FakeD1 {
         async all<T = unknown>(): Promise<{ results: T[] }> {
           if (db._failNextRun) {
             db._failNextRun = false;
+            throw new Error("simulated d1 failure");
+          }
+          if (db._failAllRuns) {
+            throw new Error("simulated d1 failure");
+          }
+          if (db._failRuns > 0) {
+            db._failRuns--;
             throw new Error("simulated d1 failure");
           }
           if (isSelectPending) {

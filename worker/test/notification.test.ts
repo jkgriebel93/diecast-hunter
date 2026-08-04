@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { handleNotification } from "../src/index";
 import {
   buildSigHeader,
@@ -182,22 +182,63 @@ describe("handleNotification", () => {
     expect(env.DB._rows.size).toBe(1);
   });
 
-  it("propagates D1 failure so the runtime returns 5xx and eBay retries", async () => {
-    // Phase 3 removed the KV safety net. With only one store, the
-    // Promise.allSettled isolation is gone too — a D1 failure now bubbles
-    // out of the handler. The worker runtime turns that into a 5xx, which
-    // is exactly what we want so eBay's retry pipeline gets us back to
-    // consistency rather than silently dropping the record.
+  it("retries a transient D1 failure and still records the deletion", async () => {
+    // The failure class that actually costs us data: a blip on the only
+    // store. Retrying in-request recovers it without involving eBay's
+    // retry pipeline, which we can't use safely (see the next test).
     const env = makeEnv();
-    env.DB._failNextRun = true;
-    const req = await signedReq(
-      validNotification("notif-d1-fail"),
-      keypair.privateKey,
-    );
-    await expect(handleNotification(req, env)).rejects.toThrow(
-      /simulated d1 failure/,
-    );
+    env.DB._failRuns = 1; // first attempt throws, the retry succeeds
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const res = await handleNotification(
+        await signedReq(
+          validNotification("notif-d1-retry"),
+          keypair.privateKey,
+        ),
+        env,
+      );
+      expect(res.status).toBe(200);
+    } finally {
+      errSpy.mockRestore();
+    }
+    expect(env.DB._rows.size).toBe(1);
+  });
+
+  it("answers 200 and logs store_failed when every insert attempt fails", async () => {
+    // Contract (DCH-28, documented in README.md): a permanent fault must
+    // NOT become a non-2xx. eBay retries non-2xx indefinitely and a
+    // permanent fault fails identically every time, so the retries become a
+    // storm that trips eBay's endpoint-down detection — risking the whole
+    // subscription to save one record.
+    const env = makeEnv();
+    env.DB._failAllRuns = true;
+    const logs: string[] = [];
+    const errors: string[] = [];
+    const logSpy = vi
+      .spyOn(console, "log")
+      .mockImplementation((m?: unknown) => void logs.push(String(m)));
+    const errSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation((m?: unknown) => void errors.push(String(m)));
+    try {
+      const res = await handleNotification(
+        await signedReq(validNotification("notif-d1-fail"), keypair.privateKey),
+        env,
+      );
+      expect(res.status).toBe(200);
+    } finally {
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+    }
+
     expect(env.DB._rows.size).toBe(0);
+    // The outcome line must not claim "stored" when nothing was stored.
+    expect(logs.some((l) => l.includes('"outcome":"store_failed"'))).toBe(true);
+    expect(logs.some((l) => l.includes('"outcome":"stored"'))).toBe(false);
+    // The alertable event carries the id of the notification we lost.
+    const lost = errors.find((e) => e.includes("deletion_insert_failed"));
+    expect(lost).toBeDefined();
+    expect(lost).toContain("notif-d1-fail");
   });
 
   it("caches the public key after the first verify", async () => {
