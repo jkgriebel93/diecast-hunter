@@ -551,6 +551,12 @@ pub struct ListingRow {
     /// analysis) after the sync removed it from the eBay watchlist. Exempt
     /// from watchlist pruning.
     pub is_archived: bool,
+    /// Why an archived listing ended: 'sold', 'ended' (unsold), or 'removed'
+    /// (vanished from eBay). None for active rows and pre-0024 archives not
+    /// yet backfilled by a sync.
+    pub end_reason: Option<String>,
+    /// When the sync archived the listing (Unix seconds).
+    pub archived_at: Option<i64>,
     pub end_time: Option<i64>,
     pub seller_username: Option<String>,
     pub seller_rating: Option<f64>,
@@ -632,6 +638,8 @@ struct ListingRowRaw {
     accepts_offers: i64,
     status: String,
     is_archived: i64,
+    end_reason: Option<String>,
+    archived_at: Option<i64>,
     end_time: Option<i64>,
     seller_username: Option<String>,
     seller_rating: Option<f64>,
@@ -673,7 +681,7 @@ pub async fn list_listings(state: State<'_, AppState>) -> AppResult<Vec<ListingR
         "SELECT l.id, s.code AS seller_code, l.external_id, l.url, l.title,
                 l.price_cents, l.shipping_cents, l.currency,
                 l.condition, l.listing_type, l.accepts_offers, l.status,
-                l.is_archived, l.end_time,
+                l.is_archived, l.end_reason, l.archived_at, l.end_time,
                 l.seller_username, l.seller_rating, l.image_url,
                 l.saved_at, l.last_seen_at,
                 lm.registry_entry_id,
@@ -740,6 +748,8 @@ pub async fn list_listings(state: State<'_, AppState>) -> AppResult<Vec<ListingR
                 accepts_offers: r.accepts_offers != 0,
                 status: r.status,
                 is_archived: r.is_archived != 0,
+                end_reason: r.end_reason,
+                archived_at: r.archived_at,
                 end_time: r.end_time,
                 seller_username: r.seller_username,
                 seller_rating: r.seller_rating,

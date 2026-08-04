@@ -8,18 +8,13 @@ use crate::error::{AppError, AppResult};
 /// Browse API GET /buy/browse/v1/item/get_item_by_legacy_id, with a fallback
 /// to /get_items_by_item_group when eBay tells us the legacy id is actually
 /// an item-group id (errorId 11006 — common for multi-variation listings).
-pub async fn fetch_item_by_legacy_id(
-    client: &EbayClient,
-    legacy_id: &str,
-) -> AppResult<EbayItem> {
+pub async fn fetch_item_by_legacy_id(client: &EbayClient, legacy_id: &str) -> AppResult<EbayItem> {
     let single_path =
         format!("/buy/browse/v1/item/get_item_by_legacy_id?legacy_item_id={legacy_id}");
     match client.get(&single_path).await {
         Ok(body) => {
             let raw: BrowseItemRaw = serde_json::from_str(&body).map_err(|e| {
-                AppError::Parse(format!(
-                    "ebay browse response unparseable: {e}: {body}"
-                ))
+                AppError::Parse(format!("ebay browse response unparseable: {e}: {body}"))
             })?;
             Ok(EbayItem::from_raw(raw, body))
         }
@@ -30,18 +25,11 @@ pub async fn fetch_item_by_legacy_id(
     }
 }
 
-async fn fetch_item_from_group(
-    client: &EbayClient,
-    group_id: &str,
-) -> AppResult<EbayItem> {
-    let path = format!(
-        "/buy/browse/v1/item/get_items_by_item_group?item_group_id={group_id}"
-    );
+async fn fetch_item_from_group(client: &EbayClient, group_id: &str) -> AppResult<EbayItem> {
+    let path = format!("/buy/browse/v1/item/get_items_by_item_group?item_group_id={group_id}");
     let body = client.get(&path).await?;
     let group: BrowseItemGroupResponse = serde_json::from_str(&body).map_err(|e| {
-        AppError::Parse(format!(
-            "ebay item group response unparseable: {e}: {body}"
-        ))
+        AppError::Parse(format!("ebay item group response unparseable: {e}: {body}"))
     })?;
 
     if group.items.is_empty() {
@@ -53,10 +41,7 @@ async fn fetch_item_from_group(
     // Prefer a variant with a price set (eBay sometimes orders variants with
     // no price first); fall back to index 0.
     let mut items = group.items;
-    let idx = items
-        .iter()
-        .position(|i| i.price.is_some())
-        .unwrap_or(0);
+    let idx = items.iter().position(|i| i.price.is_some()).unwrap_or(0);
     let mut item = items.swap_remove(idx);
 
     // Stabilize the stored item_id so re-syncing the same group doesn't churn
@@ -241,7 +226,10 @@ mod tests {
         let item = EbayItem::from_raw(raw, FIXTURE.to_string());
         assert_eq!(item.item_id, "v1|123456789012|0");
         assert_eq!(item.legacy_item_id.as_deref(), Some("123456789012"));
-        assert_eq!(item.title, "2002 Jeff Gordon #24 Pepsi Daytona 1:24 Action ARC NASCAR Diecast");
+        assert_eq!(
+            item.title,
+            "2002 Jeff Gordon #24 Pepsi Daytona 1:24 Action ARC NASCAR Diecast"
+        );
         assert_eq!(item.price_cents, Some(4995));
         assert_eq!(item.shipping_cents, Some(750));
         assert_eq!(item.currency, "USD");

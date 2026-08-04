@@ -136,10 +136,7 @@ struct OfferHeader {
     discount_percent: Option<f64>,
 }
 
-async fn fetch_offer_headers(
-    env: EbayEnvironment,
-    iaf_token: &str,
-) -> AppResult<Vec<OfferHeader>> {
+async fn fetch_offer_headers(env: EbayEnvironment, iaf_token: &str) -> AppResult<Vec<OfferHeader>> {
     let now = Utc::now();
     let start = now - chrono::Duration::days(LOOKBACK_DAYS);
     let body = format!(
@@ -378,8 +375,8 @@ fn build_dt(
     second: u32,
     offset: FixedOffset,
 ) -> Option<DateTime<FixedOffset>> {
-    let naive = chrono::NaiveDate::from_ymd_opt(year, month, day)?
-        .and_hms_opt(hour, minute, second)?;
+    let naive =
+        chrono::NaiveDate::from_ymd_opt(year, month, day)?.and_hms_opt(hour, minute, second)?;
     offset.from_local_datetime(&naive).single()
 }
 
@@ -515,23 +512,17 @@ static LONG_MESSAGE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"<LongMessage>([^<]+)</LongMessage>").unwrap());
 static MESSAGE_BLOCK_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?s)<Message>(.*?)</Message>").unwrap());
-static DISCOUNT_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)([\d.]+)\s*%").unwrap());
-static MONEY_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\$([\d,]+\.\d{2})").unwrap());
-static OFFER_AMOUNT_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"(?s)<td[^>]*id="offer-amount"[^>]*>(.*?)</td>"#).unwrap()
-});
-static OFFER_EXPIRES_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"(?s)<td[^>]*id="offer-expires"[^>]*>(.*?)</td>"#).unwrap()
-});
-static BIN_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"Buy It Now:\s*\$([\d,]+\.\d{2})").unwrap());
+static DISCOUNT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)([\d.]+)\s*%").unwrap());
+static MONEY_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\$([\d,]+\.\d{2})").unwrap());
+static OFFER_AMOUNT_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"(?s)<td[^>]*id="offer-amount"[^>]*>(.*?)</td>"#).unwrap());
+static OFFER_EXPIRES_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"(?s)<td[^>]*id="offer-expires"[^>]*>(.*?)</td>"#).unwrap());
+static BIN_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"Buy It Now:\s*\$([\d,]+\.\d{2})").unwrap());
 static EXPIRES_TEXT_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)offer expires?:\s*([^<\n]+)").unwrap());
 static EXPIRES_DATE_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"([A-Za-z]{3})-(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})\s+([A-Z]{2,4})")
-        .unwrap()
+    Regex::new(r"([A-Za-z]{3})-(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})\s+([A-Z]{2,4})").unwrap()
 });
 
 #[cfg(test)]
@@ -547,7 +538,9 @@ mod tests {
             "Special limited-time 12% discount on 2002…"
         ));
         assert!(!is_offer_subject("A new device is using your account"));
-        assert!(!is_offer_subject("John, share feedback on your recent purchase"));
+        assert!(!is_offer_subject(
+            "John, share feedback on your recent purchase"
+        ));
     }
 
     #[test]
@@ -581,10 +574,7 @@ mod tests {
         assert_eq!(body.offer_price_cents, Some(4949));
         assert_eq!(body.original_price_cents, Some(5499));
         assert_eq!(body.currency.as_deref(), Some("USD"));
-        assert_eq!(
-            body.expires_at_text.as_deref(),
-            Some("May-14 15:58:53 PDT")
-        );
+        assert_eq!(body.expires_at_text.as_deref(), Some("May-14 15:58:53 PDT"));
     }
 
     #[test]

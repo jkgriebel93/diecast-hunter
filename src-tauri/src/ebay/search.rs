@@ -75,18 +75,12 @@ pub async fn search_diecasts(
 
     let path = build_search_path(query, filters, limit, offset);
     let body = client.get(&path).await?;
-    let raw: SearchResponseRaw = serde_json::from_str(&body).map_err(|e| {
-        AppError::Parse(format!("ebay search response unparseable: {e}: {body}"))
-    })?;
+    let raw: SearchResponseRaw = serde_json::from_str(&body)
+        .map_err(|e| AppError::Parse(format!("ebay search response unparseable: {e}: {body}")))?;
     Ok(SearchPage::from_raw(raw, limit, offset))
 }
 
-fn build_search_path(
-    query: &str,
-    filters: &SearchFilters,
-    limit: u32,
-    offset: u32,
-) -> String {
+fn build_search_path(query: &str, filters: &SearchFilters, limit: u32, offset: u32) -> String {
     let mut path = format!(
         "/buy/browse/v1/item_summary/search?category_ids={DIECAST_CATEGORY_ID}\
          &limit={limit}&offset={offset}"
@@ -98,7 +92,12 @@ fn build_search_path(
         path.push_str(&urlencode(q));
     }
 
-    if let Some(sort) = filters.sort.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(sort) = filters
+        .sort
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         path.push_str("&sort=");
         path.push_str(&urlencode(sort));
     }
@@ -346,7 +345,10 @@ mod tests {
             .into_owned()
             .collect::<std::collections::HashMap<_, _>>();
         let filter = decoded.get("filter").expect("filter param missing");
-        assert!(filter.contains("sellers:{seller_a|seller_b}"), "got: {filter}");
+        assert!(
+            filter.contains("sellers:{seller_a|seller_b}"),
+            "got: {filter}"
+        );
     }
 
     #[test]
@@ -365,7 +367,10 @@ mod tests {
             .collect::<std::collections::HashMap<_, _>>();
         let filter = decoded.get("filter").expect("filter param missing");
         assert!(filter.contains("conditions:{NEW|USED}"), "got: {filter}");
-        assert!(filter.contains("buyingOptions:{FIXED_PRICE}"), "got: {filter}");
+        assert!(
+            filter.contains("buyingOptions:{FIXED_PRICE}"),
+            "got: {filter}"
+        );
         assert!(filter.contains("price:[10.00..50.00]"), "got: {filter}");
         assert!(filter.contains("priceCurrency:USD"), "got: {filter}");
     }
