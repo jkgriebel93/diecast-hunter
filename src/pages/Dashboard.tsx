@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, formatCount, type AppStatus } from "@/lib/tauri";
+import { ErrorBanner } from "@/components/ErrorBanner";
 
 export function Dashboard() {
   const [status, setStatus] = useState<AppStatus | null>(null);
@@ -21,11 +22,7 @@ export function Dashboard() {
         </p>
       </header>
 
-      {error && (
-        <div className="card border-red-500/40 text-red-300 text-sm">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner error={error} />}
 
       <div className="grid grid-cols-3 gap-4">
         <Stat label="Registry entries" value={status?.registry_count ?? "—"} />

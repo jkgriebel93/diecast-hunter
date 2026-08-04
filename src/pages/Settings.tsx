@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
+import { ErrorBanner } from "@/components/ErrorBanner";
 import {
   api,
   driverListingCounts,
@@ -615,7 +616,7 @@ export function Settings() {
           <div className="text-xs text-emerald-400">{autoSyncMessage}</div>
         )}
         {autoSyncError && (
-          <div className="text-xs text-red-400">{autoSyncError}</div>
+          <ErrorBanner error={autoSyncError} variant="inline" />
         )}
       </section>
 
@@ -736,7 +737,7 @@ export function Settings() {
             </div>
           )}
           {syncError && (
-            <div className="text-xs text-red-400">{syncError}</div>
+            <ErrorBanner error={syncError} variant="inline" />
           )}
         </div>
 
@@ -781,7 +782,7 @@ export function Settings() {
             </div>
           )}
           {refreshError && (
-            <div className="text-xs text-red-400">{refreshError}</div>
+            <ErrorBanner error={refreshError} variant="inline" />
           )}
         </div>
 
@@ -811,7 +812,7 @@ export function Settings() {
             <div className="text-xs text-emerald-400">{optionsMessage}</div>
           )}
           {optionsError && (
-            <div className="text-xs text-red-400">{optionsError}</div>
+            <ErrorBanner error={optionsError} variant="inline" />
           )}
         </div>
 
@@ -871,7 +872,7 @@ export function Settings() {
             </div>
           )}
           {prewarmError && (
-            <div className="text-xs text-red-400">{prewarmError}</div>
+            <ErrorBanner error={prewarmError} variant="inline" />
           )}
 
           <div className="pt-1 space-y-1.5">
@@ -916,7 +917,7 @@ export function Settings() {
               </label>
             ))}
             {searchModeError && (
-              <div className="text-xs text-red-400 mt-1">{searchModeError}</div>
+              <ErrorBanner error={searchModeError} variant="inline" className="mt-1" />
             )}
           </div>
 
@@ -1015,7 +1016,7 @@ export function Settings() {
             </div>
           )}
           {linkRepairError && (
-            <div className="text-xs text-red-400">{linkRepairError}</div>
+            <ErrorBanner error={linkRepairError} variant="inline" />
           )}
         </div>
       </section>
@@ -1127,7 +1128,7 @@ export function Settings() {
           <div className="text-xs text-emerald-400">{ebayMessage}</div>
         )}
         {ebayError && (
-          <div className="text-xs text-red-400">{ebayError}</div>
+          <ErrorBanner error={ebayError} variant="inline" />
         )}
 
         <div className="border-t border-border pt-4 space-y-3">
@@ -1241,7 +1242,7 @@ export function Settings() {
             <div className="text-xs text-emerald-400">{oauthMessage}</div>
           )}
           {oauthError && (
-            <div className="text-xs text-red-400">{oauthError}</div>
+            <ErrorBanner error={oauthError} variant="inline" />
           )}
         </div>
 
@@ -1285,7 +1286,7 @@ export function Settings() {
             <div className="text-xs text-emerald-400">{filterMessage}</div>
           )}
           {filterError && (
-            <div className="text-xs text-red-400">{filterError}</div>
+            <ErrorBanner error={filterError} variant="inline" />
           )}
         </div>
 
@@ -1323,7 +1324,7 @@ export function Settings() {
             <div className="text-xs text-emerald-400">{buyerZipMessage}</div>
           )}
           {buyerZipError && (
-            <div className="text-xs text-red-400">{buyerZipError}</div>
+            <ErrorBanner error={buyerZipError} variant="inline" />
           )}
         </div>
       </section>
@@ -1335,7 +1336,7 @@ export function Settings() {
       {message && (
         <div className="text-sm text-emerald-400">{message}</div>
       )}
-      {error && <div className="text-sm text-red-400">{error}</div>}
+      {error && <ErrorBanner error={error} variant="inline" />}
     </div>
   );
 }
@@ -1505,7 +1506,7 @@ function ExtensionSection() {
       )}
 
       {message && <div className="text-xs text-emerald-400">{message}</div>}
-      {error && <div className="text-xs text-red-400">{error}</div>}
+      {error && <ErrorBanner error={error} variant="inline" />}
     </section>
   );
 }
@@ -1653,7 +1654,7 @@ function MatcherLearningSection() {
             ` Learned ${outcome.learned_aliases} scheme aliases.`}
         </div>
       )}
-      {error && <div className="text-xs text-red-400">{error}</div>}
+      {error && <ErrorBanner error={error} variant="inline" />}
 
       {showWeights && status && (
         <table className="text-xs w-full max-w-md">

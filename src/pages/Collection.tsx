@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { ErrorBanner } from "@/components/ErrorBanner";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -421,11 +422,7 @@ export function Collection() {
         </div>
       </header>
 
-      {error && (
-        <div className="card border-red-500/40 text-red-300 text-sm">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner error={error} />}
       {notice && (
         <div className="card text-sm text-fg-muted">{notice}</div>
       )}
@@ -533,7 +530,9 @@ export function Collection() {
       )}
 
       {items === null ? (
-        <div className="card text-sm text-fg-muted">Loading…</div>
+        // A failed load leaves this null forever; the error banner above
+        // is the state, not "still loading".
+        error ? null : <div className="card text-sm text-fg-muted">Loading…</div>
       ) : items.length === 0 ? (
         <div className="card text-sm text-fg-muted">
           Empty. Configure your diecastregistry.com credentials in Settings,

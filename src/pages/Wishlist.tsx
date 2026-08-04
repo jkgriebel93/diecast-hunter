@@ -13,6 +13,7 @@ import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { ViewLink } from "@/components/ViewLink";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
+import { ErrorBanner } from "@/components/ErrorBanner";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-24 h-24",
@@ -458,15 +459,13 @@ export function Wishlist() {
         </div>
       )}
 
-      {error && (
-        <div className="card border-red-500/40 text-red-300 text-sm">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner error={error} />}
       {info && <div className="card text-sm text-emerald-400">{info}</div>}
 
       {lists === null || entries === null ? (
-        <div className="card text-sm text-fg-muted">Loading…</div>
+        // A failed load leaves these null forever; the error banner above
+        // is the state, not "still loading".
+        error ? null : <div className="card text-sm text-fg-muted">Loading…</div>
       ) : entries.length === 0 ? (
         <div className="card text-sm text-fg-muted">
           Nothing on "{activeList?.name ?? "this list"}" yet. Use the "Add to
@@ -1067,7 +1066,7 @@ function LinkListingModal({
           autoFocus
         />
 
-        {error && <div className="text-xs text-red-400">{error}</div>}
+        {error && <ErrorBanner error={error} variant="inline" />}
 
         <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5">
           {filtered === null ? (

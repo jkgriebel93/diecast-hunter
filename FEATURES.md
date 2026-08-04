@@ -14,7 +14,7 @@
     - e.g. `Action / Lionel + 1:24 + Elite + CWC + (Standard)`
 - Improve Saved Seller browsing
 - Year ranges for filters
-- Make error messages look nicer
+- ~~Make error messages look nicer~~ (DCH-18: `describeError` in `src/lib/errors.ts` maps `AppError` strings to plain-language title + fix hint, with the raw text behind a "Technical details" disclosure; all 29 error render sites go through the shared `ErrorBanner` component)
 - ~~Include commas in monetary (and other numerical) displays~~ (DCH-17: shared `formatCents`/`formatCount` helpers in `src/lib/format.ts` (Intl.NumberFormat, unit-tested via the new `pnpm test` vitest setup); extension overlay formatter updated to match)
 - Learned tagging
 - FF extension option to correct a match

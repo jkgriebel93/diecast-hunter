@@ -31,6 +31,7 @@ import {
 import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
+import { ErrorBanner } from "@/components/ErrorBanner";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-24 h-24",
@@ -986,14 +987,12 @@ export function Listings() {
       {actionSummary && (
         <div className="text-xs text-emerald-400">{actionSummary}</div>
       )}
-      {error && (
-        <div className="card border-red-500/40 text-red-300 text-sm">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner error={error} />}
 
       {rows === null ? (
-        <div className="card text-sm text-fg-muted">Loading…</div>
+        // A failed load leaves this null forever; the error banner above
+        // is the state, not "still loading".
+        error ? null : <div className="card text-sm text-fg-muted">Loading…</div>
       ) : rows.length === 0 ? (
         <div className="card text-sm text-fg-muted flex flex-wrap items-center justify-between gap-3">
           <span>
@@ -3501,7 +3500,7 @@ function ManageGroupsDialog({
           </button>
         </div>
 
-        {error && <div className="text-xs text-red-400 mb-2">{error}</div>}
+        {error && <ErrorBanner error={error} variant="inline" className="mb-2" />}
 
         <div className="flex-1 overflow-y-auto -mx-1 px-1 space-y-4 min-h-[6rem]">
           {groups.length === 0 ? (
@@ -4016,7 +4015,7 @@ function GroupEditorDialog({
             </p>
           </div>
         </div>
-        {error && <div className="text-xs text-red-400 mt-2">{error}</div>}
+        {error && <ErrorBanner error={error} variant="inline" className="mt-2" />}
         <div className="flex items-center justify-end gap-2 mt-4 pt-3 border-t border-border">
           <button
             type="button"
@@ -4290,7 +4289,7 @@ function GroupMigrationWizard({
           </button>
         </div>
 
-        {error && <div className="text-xs text-red-400 mb-2">{error}</div>}
+        {error && <ErrorBanner error={error} variant="inline" className="mb-2" />}
         {info && <div className="text-xs text-emerald-400 mb-2">{info}</div>}
 
         <datalist id={driverListId}>
@@ -4951,7 +4950,7 @@ function RegistrySearchDialog({
 
         {info && <div className="text-xs text-emerald-400 mt-2">{info}</div>}
         {dialogError && (
-          <div className="text-xs text-red-400 mt-2">{dialogError}</div>
+          <ErrorBanner error={dialogError} variant="inline" className="mt-2" />
         )}
 
         <div className="flex-1 overflow-y-auto -mx-1 px-1 mt-3 space-y-1 min-h-[8rem]">

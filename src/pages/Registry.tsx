@@ -21,6 +21,7 @@ import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { MultiSelect } from "@/components/MultiSelect";
 import { ViewLink } from "@/components/ViewLink";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
+import { ErrorBanner } from "@/components/ErrorBanner";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-24 h-24",
@@ -536,11 +537,7 @@ export function Registry() {
       )}
 
       {info && <div className="text-xs text-emerald-400">{info}</div>}
-      {error && (
-        <div className="card border-red-500/40 text-red-300 text-sm">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner error={error} />}
 
       {searching ? (
         <div className="card text-sm text-fg-muted">Searching…</div>
@@ -1021,7 +1018,7 @@ function AddToGarageModal({
             </div>
 
             {error && (
-              <div className="text-xs text-red-400">{error}</div>
+              <ErrorBanner error={error} variant="inline" />
             )}
 
             <div className="flex items-center justify-end gap-2 pt-1">
