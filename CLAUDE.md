@@ -20,6 +20,7 @@ Rust side (run from `src-tauri/`):
 - `cargo test` — runs all Rust tests, including the parser tests in `src/dcr/parse.rs`
 - `cargo test parse_details_line` — single test by name
 - `cargo check` — fast compile check without linking
+- **Don't write a Rust test that calls a function which reaches `DcrClient`** (or any other network/keyring path). Doing so makes reqwest + TLS + the keyring reachable from the *test* binary, and on the Windows CI runner that binary then fails to load outright — `STATUS_ENTRYPOINT_NOT_FOUND` (exit `0xc0000139`) before a single test runs, with no indication of which test caused it. The app binary links the same code fine; this is specific to the test executable. Extract the decision you actually want to assert into a pure function and test that instead — see `RemovalPlan` / `plan_removal` in `sync/dcr_remove.rs`. The failure is invisible locally on Linux, so it only shows up in CI.
 - `cargo fmt` / `cargo clippy --all-targets -- -D warnings` — formatting / lints. Both are CI gates, and the tree is clean against both, so a repo-wide `cargo fmt` is now safe (it no longer rewrites untouched files). Deliberately-kept clippy findings carry a targeted `#[allow]` with a reason at the item — don't add crate-level allows.
 
 ## Architecture
