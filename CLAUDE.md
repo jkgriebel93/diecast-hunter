@@ -12,6 +12,7 @@ Package manager is **pnpm** (enforced by `packageManager` in package.json). Do n
 - `pnpm build` — `tsc -b && vite build` (TypeScript typecheck + production frontend bundle)
 - `pnpm format` / `pnpm format:check` — prettier over the TS/JS/CSS/JSON/HTML tree. Config is `.prettierrc.json` (prettier's defaults, written out explicitly) and `.prettierignore` (excludes `src-tauri/fixtures/` — captured verbatim from DCR/eBay, so reformatting would change what the parser tests assert — plus `*.md` and `*.rs`). CI gates on `format:check`, so run `pnpm format` before pushing rather than `npx prettier`, which resolves an unpinned version.
 - `pnpm tauri build` — produce Windows installers (msi + nsis)
+- `pnpm ext:package` — build the browser-extension zip at `extension/diecast-hunter-ebay.zip` via `scripts/package-extension.mjs`. Cross-platform (was PowerShell-only, so it couldn't run on Linux/WSL at all). The file set is discovered by walking `extension/`, so a new asset ships without editing the script; exclusions are *rules* — `.md`, `.map`, `.zip`, dotfiles/scratch, `node_modules`. Timestamps are pinned to 1980-01-01 (zip's DOS-time epoch) and directory entries are suppressed, so identical input yields a byte-identical archive. CI builds and uploads it on every run.
 - `pnpm tauri icon path/to/source.png` — regenerate `src-tauri/icons/` from a ≥1024px source
 
 Rust side (run from `src-tauri/`):
@@ -63,6 +64,12 @@ Tauri 2 app: **Rust backend ↔ React/TS frontend** communicating exclusively th
 ### Cloudflare Worker (`worker/`)
 
 Separate pnpm project — its own `package.json`, `wrangler.toml`, and `tsconfig.json`. Single-file Worker (`src/index.ts`) that satisfies eBay's Marketplace Account Deletion compliance so the prod keyset is unlocked. It (1) responds to eBay's GET verification challenge with the SHA-256 hash, (2) queues deletion POSTs in Cloudflare KV (`DELETIONS` binding), (3) exposes an authenticated polling API the desktop app drains on launch. Two secrets via `wrangler secret put`: `EBAY_VERIFICATION_TOKEN` (32–80 chars, shared with eBay) and `APP_SHARED_SECRET` (Bearer token between Worker and desktop app). Run `pnpm dev` (wrangler local on :8787) / `pnpm deploy` from inside `worker/`. ECDSA signature verification of inbound notifications is intentionally not implemented yet — see `worker/README.md` for the threat-model rationale.
+
+## Working conventions
+
+**Keep `IMPLEMENTATION_ORDER.md` in the feature PR.** When a ticket changes what's next — it ships, it unblocks something, it turns up work worth filing — update the plan in that ticket's own branch, not a follow-up docs PR. A standalone plan PR is only worth it when the revision spans several tickets, or when the ticket's PR has already merged.
+
+The reason is cost, not tidiness: `ci.yml` has no `paths-ignore` (deliberately — a required check reporting "skipped" can block a merge), so a two-line markdown PR runs the full matrix including the ~5-minute Windows Rust job. Splitting also leaves `main` describing a state that is already false, and separates the plan change from the work that explains it.
 
 ## Roadmap context
 
