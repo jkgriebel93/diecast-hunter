@@ -1,4 +1,5 @@
 mod commands;
+mod comps;
 mod db;
 mod dcr;
 mod ebay;

@@ -908,6 +908,21 @@ export interface EbayOauthStatus {
   access_token_expires_at: number | null;
 }
 
+/** Sold-price statistics over comparable archived listings (see the Rust
+ *  `comps` module). All amounts are delivered cost — price plus shipping. */
+export interface CompSummary {
+  /** "exact" = sales of this same registry entry; "similar" = same driver at
+   *  the same scale, used only when exact sales are too few. */
+  tier: "exact" | "similar";
+  count: number;
+  low_cents: number;
+  median_cents: number;
+  high_cents: number;
+  /** Unix seconds of the most / least recent sale in the set. */
+  newest_sold_at: number;
+  oldest_sold_at: number;
+}
+
 export interface ListingRow {
   listing_id: number;
   seller_code: string;
@@ -958,6 +973,12 @@ export interface ListingRow {
   matched_detail_url: string | null;
   /** Total (price + shipping) as percentage of registry retail. Lower = better deal. */
   deal_score: number | null;
+  /** What comparable cars actually sold for, from the local archive of ended
+   *  listings. null until enough sales have accumulated for this entry. */
+  comps: CompSummary | null;
+  /** Total as percentage of the comp median. Same shape as `deal_score` but
+   *  measured against real sales rather than list value. */
+  comp_score: number | null;
   /** Driver auto-detected from the listing title (independent of any registry match). */
   auto_driver_id: number | null;
   auto_driver_name: string | null;
@@ -1070,4 +1091,4 @@ export async function driverListingCounts(): Promise<Map<string, number>> {
 // Re-exported so the many existing `import { formatCents } from "@/lib/tauri"`
 // sites keep working; the implementation lives in format.ts (Tauri-free,
 // unit-testable).
-export { formatCents, formatCount } from "./format";
+export { formatAgo, formatCents, formatCount } from "./format";

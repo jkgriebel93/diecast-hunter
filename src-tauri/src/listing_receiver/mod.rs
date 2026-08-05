@@ -140,6 +140,12 @@ struct PreviewResponse {
     /// Total cost as a percentage of the matched entry's retail value —
     /// same computation as the Listings page. Lower = better deal.
     deal_score: Option<f64>,
+    /// What comparable cars actually sold for, from the local archive of
+    /// ended listings. None until enough sales have accumulated.
+    comps: Option<crate::comps::CompSummary>,
+    /// Total cost as a percentage of the comp median. Same shape as
+    /// `deal_score`, measured against real sales instead of list value.
+    comp_score: Option<f64>,
     /// Set when this eBay item is already saved locally.
     already_listing_id: Option<i64>,
     /// For an already-saved listing: the registry entry its match row
@@ -185,17 +191,47 @@ async fn match_preview(
         None => None,
     };
 
+    // Comps for the previewed entry. `already_listing_id` is excluded so a
+    // page the user is re-visiting after its listing ended isn't compared
+    // against its own sale. A failure here degrades to "no comps" rather than
+    // failing the whole overlay — the match verdict is the primary payload.
+    let comps = match preview.entry.as_ref() {
+        Some(entry) => comps_for_entry(&state.pool, entry.registry_entry_id, already_listing_id)
+            .await
+            .unwrap_or(None),
+        None => None,
+    };
+    let comp_score = crate::comps::comp_score(total, comps.as_ref());
+
     (
         StatusCode::OK,
         Json(PreviewResponse {
             preview,
             deal_score,
+            comps,
+            comp_score,
             already_listing_id,
             already_matched_entry_id: match_state.and_then(|(e, _)| e),
             already_user_confirmed: match_state.is_some_and(|(_, c)| c),
         }),
     )
         .into_response()
+}
+
+/// Sold-price comps for one registry entry. Unlike the Listings page, which
+/// scores hundreds of rows against one loaded index, the overlay scores
+/// exactly one entry per request — but it reuses the same index type so both
+/// surfaces apply identical tiering and thresholds.
+async fn comps_for_entry(
+    pool: &SqlitePool,
+    entry_id: i64,
+    exclude_listing_id: Option<i64>,
+) -> AppResult<Option<crate::comps::CompSummary>> {
+    let Some(target) = crate::comps::load_target(pool, entry_id).await? else {
+        return Ok(None);
+    };
+    let index = crate::comps::CompIndex::load(pool, chrono::Utc::now().timestamp()).await?;
+    Ok(index.summarize(&target, exclude_listing_id))
 }
 
 /// (registry_entry_id, user_confirmed) of a listing's match row, if any.
