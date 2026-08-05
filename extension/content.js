@@ -141,6 +141,46 @@ function entryLine(entry) {
   return bits || "(registry entry)";
 }
 
+/** Coarse age of a sale — enough to tell current comps from stale ones. */
+function soldAgo(unixSeconds) {
+  const days = Math.max(0, (Date.now() / 1000 - unixSeconds) / 86400);
+  if (days < 1) return "today";
+  if (days < 14) return `${Math.round(days)} days ago`;
+  if (days < 60) return `${Math.round(days / 7)} weeks ago`;
+  return `${Math.round(days / 30)} months ago`;
+}
+
+/** The price verdict rows: what this listing costs against the registry's
+ *  list value, and — when the app's archive holds enough comparable sales —
+ *  what such cars have actually sold for. The sold range leads when present
+ *  because it is evidence rather than a catalog number. */
+function compRows(p) {
+  const rows = [];
+  if (p.comps) {
+    const c = p.comps;
+    const scope = c.tier === "exact" ? "this car" : "this driver, same scale";
+    rows.push(
+      `<div class="dh-row"><span class="dh-muted">Sold</span>` +
+        `<span class="dh-strong">${fmtCents(c.low_cents)}–${fmtCents(c.high_cents)}</span></div>` +
+        `<div class="dh-muted">median ${fmtCents(c.median_cents)} · ${c.count} ` +
+        `${c.count === 1 ? "sale" : "sales"} of ${esc(scope)} · newest ${esc(soldAgo(c.newest_sold_at))}</div>`,
+    );
+  }
+  if (p.comp_score !== null && p.comp_score !== undefined) {
+    rows.push(
+      `<div class="dh-row"><span class="dh-muted">This listing</span>` +
+        `<span class="dh-strong">${Math.round(p.comp_score)}% of sold</span></div>`,
+    );
+  }
+  if (p.deal_score !== null && p.deal_score !== undefined) {
+    rows.push(
+      `<div class="dh-row"><span class="dh-muted">${p.comps ? "" : "This listing"}</span>` +
+        `<span class="${p.comps ? "dh-muted" : "dh-strong"}">${Math.round(p.deal_score)}% of retail</span></div>`,
+    );
+  }
+  return rows.join("");
+}
+
 async function main() {
   const title = extractTitle();
   if (!title) return;
@@ -196,11 +236,7 @@ async function main() {
     <div class="dh-muted">${entryLine(p.entry)}</div>
     <div class="dh-row"><span class="dh-muted">Retail</span><span>${fmtCents(p.entry.retail_value_cents)}</span></div>
     <div class="dh-row"><span class="dh-muted">Wholesale</span><span>${fmtCents(p.entry.wholesale_value_cents)}</span></div>
-    ${
-      p.deal_score !== null
-        ? `<div class="dh-row"><span class="dh-muted">This listing</span><span class="dh-strong">${Math.round(p.deal_score)}% of retail</span></div>`
-        : ""
-    }
+    ${compRows(p)}
     <div class="dh-actions">
       ${
         already

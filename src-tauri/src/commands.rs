@@ -1,3 +1,4 @@
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::sync::atomic::Ordering;
@@ -587,6 +588,13 @@ pub struct ListingRow {
     /// Total cost (price + shipping) as a percentage of registry retail. None
     /// if either side is missing. Lower = better deal.
     pub deal_score: Option<f64>,
+    /// What comparable cars actually sold for, from our own archive of ended
+    /// listings (see `crate::comps`). None until the archive holds enough
+    /// sales for this entry — the common case on a young database.
+    pub comps: Option<crate::comps::CompSummary>,
+    /// Total cost as a percentage of the comp median. Same shape as
+    /// `deal_score` but measured against real sales instead of list value.
+    pub comp_score: Option<f64>,
     /// Auto-associated driver from `listings.driver_id` (populated by
     /// `sync::driver_assoc`). Independent of any registry match: lets the UI
     /// group/filter by driver even when no `listing_matches` row exists.
@@ -651,6 +659,7 @@ struct ListingRowRaw {
     match_user_confirmed: Option<i64>,
     matched_by: Option<String>,
     match_reasons: Option<String>,
+    matched_driver_id: Option<i64>,
     matched_driver_name: Option<String>,
     matched_scheme_text: Option<String>,
     matched_year: Option<i32>,
@@ -689,6 +698,7 @@ pub async fn list_listings(state: State<'_, AppState>) -> AppResult<Vec<ListingR
                 lm.user_confirmed AS match_user_confirmed,
                 lm.matched_by,
                 lm.match_reasons,
+                re.driver_id AS matched_driver_id,
                 d.name AS matched_driver_name,
                 re.scheme_text AS matched_scheme_text,
                 re.year AS matched_year,
@@ -717,6 +727,10 @@ pub async fn list_listings(state: State<'_, AppState>) -> AppResult<Vec<ListingR
     .fetch_all(&state.db.pool)
     .await?;
 
+    // Loaded once for the whole page rather than per row — see `comps` for
+    // why the archive is small enough to hold in memory.
+    let comp_index = crate::comps::CompIndex::load(&state.db.pool, Utc::now().timestamp()).await?;
+
     Ok(rows
         .into_iter()
         .map(|r| {
@@ -725,6 +739,19 @@ pub async fn list_listings(state: State<'_, AppState>) -> AppResult<Vec<ListingR
                 (Some(t), Some(retail)) if retail > 0 => Some((t as f64) / (retail as f64) * 100.0),
                 _ => None,
             };
+            // Comps hang off the registry match: without one there is nothing
+            // to say this listing is the same car as any past sale.
+            let comps = r.registry_entry_id.and_then(|entry_id| {
+                comp_index.summarize(
+                    &crate::comps::CompTarget {
+                        registry_entry_id: entry_id,
+                        driver_id: r.matched_driver_id,
+                        scale: r.matched_scale.clone(),
+                    },
+                    Some(r.id),
+                )
+            });
+            let comp_score = crate::comps::comp_score(total_cents, comps.as_ref());
             let matched_detail_url = r
                 .matched_raw_json
                 .as_deref()
@@ -775,6 +802,8 @@ pub async fn list_listings(state: State<'_, AppState>) -> AppResult<Vec<ListingR
                 matched_wholesale_cents: r.matched_wholesale_cents,
                 matched_detail_url,
                 deal_score,
+                comps,
+                comp_score,
                 auto_driver_id: r.auto_driver_id,
                 auto_driver_name: r.auto_driver_name,
                 auto_driver_user_set: r.auto_driver_user_set != 0,

@@ -9,6 +9,7 @@ import {
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
   api,
+  formatAgo,
   formatCents,
   isPreferredOem,
   prepareBrandOptions,
@@ -18,6 +19,7 @@ import {
   byDriverNamePriority,
   driverListingCounts,
   sortDriverOptions,
+  type CompSummary,
   type DriverOption,
   type FormOptionRow,
   type GroupMigrationProposal,
@@ -792,7 +794,12 @@ export function Listings() {
         case "total-asc":
           return nullsLast(totalA, totalB);
         case "deal-asc":
-          return nullsLast(a.deal_score, b.deal_score);
+          // Sort on whichever score the row's badge is showing, so the order
+          // matches what the user sees rather than a hidden second metric.
+          return nullsLast(
+            a.comp_score ?? a.deal_score,
+            b.comp_score ?? b.deal_score,
+          );
         case "ending-soon":
           return nullsLast(a.end_time, b.end_time);
         case "title":
@@ -1928,7 +1935,16 @@ function ListingCard({
       </div>
       <div className="text-right text-xs tabular-nums shrink-0 space-y-0.5">
         <div className="flex items-center justify-end gap-2">
-          {row.deal_score !== null && <DealBadge score={row.deal_score} />}
+          {/* Real sales outrank a catalog value, so the badge shows the comp
+              score whenever the archive has enough of them and falls back to
+              retail otherwise. Both references stay visible as text below. */}
+          {row.comp_score !== null ? (
+            <DealBadge score={row.comp_score} basis="sold" comps={row.comps} />
+          ) : (
+            row.deal_score !== null && (
+              <DealBadge score={row.deal_score} basis="retail" />
+            )
+          )}
           <div className="text-base text-fg">{formatCents(total)}</div>
         </div>
         {!minimized && row.shipping_cents !== null && row.shipping_cents > 0 && (
@@ -1940,6 +1956,21 @@ function ListingCard({
         {!minimized && matched && (
           <div className="text-fg-subtle mt-1">
             retail {formatCents(row.matched_retail_cents)}
+          </div>
+        )}
+        {!minimized && row.comps !== null && (
+          <div
+            className="text-fg-subtle"
+            title={
+              `${row.comps.count} archived ${row.comps.tier === "exact" ? "sales of this car" : "sales of this driver at this scale"}, ` +
+              `${formatAgo(row.comps.oldest_sold_at)} to ${formatAgo(row.comps.newest_sold_at)}. ` +
+              `Median ${formatCents(row.comps.median_cents)}. Delivered cost, from listings you watched.`
+            }
+          >
+            sold {formatCents(row.comps.low_cents)}–
+            {formatCents(row.comps.high_cents)} ·{" "}
+            {row.comps.count === 1 ? "1 sale" : `${row.comps.count} sales`}
+            {row.comps.tier === "similar" && "*"}
           </div>
         )}
       </div>
@@ -1976,14 +2007,29 @@ function ConfidenceBadge({
   );
 }
 
-function DealBadge({ score }: { score: number }) {
-  // score = (price+shipping) / retail * 100
+/** Price verdict for a listing, as a percentage of a reference price.
+ *
+ *  Two references exist and they are not equally good. `retail` is the
+ *  registry's list value — always available for a matched listing, but a
+ *  catalog number rather than evidence of what anyone paid. `sold` is the
+ *  median of comparable sales from our own archive, which is what the market
+ *  actually did — so the caller prefers it whenever there are enough sales,
+ *  and the badge names its basis so the two are never confused at a glance. */
+function DealBadge({
+  score,
+  basis,
+  comps,
+}: {
+  score: number;
+  basis: "retail" | "sold";
+  comps?: CompSummary | null;
+}) {
   // < 70%  → great deal (green)
   // 70-90% → fair (yellow)
-  // 90-110% → at retail (slate)
-  // > 110% → over retail (red)
+  // 90-110% → at the reference price (slate)
+  // > 110% → over it (red)
   let cls = "text-fg-muted border-border";
-  let label = "at retail";
+  let label = basis === "sold" ? "at market" : "at retail";
   if (score < 70) {
     cls = "text-emerald-400 border-emerald-500/30 bg-emerald-500/10";
     label = "great deal";
@@ -1992,14 +2038,23 @@ function DealBadge({ score }: { score: number }) {
     label = "fair";
   } else if (score > 110) {
     cls = "text-red-400 border-red-500/30 bg-red-500/10";
-    label = "over retail";
+    label = basis === "sold" ? "over market" : "over retail";
   }
+  const tooltip =
+    basis === "sold" && comps
+      ? `${score.toFixed(0)}% of the ${formatCents(comps.median_cents)} median ` +
+        `from ${comps.count} ${comps.tier === "exact" ? "sales of this car" : "sales of this driver at this scale"}` +
+        ` (${formatCents(comps.low_cents)}–${formatCents(comps.high_cents)}, ` +
+        `newest ${formatAgo(comps.newest_sold_at)}) — ${label}`
+      : `${score.toFixed(0)}% of registry retail (${label})`;
   return (
     <div
       className={`inline-flex flex-col items-end px-1.5 py-0.5 rounded border ${cls}`}
-      title={`${score.toFixed(0)}% of registry retail (${label})`}
+      title={tooltip}
     >
-      <span className="font-medium">{score.toFixed(0)}% of retail</span>
+      <span className="font-medium">
+        {score.toFixed(0)}% of {basis}
+      </span>
       <span className="text-[10px] uppercase tracking-wide opacity-80">
         {label}
       </span>
