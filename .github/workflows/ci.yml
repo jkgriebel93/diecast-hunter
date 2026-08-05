@@ -66,6 +66,20 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # Built on every run, not just main: the whole point of DCH-31 is that
+      # extension changes used to merge green and never reach a browser. A
+      # failure here means the zip wouldn't have loaded.
+      - name: Package extension
+        run: pnpm ext:package
+
+      - name: Upload extension
+        uses: actions/upload-artifact@v4
+        with:
+          name: diecast-hunter-extension-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 30
+          path: extension/diecast-hunter-ebay.zip
+
   worker:
     name: Worker (tests)
     # Its own pnpm project with a separate lockfile, so it can't share the

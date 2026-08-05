@@ -12,6 +12,7 @@ Package manager is **pnpm** (enforced by `packageManager` in package.json). Do n
 - `pnpm build` — `tsc -b && vite build` (TypeScript typecheck + production frontend bundle)
 - `pnpm format` / `pnpm format:check` — prettier over the TS/JS/CSS/JSON/HTML tree. Config is `.prettierrc.json` (prettier's defaults, written out explicitly) and `.prettierignore` (excludes `src-tauri/fixtures/` — captured verbatim from DCR/eBay, so reformatting would change what the parser tests assert — plus `*.md` and `*.rs`). CI gates on `format:check`, so run `pnpm format` before pushing rather than `npx prettier`, which resolves an unpinned version.
 - `pnpm tauri build` — produce Windows installers (msi + nsis)
+- `pnpm ext:package` — build the browser-extension zip at `extension/diecast-hunter-ebay.zip` via `scripts/package-extension.mjs`. Cross-platform (was PowerShell-only, so it couldn't run on Linux/WSL at all). The file set is discovered by walking `extension/`, so a new asset ships without editing the script; exclusions are *rules* — `.md`, `.map`, `.zip`, dotfiles/scratch, `node_modules`. Timestamps are pinned to 1980-01-01 (zip's DOS-time epoch) and directory entries are suppressed, so identical input yields a byte-identical archive. CI builds and uploads it on every run.
 - `pnpm tauri icon path/to/source.png` — regenerate `src-tauri/icons/` from a ≥1024px source
 
 Rust side (run from `src-tauri/`):

@@ -6,6 +6,8 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: { alias: { "@": path.resolve(__dirname, "src") } },
   test: {
-    include: ["src/**/*.test.ts"],
+    // App code plus the build scripts under scripts/ (the extension
+    // packager). The Cloudflare Worker keeps its own vitest.
+    include: ["src/**/*.test.ts", "scripts/**/*.test.mjs"],
   },
 });
