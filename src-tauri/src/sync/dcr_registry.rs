@@ -80,9 +80,7 @@ pub async fn enrich_pending_registry_entries(
         match enrich_one(pool, client, id, &external_id, &detail_url).await {
             Ok(()) => summary.enriched += 1,
             Err(e) => {
-                tracing::warn!(
-                    "registry_entry {id} ({external_id}): enrichment failed: {e}"
-                );
+                tracing::warn!("registry_entry {id} ({external_id}): enrichment failed: {e}");
                 summary.failed += 1;
             }
         }
@@ -190,11 +188,7 @@ fn build_raw_json(detail: &RegistryDetail, detail_url: &str) -> String {
     .unwrap_or_default()
 }
 
-async fn upsert_driver(
-    pool: &SqlitePool,
-    name: &str,
-    normalized: &str,
-) -> AppResult<i64> {
+async fn upsert_driver(pool: &SqlitePool, name: &str, normalized: &str) -> AppResult<i64> {
     sqlx::query(
         "INSERT INTO drivers (name, normalized_name) VALUES (?, ?)
          ON CONFLICT(normalized_name) DO UPDATE SET name = excluded.name",
@@ -203,11 +197,10 @@ async fn upsert_driver(
     .bind(normalized)
     .execute(pool)
     .await?;
-    let row: (i64,) =
-        sqlx::query_as("SELECT id FROM drivers WHERE normalized_name = ?")
-            .bind(normalized)
-            .fetch_one(pool)
-            .await?;
+    let row: (i64,) = sqlx::query_as("SELECT id FROM drivers WHERE normalized_name = ?")
+        .bind(normalized)
+        .fetch_one(pool)
+        .await?;
     Ok(row.0)
 }
 
@@ -217,7 +210,8 @@ mod tests {
 
     #[test]
     fn build_raw_json_preserves_detail_url() {
-        let url = "/diecast/jeff-gordon/action-lionel-elite-24/68acf030-a051-4e24-907f-abf2475e5315";
+        let url =
+            "/diecast/jeff-gordon/action-lionel-elite-24/68acf030-a051-4e24-907f-abf2475e5315";
         let raw_json = build_raw_json(&RegistryDetail::default(), url);
         assert_eq!(extract_detail_url(Some(&raw_json)).as_deref(), Some(url));
     }

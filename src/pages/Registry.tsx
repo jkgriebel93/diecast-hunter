@@ -108,7 +108,9 @@ export function Registry() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
-  const [addTarget, setAddTarget] = useState<ProductionSearchResult | null>(null);
+  const [addTarget, setAddTarget] = useState<ProductionSearchResult | null>(
+    null,
+  );
   const [wishlistGuids, setWishlistGuids] = useState<Set<string>>(
     () => new Set(),
   );
@@ -371,18 +373,20 @@ export function Registry() {
       <header>
         <h2 className="text-2xl font-semibold">Registry search</h2>
         <p className="text-sm text-fg-subtle">
-          Search diecastregistry.com's production catalog. Results link out
-          to the registry's detail pages.
+          Search diecastregistry.com's production catalog. Results link out to
+          the registry's detail pages.
         </p>
       </header>
 
       {!optionsLoaded ? (
-        <div className="card text-sm text-fg-muted">Loading filter options…</div>
+        <div className="card text-sm text-fg-muted">
+          Loading filter options…
+        </div>
       ) : optionsEmpty ? (
         <div className="card text-sm text-amber-400/90 space-y-2">
           <div>
-            The registry option cache is empty. Fetch it once (a few seconds)
-            so the filter dropdowns can populate.
+            The registry option cache is empty. Fetch it once (a few seconds) so
+            the filter dropdowns can populate.
           </div>
           <button
             className="btn-primary"
@@ -524,9 +528,7 @@ export function Registry() {
                 onClick={onSearch}
                 disabled={searching || !canSearch}
                 title={
-                  canSearch
-                    ? "Search the registry"
-                    : "Pick at least one filter"
+                  canSearch ? "Search the registry" : "Pick at least one filter"
                 }
               >
                 {searching ? "Searching…" : "Search"}
@@ -594,19 +596,19 @@ export function Registry() {
               No results in this value range.
             </div>
           ) : (
-          <ul className="space-y-2">
-            {sortedResults!.map((r) => (
-              <RegistryResultCard
-                key={r.registry_guid}
-                r={r}
-                imgClass={IMG_CLASS[imgSize]}
-                onAddToGarage={() => setAddTarget(r)}
-                inWishlist={wishlistGuids.has(r.registry_guid)}
-                wishing={wishing === r.registry_guid}
-                onAddToWishlist={() => onAddToWishlist(r)}
-              />
-            ))}
-          </ul>
+            <ul className="space-y-2">
+              {sortedResults!.map((r) => (
+                <RegistryResultCard
+                  key={r.registry_guid}
+                  r={r}
+                  imgClass={IMG_CLASS[imgSize]}
+                  onAddToGarage={() => setAddTarget(r)}
+                  inWishlist={wishlistGuids.has(r.registry_guid)}
+                  wishing={wishing === r.registry_guid}
+                  onAddToWishlist={() => onAddToWishlist(r)}
+                />
+              ))}
+            </ul>
           )}
         </>
       )}
@@ -696,9 +698,7 @@ function RegistryResultCard({
     `registry:${r.registry_guid}`,
   );
   return (
-    <li
-      className={`card flex items-start gap-4 ${minimized ? "!py-2" : ""}`}
-    >
+    <li className={`card flex items-start gap-4 ${minimized ? "!py-2" : ""}`}>
       <MinimizeToggle
         minimized={minimized}
         onToggle={toggleMinimized}
@@ -726,9 +726,7 @@ function RegistryResultCard({
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium truncate">
               {r.driver_name}
-              {r.year && (
-                <span className="text-fg-subtle ml-2">{r.year}</span>
-              )}
+              {r.year && <span className="text-fg-subtle ml-2">{r.year}</span>}
             </div>
             <div className="text-xs text-fg-muted truncate mt-0.5">
               {r.scheme_text ?? "(no scheme)"}
@@ -738,9 +736,7 @@ function RegistryResultCard({
         {!minimized && (
           <>
             <div className="text-xs text-fg-subtle mt-0.5">
-              {[r.oem, r.brand, r.scale, r.make]
-                .filter(Boolean)
-                .join(" · ")}
+              {[r.oem, r.brand, r.scale, r.make].filter(Boolean).join(" · ")}
             </div>
             {r.seq_produced_total !== null && (
               <div className="text-xs text-fg-faint mt-0.5">
@@ -867,7 +863,8 @@ function AddToGarageModal({
   // numbered — the backend detects that from the registration form HTML.
   // We always show the chassis field; the backend ignores it for NSN items
   // and requires it for sequentially-numbered ones (unless prototype=true).
-  const isProduced = target.seq_produced_total !== null && target.seq_produced_total > 1;
+  const isProduced =
+    target.seq_produced_total !== null && target.seq_produced_total > 1;
 
   async function onSubmit() {
     setSubmitting(true);
@@ -910,7 +907,11 @@ function AddToGarageModal({
         if (e.target === e.currentTarget && !submitting) onClose();
       }}
     >
-      <div className="card w-full max-w-md space-y-3" role="dialog" aria-modal="true">
+      <div
+        className="card w-full max-w-md space-y-3"
+        role="dialog"
+        aria-modal="true"
+      >
         <header>
           <h3 className="text-lg font-semibold">Add to My Garage</h3>
           <div className="text-xs text-fg-muted mt-0.5">
@@ -938,11 +939,7 @@ function AddToGarageModal({
               </span>
             </div>
             <div className="flex justify-end">
-              <button
-                type="button"
-                className="btn-primary"
-                onClick={onClose}
-              >
+              <button type="button" className="btn-primary" onClick={onClose}>
                 Close
               </button>
             </div>
@@ -1017,9 +1014,7 @@ function AddToGarageModal({
               />
             </div>
 
-            {error && (
-              <ErrorBanner error={error} variant="inline" />
-            )}
+            {error && <ErrorBanner error={error} variant="inline" />}
 
             <div className="flex items-center justify-end gap-2 pt-1">
               <button

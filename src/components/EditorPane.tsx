@@ -1,9 +1,4 @@
-import {
-  createElement,
-  useState,
-  type DragEvent,
-  type ReactNode,
-} from "react";
+import { createElement, useState, type DragEvent, type ReactNode } from "react";
 import { VIEWS, type ViewId } from "@/lib/views";
 import { useWorkspace, type Pane } from "@/lib/workspace";
 
@@ -111,7 +106,9 @@ export function EditorPane({
 
       <div
         className={`relative flex-1 min-h-0 ${
-          dragOver ? "outline outline-2 -outline-offset-2 outline-accent/60" : ""
+          dragOver
+            ? "outline outline-2 -outline-offset-2 outline-accent/60"
+            : ""
         }`}
         onDragOver={onDragOver}
         onDragLeave={() => setDragOver(false)}

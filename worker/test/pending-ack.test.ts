@@ -22,9 +22,7 @@ function seed(
       user_id: r.user_id ?? null,
       username: r.username ?? null,
       eias_token: r.eias_token ?? null,
-      raw: JSON.stringify(
-        r.notification ?? { notificationId: r.id, data: {} },
-      ),
+      raw: JSON.stringify(r.notification ?? { notificationId: r.id, data: {} }),
     });
   }
 }

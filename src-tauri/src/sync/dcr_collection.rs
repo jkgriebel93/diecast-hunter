@@ -62,16 +62,11 @@ pub(crate) async fn load_credentials(pool: &SqlitePool) -> AppResult<(String, St
     let username = settings::get(pool, settings::KEY_DCR_USERNAME)
         .await?
         .ok_or_else(|| {
-            AppError::NotConfigured(
-                "diecastregistry.com username not set in Settings".into(),
-            )
+            AppError::NotConfigured("diecastregistry.com username not set in Settings".into())
         })?;
-    let password = settings::secret_get(settings::ENTRY_DCR_PASSWORD)?
-        .ok_or_else(|| {
-            AppError::NotConfigured(
-                "diecastregistry.com password not set in Settings".into(),
-            )
-        })?;
+    let password = settings::secret_get(settings::ENTRY_DCR_PASSWORD)?.ok_or_else(|| {
+        AppError::NotConfigured("diecastregistry.com password not set in Settings".into())
+    })?;
     Ok((username, password))
 }
 
@@ -122,8 +117,7 @@ async fn run_collection_sync(
     // guard aborted the walk — pruning on a partial listing would delete
     // rows we simply never got to.
     if all_pages_fetched {
-        summary.collection_rows_removed =
-            prune_missing_rows(pool, &seen_asset_guids).await?;
+        summary.collection_rows_removed = prune_missing_rows(pool, &seen_asset_guids).await?;
         if summary.collection_rows_removed > 0 {
             tracing::info!(
                 "pruned {} collection rows no longer in My Garage",
@@ -190,9 +184,7 @@ pub async fn enrich_only(
 /// and `drivers` rows are left alone — they're a cache of registry data, not
 /// part of the collection itself.
 async fn prune_missing_rows(pool: &SqlitePool, seen: &[String]) -> AppResult<u32> {
-    let mut sql = String::from(
-        "DELETE FROM my_collection WHERE source = 'diecastregistry'",
-    );
+    let mut sql = String::from("DELETE FROM my_collection WHERE source = 'diecastregistry'");
     if !seen.is_empty() {
         sql.push_str(" AND external_id NOT IN (");
         sql.push_str(&vec!["?"; seen.len()].join(","));
@@ -217,9 +209,7 @@ async fn persist_item(
     summary.drivers_upserted += 1;
 
     let registry_entry_id = match &item.registry_guid {
-        Some(guid) => Some(
-            upsert_registry_stub(pool, guid, item, driver_id, now).await?,
-        ),
+        Some(guid) => Some(upsert_registry_stub(pool, guid, item, driver_id, now).await?),
         None => None,
     };
     if registry_entry_id.is_some() {
@@ -267,11 +257,7 @@ async fn persist_item(
     Ok(())
 }
 
-async fn upsert_driver(
-    pool: &SqlitePool,
-    name: &str,
-    normalized: &str,
-) -> AppResult<i64> {
+async fn upsert_driver(pool: &SqlitePool, name: &str, normalized: &str) -> AppResult<i64> {
     sqlx::query(
         "INSERT INTO drivers (name, normalized_name) VALUES (?, ?)
          ON CONFLICT(normalized_name) DO UPDATE SET name = excluded.name",
@@ -339,10 +325,9 @@ async fn upsert_registry_stub(
     .execute(pool)
     .await?;
 
-    let row: (i64,) =
-        sqlx::query_as("SELECT id FROM registry_entries WHERE external_id = ?")
-            .bind(guid)
-            .fetch_one(pool)
-            .await?;
+    let row: (i64,) = sqlx::query_as("SELECT id FROM registry_entries WHERE external_id = ?")
+        .bind(guid)
+        .fetch_one(pool)
+        .await?;
     Ok(row.0)
 }

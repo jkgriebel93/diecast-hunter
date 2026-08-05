@@ -53,14 +53,10 @@ impl DcrSession {
         let username = settings::get(pool, settings::KEY_DCR_USERNAME)
             .await?
             .ok_or_else(|| {
-                AppError::NotConfigured(
-                    "diecastregistry.com username not set in Settings".into(),
-                )
+                AppError::NotConfigured("diecastregistry.com username not set in Settings".into())
             })?;
         let password = settings::secret_get(settings::ENTRY_DCR_PASSWORD)?.ok_or_else(|| {
-            AppError::NotConfigured(
-                "diecastregistry.com password not set in Settings".into(),
-            )
+            AppError::NotConfigured("diecastregistry.com password not set in Settings".into())
         })?;
         let client = Arc::new(DcrClient::new()?);
         client.login(&username, &password).await?;

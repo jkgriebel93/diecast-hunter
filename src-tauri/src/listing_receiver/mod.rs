@@ -450,6 +450,11 @@ fn internal_error(e: AppError) -> Response {
         .into_response()
 }
 
+// The `Err` variant is an axum `Response`, which is large by nature. Boxing
+// it to satisfy the lint would add an allocation to every unauthorized
+// request and buy nothing — this is a local control-flow type, never stored
+// or returned across a boundary.
+#[allow(clippy::result_large_err)]
 fn check_auth(headers: &HeaderMap) -> Result<(), Response> {
     let secret = match settings::secret_get(settings::ENTRY_LISTING_RECEIVER_SECRET) {
         Ok(Some(s)) => s,

@@ -27,7 +27,10 @@ afterEach(() => {
   restore();
 });
 
-function postReq(body: string | ArrayBuffer, headers: Record<string, string> = {}): Request {
+function postReq(
+  body: string | ArrayBuffer,
+  headers: Record<string, string> = {},
+): Request {
   return new Request("https://example.test/marketplace-deletion", {
     method: "POST",
     body,

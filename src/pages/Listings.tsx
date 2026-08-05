@@ -103,7 +103,8 @@ function clusterGroupsByDriver(groups: ListingGroup[]): {
       (a, b) =>
         byDriverNamePriority(a.name, b.name) || a.name.localeCompare(b.name),
     );
-  for (const d of drivers) d.groups.sort((a, b) => a.name.localeCompare(b.name));
+  for (const d of drivers)
+    d.groups.sort((a, b) => a.name.localeCompare(b.name));
   noDriver.sort((a, b) => a.name.localeCompare(b.name));
   archived.sort((a, b) => a.name.localeCompare(b.name));
   return { drivers, noDriver, archived };
@@ -483,10 +484,7 @@ export function Listings() {
     }
   }
 
-  async function onRemoveListingFromGroup(
-    listingId: number,
-    groupId: number,
-  ) {
+  async function onRemoveListingFromGroup(listingId: number, groupId: number) {
     setError(null);
     try {
       await api.removeListingFromGroup(groupId, listingId);
@@ -965,8 +963,7 @@ export function Listings() {
     for (const r of filteredRows) {
       if (!selectedIds.has(r.listing_id)) continue;
       if (r.auto_driver_id !== null) ids.add(r.auto_driver_id);
-      if (r.matched_driver_name)
-        names.add(r.matched_driver_name.toLowerCase());
+      if (r.matched_driver_name) names.add(r.matched_driver_name.toLowerCase());
       if (r.auto_driver_name) names.add(r.auto_driver_name.toLowerCase());
     }
     return { ids, names };
@@ -999,7 +996,9 @@ export function Listings() {
       {rows === null ? (
         // A failed load leaves this null forever; the error banner above
         // is the state, not "still loading".
-        error ? null : <div className="card text-sm text-fg-muted">Loading…</div>
+        error ? null : (
+          <div className="card text-sm text-fg-muted">Loading…</div>
+        )
       ) : rows.length === 0 ? (
         <div className="card text-sm text-fg-muted flex flex-wrap items-center justify-between gap-3">
           <span>
@@ -1039,213 +1038,213 @@ export function Listings() {
                 )}
               </button>
             ) : (
-            <aside className="w-52 shrink-0 card !p-3 space-y-4 sticky top-4">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] uppercase tracking-wide text-fg-subtle">
-                  Filters
-                </span>
-                <button
-                  type="button"
-                  className="text-fg-subtle hover:text-fg"
-                  onClick={() => setFiltersCollapsed(true)}
-                  title="Hide filters"
-                  aria-label="Hide filters"
-                  aria-expanded={true}
-                >
-                  <PanelChevronIcon direction="left" />
-                </button>
-              </div>
-              <input
-                type="text"
-                className="input !py-1 !text-xs"
-                placeholder="Search title, driver, scheme, seller…"
-                value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
-              />
-              <FacetList
-                label="Status"
-                selected={statusFilter}
-                options={[
-                  {
-                    value: "active",
-                    label: "Active",
-                    count: facetCounts.status.active,
-                  },
-                  {
-                    value: "ended",
-                    label: "Ended",
-                    count: facetCounts.status.ended,
-                  },
-                  {
-                    value: "archived",
-                    label: "Archived",
-                    count: facetCounts.status.archived,
-                  },
-                ]}
-                onToggle={(v) =>
-                  setStatusFilter((prev) => toggled(prev, v as StatusOption))
-                }
-              />
-              <FacetList
-                label="Match"
-                selected={matchFilter}
-                options={[
-                  {
-                    value: "confirmed",
-                    label: "Confirmed",
-                    count: facetCounts.match.confirmed,
-                  },
-                  {
-                    value: "unconfirmed",
-                    label: "Unconfirmed",
-                    count: facetCounts.match.unconfirmed,
-                  },
-                  {
-                    value: "unmatched",
-                    label: "Unmatched",
-                    count: facetCounts.match.unmatched,
-                  },
-                ]}
-                onToggle={(v) =>
-                  setMatchFilter((prev) => toggled(prev, v as MatchOption))
-                }
-              />
-              <FacetList
-                label="Offer"
-                selected={offerFilter}
-                options={[
-                  {
-                    value: "unresponded",
-                    label: "Unresponded",
-                    count: facetCounts.offer.unresponded,
-                  },
-                  {
-                    value: "with",
-                    label: "Any offer",
-                    count: facetCounts.offer.with,
-                  },
-                  {
-                    value: "without",
-                    label: "No offer",
-                    count: facetCounts.offer.without,
-                  },
-                ]}
-                onToggle={(v) =>
-                  setOfferFilter((prev) => toggled(prev, v as OfferOption))
-                }
-              />
-              <FacetList
-                label="Type"
-                selected={typeFilter}
-                options={[
-                  {
-                    value: "auction",
-                    label: "Auction",
-                    count: facetCounts.type.auction,
-                  },
-                  {
-                    value: "bin",
-                    label: "Buy It Now only",
-                    count: facetCounts.type.bin,
-                  },
-                  {
-                    value: "offers",
-                    label: "Accepts offers",
-                    count: facetCounts.type.offers,
-                  },
-                ]}
-                onToggle={(v) =>
-                  setTypeFilter((prev) => toggled(prev, v as TypeOption))
-                }
-              />
-              <div>
-                <div className="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
-                  Driver
+              <aside className="w-52 shrink-0 card !p-3 space-y-4 sticky top-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase tracking-wide text-fg-subtle">
+                    Filters
+                  </span>
+                  <button
+                    type="button"
+                    className="text-fg-subtle hover:text-fg"
+                    onClick={() => setFiltersCollapsed(true)}
+                    title="Hide filters"
+                    aria-label="Hide filters"
+                    aria-expanded={true}
+                  >
+                    <PanelChevronIcon direction="left" />
+                  </button>
                 </div>
-                <DriverFilterSelect
-                  value={driverFilter}
-                  label={driverFilterLabel}
-                  options={driverOptions.options}
-                  allCount={driverOptions.allCount}
-                  noneCount={driverOptions.noneCount}
-                  onChange={setDriverFilter}
-                />
-              </div>
-              <div>
-                <div className="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
-                  Group
-                </div>
-                <select
+                <input
+                  type="text"
                   className="input !py-1 !text-xs"
-                  value={groupFilter}
-                  onChange={(e) => setGroupFilter(e.target.value)}
-                  title="Filter listings by group membership"
-                >
-                  <option value="all">All</option>
-                  <option value="none">Ungrouped</option>
-                  {(() => {
-                    const { drivers, noDriver, archived } =
-                      clusterGroupsByDriver(groups);
-                    return (
-                      <>
-                        {drivers.map((d) => (
-                          <optgroup key={`d-${d.id}`} label={d.name}>
-                            {d.groups.map((g) => (
-                              <option
-                                key={`${d.id}-${g.id}`}
-                                value={String(g.id)}
-                              >
-                                {g.name} ({g.member_count})
-                              </option>
-                            ))}
-                          </optgroup>
-                        ))}
-                        {noDriver.length > 0 && (
-                          <optgroup label="Other (no driver)">
-                            {noDriver.map((g) => (
-                              <option key={g.id} value={String(g.id)}>
-                                {g.name} ({g.member_count})
-                              </option>
-                            ))}
-                          </optgroup>
-                        )}
-                        {archived.length > 0 && (
-                          <optgroup label="Archived">
-                            {archived.map((g) => (
-                              <option key={g.id} value={String(g.id)}>
-                                {g.name} ({g.member_count})
-                              </option>
-                            ))}
-                          </optgroup>
-                        )}
-                      </>
-                    );
-                  })()}
-                </select>
-                <div className="mt-1.5">
-                  <ExcludeGroupsMenu
-                    groups={groups}
-                    excluded={excludedGroupIds}
-                    onToggle={(id) =>
-                      setExcludedGroupIds((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(id)) next.delete(id);
-                        else next.add(id);
-                        return next;
-                      })
-                    }
-                    onClear={() => setExcludedGroupIds(new Set())}
+                  placeholder="Search title, driver, scheme, seller…"
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                />
+                <FacetList
+                  label="Status"
+                  selected={statusFilter}
+                  options={[
+                    {
+                      value: "active",
+                      label: "Active",
+                      count: facetCounts.status.active,
+                    },
+                    {
+                      value: "ended",
+                      label: "Ended",
+                      count: facetCounts.status.ended,
+                    },
+                    {
+                      value: "archived",
+                      label: "Archived",
+                      count: facetCounts.status.archived,
+                    },
+                  ]}
+                  onToggle={(v) =>
+                    setStatusFilter((prev) => toggled(prev, v as StatusOption))
+                  }
+                />
+                <FacetList
+                  label="Match"
+                  selected={matchFilter}
+                  options={[
+                    {
+                      value: "confirmed",
+                      label: "Confirmed",
+                      count: facetCounts.match.confirmed,
+                    },
+                    {
+                      value: "unconfirmed",
+                      label: "Unconfirmed",
+                      count: facetCounts.match.unconfirmed,
+                    },
+                    {
+                      value: "unmatched",
+                      label: "Unmatched",
+                      count: facetCounts.match.unmatched,
+                    },
+                  ]}
+                  onToggle={(v) =>
+                    setMatchFilter((prev) => toggled(prev, v as MatchOption))
+                  }
+                />
+                <FacetList
+                  label="Offer"
+                  selected={offerFilter}
+                  options={[
+                    {
+                      value: "unresponded",
+                      label: "Unresponded",
+                      count: facetCounts.offer.unresponded,
+                    },
+                    {
+                      value: "with",
+                      label: "Any offer",
+                      count: facetCounts.offer.with,
+                    },
+                    {
+                      value: "without",
+                      label: "No offer",
+                      count: facetCounts.offer.without,
+                    },
+                  ]}
+                  onToggle={(v) =>
+                    setOfferFilter((prev) => toggled(prev, v as OfferOption))
+                  }
+                />
+                <FacetList
+                  label="Type"
+                  selected={typeFilter}
+                  options={[
+                    {
+                      value: "auction",
+                      label: "Auction",
+                      count: facetCounts.type.auction,
+                    },
+                    {
+                      value: "bin",
+                      label: "Buy It Now only",
+                      count: facetCounts.type.bin,
+                    },
+                    {
+                      value: "offers",
+                      label: "Accepts offers",
+                      count: facetCounts.type.offers,
+                    },
+                  ]}
+                  onToggle={(v) =>
+                    setTypeFilter((prev) => toggled(prev, v as TypeOption))
+                  }
+                />
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
+                    Driver
+                  </div>
+                  <DriverFilterSelect
+                    value={driverFilter}
+                    label={driverFilterLabel}
+                    options={driverOptions.options}
+                    allCount={driverOptions.allCount}
+                    noneCount={driverOptions.noneCount}
+                    onChange={setDriverFilter}
                   />
                 </div>
-              </div>
-              <button
-                type="button"
-                className="text-xs text-fg-subtle hover:text-fg underline decoration-dotted underline-offset-2"
-                onClick={clearAllFilters}
-              >
-                Clear all filters
-              </button>
-            </aside>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
+                    Group
+                  </div>
+                  <select
+                    className="input !py-1 !text-xs"
+                    value={groupFilter}
+                    onChange={(e) => setGroupFilter(e.target.value)}
+                    title="Filter listings by group membership"
+                  >
+                    <option value="all">All</option>
+                    <option value="none">Ungrouped</option>
+                    {(() => {
+                      const { drivers, noDriver, archived } =
+                        clusterGroupsByDriver(groups);
+                      return (
+                        <>
+                          {drivers.map((d) => (
+                            <optgroup key={`d-${d.id}`} label={d.name}>
+                              {d.groups.map((g) => (
+                                <option
+                                  key={`${d.id}-${g.id}`}
+                                  value={String(g.id)}
+                                >
+                                  {g.name} ({g.member_count})
+                                </option>
+                              ))}
+                            </optgroup>
+                          ))}
+                          {noDriver.length > 0 && (
+                            <optgroup label="Other (no driver)">
+                              {noDriver.map((g) => (
+                                <option key={g.id} value={String(g.id)}>
+                                  {g.name} ({g.member_count})
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                          {archived.length > 0 && (
+                            <optgroup label="Archived">
+                              {archived.map((g) => (
+                                <option key={g.id} value={String(g.id)}>
+                                  {g.name} ({g.member_count})
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </select>
+                  <div className="mt-1.5">
+                    <ExcludeGroupsMenu
+                      groups={groups}
+                      excluded={excludedGroupIds}
+                      onToggle={(id) =>
+                        setExcludedGroupIds((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(id)) next.delete(id);
+                          else next.add(id);
+                          return next;
+                        })
+                      }
+                      onClear={() => setExcludedGroupIds(new Set())}
+                    />
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="text-xs text-fg-subtle hover:text-fg underline decoration-dotted underline-offset-2"
+                  onClick={clearAllFilters}
+                >
+                  Clear all filters
+                </button>
+              </aside>
             )}
 
             <div className="flex-1 min-w-0 space-y-2">
@@ -1361,7 +1360,9 @@ export function Listings() {
                       }`}
                     />
                   </span>
-                  <span className={selectMode ? "text-accent" : "text-fg-muted"}>
+                  <span
+                    className={selectMode ? "text-accent" : "text-fg-muted"}
+                  >
                     Select mode
                   </span>
                 </button>
@@ -1400,120 +1401,128 @@ export function Listings() {
                   No listings match the current filters.
                 </div>
               ) : viewMode === "flat" ? (
-        <ul className="space-y-2">
-          {(filteredRows ?? []).map((r) => (
-            <ListingCard
-              key={r.listing_id}
-              row={r}
-              groups={groups}
-              offer={offersByItemId.get(legacyIdFromExternalId(r.external_id))}
-              refreshing={refreshingId === r.listing_id}
-              unwatching={unwatchingId === r.listing_id}
-              onRefresh={() => onRefreshOne(r.listing_id)}
-              onUnwatch={() => onUnwatch(r)}
-              onClearMatch={() => onClearMatch(r.listing_id)}
-              onRejectMatch={() => onRejectMatch(r.listing_id)}
-              onConfirmMatch={() => onConfirmMatch(r.listing_id)}
-              onChangeMatch={() => setRegistrySearchListing(r)}
-              autoMatching={autoMatchingId === r.listing_id}
-              autoMatchNote={autoMatchNotes.get(r.listing_id)}
-              onAutoMatch={() => onAutoMatchOne(r.listing_id)}
-              onAddToGroup={(gid) => onAddListingToGroup(r.listing_id, gid)}
-              onCreateGroup={() => setCreateGroupForListingId(r.listing_id)}
-              onRemoveFromGroup={(gid) =>
-                onRemoveListingFromGroup(r.listing_id, gid)
-              }
-              localDrivers={localDrivers}
-              tagDriverOpen={tagDriverId === r.listing_id}
-              onOpenTagDriver={() => setTagDriverId(r.listing_id)}
-              onCancelTagDriver={() => setTagDriverId(null)}
-              onSetDriver={(name, normalized) =>
-                onSetDriver(r.listing_id, name, normalized)
-              }
-              onClearDriver={() => onClearDriver(r.listing_id)}
-              onResetDriver={() => onResetDriver(r.listing_id)}
-              onSetAttributes={(attrs) => onSetAttributes(r.listing_id, attrs)}
-              onResetAttributes={() => onResetAttributes(r.listing_id)}
-              selectMode={selectMode}
-              selected={selectedIds.has(r.listing_id)}
-              onToggleSelect={() => toggleSelected(r.listing_id)}
-              imgSizeClass={IMG_CLASS[imgSize]}
-            />
-          ))}
-        </ul>
-      ) : viewMode === "byGroup" ? (
-        <GroupedByGroup
-          rows={filteredRows ?? []}
-          groups={groups}
-          bucketSort={bucketSort}
-          collapseCommand={collapseCmd}
-          onAllCollapsedChange={setAllCollapsed}
-          offersByItemId={offersByItemId}
-          refreshingId={refreshingId}
-          unwatchingId={unwatchingId}
-          onRefresh={onRefreshOne}
-          onUnwatch={onUnwatch}
-          onClearMatch={onClearMatch}
-          onRejectMatch={onRejectMatch}
-          onConfirmMatch={onConfirmMatch}
-          onChangeMatch={setRegistrySearchListing}
-          autoMatchingId={autoMatchingId}
-          autoMatchNotes={autoMatchNotes}
-          onAutoMatch={onAutoMatchOne}
-          onAddToGroup={onAddListingToGroup}
-          onCreateGroup={setCreateGroupForListingId}
-          onRemoveFromGroup={onRemoveListingFromGroup}
-          localDrivers={localDrivers}
-          tagDriverId={tagDriverId}
-          onOpenTagDriver={setTagDriverId}
-          onCancelTagDriver={() => setTagDriverId(null)}
-          onSetDriver={onSetDriver}
-          onClearDriver={onClearDriver}
-          onResetDriver={onResetDriver}
-          onSetAttributes={onSetAttributes}
-          onResetAttributes={onResetAttributes}
-          selectMode={selectMode}
-          selectedIds={selectedIds}
-          onToggleSelect={toggleSelected}
-          imgSizeClass={IMG_CLASS[imgSize]}
-        />
-      ) : (
-        <GroupedByDriver
-          rows={filteredRows ?? []}
-          groups={groups}
-          bucketSort={bucketSort}
-          collapseCommand={collapseCmd}
-          onAllCollapsedChange={setAllCollapsed}
-          offersByItemId={offersByItemId}
-          refreshingId={refreshingId}
-          unwatchingId={unwatchingId}
-          onRefresh={onRefreshOne}
-          onUnwatch={onUnwatch}
-          onClearMatch={onClearMatch}
-          onRejectMatch={onRejectMatch}
-          onConfirmMatch={onConfirmMatch}
-          onChangeMatch={setRegistrySearchListing}
-          autoMatchingId={autoMatchingId}
-          autoMatchNotes={autoMatchNotes}
-          onAutoMatch={onAutoMatchOne}
-          onAddToGroup={onAddListingToGroup}
-          onCreateGroup={setCreateGroupForListingId}
-          onRemoveFromGroup={onRemoveListingFromGroup}
-          localDrivers={localDrivers}
-          tagDriverId={tagDriverId}
-          onOpenTagDriver={setTagDriverId}
-          onCancelTagDriver={() => setTagDriverId(null)}
-          onSetDriver={onSetDriver}
-          onClearDriver={onClearDriver}
-          onResetDriver={onResetDriver}
-          onSetAttributes={onSetAttributes}
-          onResetAttributes={onResetAttributes}
-          selectMode={selectMode}
-          selectedIds={selectedIds}
-          onToggleSelect={toggleSelected}
-          imgSizeClass={IMG_CLASS[imgSize]}
-        />
-      )}
+                <ul className="space-y-2">
+                  {(filteredRows ?? []).map((r) => (
+                    <ListingCard
+                      key={r.listing_id}
+                      row={r}
+                      groups={groups}
+                      offer={offersByItemId.get(
+                        legacyIdFromExternalId(r.external_id),
+                      )}
+                      refreshing={refreshingId === r.listing_id}
+                      unwatching={unwatchingId === r.listing_id}
+                      onRefresh={() => onRefreshOne(r.listing_id)}
+                      onUnwatch={() => onUnwatch(r)}
+                      onClearMatch={() => onClearMatch(r.listing_id)}
+                      onRejectMatch={() => onRejectMatch(r.listing_id)}
+                      onConfirmMatch={() => onConfirmMatch(r.listing_id)}
+                      onChangeMatch={() => setRegistrySearchListing(r)}
+                      autoMatching={autoMatchingId === r.listing_id}
+                      autoMatchNote={autoMatchNotes.get(r.listing_id)}
+                      onAutoMatch={() => onAutoMatchOne(r.listing_id)}
+                      onAddToGroup={(gid) =>
+                        onAddListingToGroup(r.listing_id, gid)
+                      }
+                      onCreateGroup={() =>
+                        setCreateGroupForListingId(r.listing_id)
+                      }
+                      onRemoveFromGroup={(gid) =>
+                        onRemoveListingFromGroup(r.listing_id, gid)
+                      }
+                      localDrivers={localDrivers}
+                      tagDriverOpen={tagDriverId === r.listing_id}
+                      onOpenTagDriver={() => setTagDriverId(r.listing_id)}
+                      onCancelTagDriver={() => setTagDriverId(null)}
+                      onSetDriver={(name, normalized) =>
+                        onSetDriver(r.listing_id, name, normalized)
+                      }
+                      onClearDriver={() => onClearDriver(r.listing_id)}
+                      onResetDriver={() => onResetDriver(r.listing_id)}
+                      onSetAttributes={(attrs) =>
+                        onSetAttributes(r.listing_id, attrs)
+                      }
+                      onResetAttributes={() => onResetAttributes(r.listing_id)}
+                      selectMode={selectMode}
+                      selected={selectedIds.has(r.listing_id)}
+                      onToggleSelect={() => toggleSelected(r.listing_id)}
+                      imgSizeClass={IMG_CLASS[imgSize]}
+                    />
+                  ))}
+                </ul>
+              ) : viewMode === "byGroup" ? (
+                <GroupedByGroup
+                  rows={filteredRows ?? []}
+                  groups={groups}
+                  bucketSort={bucketSort}
+                  collapseCommand={collapseCmd}
+                  onAllCollapsedChange={setAllCollapsed}
+                  offersByItemId={offersByItemId}
+                  refreshingId={refreshingId}
+                  unwatchingId={unwatchingId}
+                  onRefresh={onRefreshOne}
+                  onUnwatch={onUnwatch}
+                  onClearMatch={onClearMatch}
+                  onRejectMatch={onRejectMatch}
+                  onConfirmMatch={onConfirmMatch}
+                  onChangeMatch={setRegistrySearchListing}
+                  autoMatchingId={autoMatchingId}
+                  autoMatchNotes={autoMatchNotes}
+                  onAutoMatch={onAutoMatchOne}
+                  onAddToGroup={onAddListingToGroup}
+                  onCreateGroup={setCreateGroupForListingId}
+                  onRemoveFromGroup={onRemoveListingFromGroup}
+                  localDrivers={localDrivers}
+                  tagDriverId={tagDriverId}
+                  onOpenTagDriver={setTagDriverId}
+                  onCancelTagDriver={() => setTagDriverId(null)}
+                  onSetDriver={onSetDriver}
+                  onClearDriver={onClearDriver}
+                  onResetDriver={onResetDriver}
+                  onSetAttributes={onSetAttributes}
+                  onResetAttributes={onResetAttributes}
+                  selectMode={selectMode}
+                  selectedIds={selectedIds}
+                  onToggleSelect={toggleSelected}
+                  imgSizeClass={IMG_CLASS[imgSize]}
+                />
+              ) : (
+                <GroupedByDriver
+                  rows={filteredRows ?? []}
+                  groups={groups}
+                  bucketSort={bucketSort}
+                  collapseCommand={collapseCmd}
+                  onAllCollapsedChange={setAllCollapsed}
+                  offersByItemId={offersByItemId}
+                  refreshingId={refreshingId}
+                  unwatchingId={unwatchingId}
+                  onRefresh={onRefreshOne}
+                  onUnwatch={onUnwatch}
+                  onClearMatch={onClearMatch}
+                  onRejectMatch={onRejectMatch}
+                  onConfirmMatch={onConfirmMatch}
+                  onChangeMatch={setRegistrySearchListing}
+                  autoMatchingId={autoMatchingId}
+                  autoMatchNotes={autoMatchNotes}
+                  onAutoMatch={onAutoMatchOne}
+                  onAddToGroup={onAddListingToGroup}
+                  onCreateGroup={setCreateGroupForListingId}
+                  onRemoveFromGroup={onRemoveListingFromGroup}
+                  localDrivers={localDrivers}
+                  tagDriverId={tagDriverId}
+                  onOpenTagDriver={setTagDriverId}
+                  onCancelTagDriver={() => setTagDriverId(null)}
+                  onSetDriver={onSetDriver}
+                  onClearDriver={onClearDriver}
+                  onResetDriver={onResetDriver}
+                  onSetAttributes={onSetAttributes}
+                  onResetAttributes={onResetAttributes}
+                  selectMode={selectMode}
+                  selectedIds={selectedIds}
+                  onToggleSelect={toggleSelected}
+                  imgSizeClass={IMG_CLASS[imgSize]}
+                />
+              )}
             </div>
           </div>
         </>
@@ -1676,9 +1685,7 @@ function ListingCard({
             className="w-4 h-4 accent-accent"
             checked={selected}
             onChange={onToggleSelect}
-            aria-label={
-              selected ? "Deselect listing" : "Select listing"
-            }
+            aria-label={selected ? "Deselect listing" : "Select listing"}
           />
         </label>
       )}
@@ -1704,233 +1711,242 @@ function ListingCard({
           {offer && <OfferBadge offer={offer} />}
         </div>
         {minimized ? null : (
-        <>
-        <div className="text-xs text-fg-subtle mt-0.5">
-          {[
-            row.seller_code,
-            row.condition,
-            row.listing_type &&
-              (row.accepts_offers
-                ? `${row.listing_type} + offers`
-                : row.listing_type),
-            row.is_archived &&
-              (row.end_reason
-                ? `archived · ${END_REASON_LABELS[row.end_reason] ?? row.end_reason}`
-                : "archived"),
-            row.seller_username && `seller: ${row.seller_username}`,
-            row.seller_rating !== null &&
-              row.seller_rating !== undefined &&
-              `${row.seller_rating}%`,
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-        </div>
-
-        <GroupChipRow
-          row={row}
-          groups={groups}
-          onAddToGroup={onAddToGroup}
-          onCreateGroup={onCreateGroup}
-          onRemoveFromGroup={onRemoveFromGroup}
-        />
-
-        {matched ? (
-          <div className="mt-2 rounded-md border border-border bg-bg-elevated px-2 py-1.5 text-xs">
-            <div className="flex items-center gap-2">
-              {row.match_user_confirmed ? (
-                <span className="text-emerald-400">✓ matched</span>
-              ) : (
-                <span
-                  className="text-sky-400"
-                  title="Suggested automatically — confirm it or pick a different entry"
-                >
-                  ≈ auto-match
-                </span>
-              )}
-              {!row.match_user_confirmed && row.match_confidence !== null && (
-                <ConfidenceBadge
-                  value={row.match_confidence}
-                  reasons={row.match_reasons}
-                />
-              )}
-              <span className="text-fg-muted truncate">
-                {row.matched_driver_name}
-                {row.matched_scheme_text
-                  ? ` — ${row.matched_scheme_text}`
-                  : ""}
-              </span>
-            </div>
-            <div className="text-fg-subtle mt-0.5">
+          <>
+            <div className="text-xs text-fg-subtle mt-0.5">
               {[
-                row.matched_year,
-                row.matched_oem,
-                row.matched_brand,
-                row.matched_scale,
+                row.seller_code,
+                row.condition,
+                row.listing_type &&
+                  (row.accepts_offers
+                    ? `${row.listing_type} + offers`
+                    : row.listing_type),
+                row.is_archived &&
+                  (row.end_reason
+                    ? `archived · ${END_REASON_LABELS[row.end_reason] ?? row.end_reason}`
+                    : "archived"),
+                row.seller_username && `seller: ${row.seller_username}`,
+                row.seller_rating !== null &&
+                  row.seller_rating !== undefined &&
+                  `${row.seller_rating}%`,
               ]
                 .filter(Boolean)
                 .join(" · ")}
             </div>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
-              {row.matched_detail_url && (
-                <a
-                  className="text-accent hover:underline inline-block"
-                  href={"https://www.diecastregistry.com" + row.matched_detail_url}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    void openExternal(
-                      "https://www.diecastregistry.com" + row.matched_detail_url,
-                    );
-                  }}
+
+            <GroupChipRow
+              row={row}
+              groups={groups}
+              onAddToGroup={onAddToGroup}
+              onCreateGroup={onCreateGroup}
+              onRemoveFromGroup={onRemoveFromGroup}
+            />
+
+            {matched ? (
+              <div className="mt-2 rounded-md border border-border bg-bg-elevated px-2 py-1.5 text-xs">
+                <div className="flex items-center gap-2">
+                  {row.match_user_confirmed ? (
+                    <span className="text-emerald-400">✓ matched</span>
+                  ) : (
+                    <span
+                      className="text-sky-400"
+                      title="Suggested automatically — confirm it or pick a different entry"
+                    >
+                      ≈ auto-match
+                    </span>
+                  )}
+                  {!row.match_user_confirmed &&
+                    row.match_confidence !== null && (
+                      <ConfidenceBadge
+                        value={row.match_confidence}
+                        reasons={row.match_reasons}
+                      />
+                    )}
+                  <span className="text-fg-muted truncate">
+                    {row.matched_driver_name}
+                    {row.matched_scheme_text
+                      ? ` — ${row.matched_scheme_text}`
+                      : ""}
+                  </span>
+                </div>
+                <div className="text-fg-subtle mt-0.5">
+                  {[
+                    row.matched_year,
+                    row.matched_oem,
+                    row.matched_brand,
+                    row.matched_scale,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </div>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
+                  {row.matched_detail_url && (
+                    <a
+                      className="text-accent hover:underline inline-block"
+                      href={
+                        "https://www.diecastregistry.com" +
+                        row.matched_detail_url
+                      }
+                      onClick={(e) => {
+                        e.preventDefault();
+                        void openExternal(
+                          "https://www.diecastregistry.com" +
+                            row.matched_detail_url,
+                        );
+                      }}
+                    >
+                      View on diecastregistry.com →
+                    </a>
+                  )}
+                  {!row.match_user_confirmed && (
+                    <>
+                      <button
+                        className="text-emerald-400 hover:text-emerald-300"
+                        type="button"
+                        onClick={onConfirmMatch}
+                        title="Lock this in as the right registry entry"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        className="text-fg-subtle hover:text-red-300"
+                        type="button"
+                        onClick={onRejectMatch}
+                        title="Wrong entry — drop it and stop auto-matching this listing"
+                      >
+                        Not it
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ) : row.match_user_confirmed ? (
+              <div className="mt-2 text-xs text-fg-subtle">
+                Marked as no-match.
+              </div>
+            ) : (
+              <div className="mt-2 text-xs text-amber-400/80">
+                Unmatched — link a registry entry to enable retail comparison.
+              </div>
+            )}
+            {autoMatchNote && !matched && (
+              <div className="mt-1 text-xs text-fg-subtle">
+                Auto-match: {autoMatchNote}
+              </div>
+            )}
+
+            <DriverTagSection
+              row={row}
+              localDrivers={localDrivers}
+              open={tagDriverOpen}
+              onOpen={onOpenTagDriver}
+              onCancel={onCancelTagDriver}
+              onSet={onSetDriver}
+              onClear={onClearDriver}
+              onReset={onResetDriver}
+            />
+
+            <AttributesSection
+              row={row}
+              onSave={onSetAttributes}
+              onReset={onResetAttributes}
+            />
+
+            <div className="text-xs text-fg-subtle mt-1">
+              {ended
+                ? "ended"
+                : row.end_time
+                  ? `ends ${new Date(row.end_time * 1000).toLocaleString()}`
+                  : ""}
+            </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
+              <a
+                className="text-xs text-accent hover:underline"
+                href={row.url}
+                onClick={(e) => {
+                  e.preventDefault();
+                  void openExternal(row.url);
+                }}
+              >
+                View on eBay →
+              </a>
+              <button
+                className="text-xs text-fg-muted hover:text-fg"
+                type="button"
+                onClick={onRefresh}
+                disabled={refreshing}
+              >
+                {refreshing ? "Refreshing…" : "Refresh"}
+              </button>
+              {row.seller_code === "ebay" && (
+                <button
+                  className="text-xs text-fg-subtle hover:text-red-300"
+                  type="button"
+                  onClick={onUnwatch}
+                  disabled={unwatching}
+                  title="Remove from your eBay watchlist and delete this local row"
                 >
-                  View on diecastregistry.com →
-                </a>
+                  {unwatching ? "Removing…" : "Remove from watchlist"}
+                </button>
               )}
               {!row.match_user_confirmed && (
-                <>
-                  <button
-                    className="text-emerald-400 hover:text-emerald-300"
-                    type="button"
-                    onClick={onConfirmMatch}
-                    title="Lock this in as the right registry entry"
-                  >
-                    Confirm
-                  </button>
-                  <button
-                    className="text-fg-subtle hover:text-red-300"
-                    type="button"
-                    onClick={onRejectMatch}
-                    title="Wrong entry — drop it and stop auto-matching this listing"
-                  >
-                    Not it
-                  </button>
-                </>
+                <button
+                  className="text-xs text-fg-muted hover:text-fg"
+                  type="button"
+                  onClick={onAutoMatch}
+                  disabled={autoMatching}
+                  title={
+                    matched
+                      ? "Re-run auto-matching — useful after correcting attributes; replaces or clears the current suggestion"
+                      : "Search the registry for a best-effort match (pulls the driver's entries from diecastregistry.com if needed)"
+                  }
+                >
+                  {autoMatching
+                    ? "Matching…"
+                    : matched
+                      ? "Re-match"
+                      : "Auto-match"}
+                </button>
+              )}
+              <button
+                className="text-xs text-fg-muted hover:text-fg"
+                type="button"
+                onClick={onChangeMatch}
+                title="Search the diecastregistry.com catalog and link a result to this listing"
+              >
+                {matched ? "Change match…" : "Match…"}
+              </button>
+              {matched && (
+                <button
+                  className="text-xs text-fg-subtle hover:text-fg-muted"
+                  type="button"
+                  onClick={onClearMatch}
+                  title="Remove the link to the registry entry"
+                >
+                  Clear
+                </button>
+              )}
+              {!matched && !row.match_user_confirmed && (
+                <button
+                  className="text-xs text-fg-subtle hover:text-fg-muted"
+                  type="button"
+                  onClick={onRejectMatch}
+                  title="Mark as having no match in your registry"
+                >
+                  Mark no-match
+                </button>
+              )}
+              {row.match_user_confirmed && !matched && (
+                <button
+                  className="text-xs text-fg-subtle hover:text-fg-muted"
+                  type="button"
+                  onClick={onClearMatch}
+                  title="Clear the no-match flag"
+                >
+                  Reset
+                </button>
               )}
             </div>
-          </div>
-        ) : row.match_user_confirmed ? (
-          <div className="mt-2 text-xs text-fg-subtle">
-            Marked as no-match.
-          </div>
-        ) : (
-          <div className="mt-2 text-xs text-amber-400/80">
-            Unmatched — link a registry entry to enable retail comparison.
-          </div>
-        )}
-        {autoMatchNote && !matched && (
-          <div className="mt-1 text-xs text-fg-subtle">
-            Auto-match: {autoMatchNote}
-          </div>
-        )}
-
-        <DriverTagSection
-          row={row}
-          localDrivers={localDrivers}
-          open={tagDriverOpen}
-          onOpen={onOpenTagDriver}
-          onCancel={onCancelTagDriver}
-          onSet={onSetDriver}
-          onClear={onClearDriver}
-          onReset={onResetDriver}
-        />
-
-        <AttributesSection
-          row={row}
-          onSave={onSetAttributes}
-          onReset={onResetAttributes}
-        />
-
-        <div className="text-xs text-fg-subtle mt-1">
-          {ended
-            ? "ended"
-            : row.end_time
-              ? `ends ${new Date(row.end_time * 1000).toLocaleString()}`
-              : ""}
-        </div>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
-          <a
-            className="text-xs text-accent hover:underline"
-            href={row.url}
-            onClick={(e) => {
-              e.preventDefault();
-              void openExternal(row.url);
-            }}
-          >
-            View on eBay →
-          </a>
-          <button
-            className="text-xs text-fg-muted hover:text-fg"
-            type="button"
-            onClick={onRefresh}
-            disabled={refreshing}
-          >
-            {refreshing ? "Refreshing…" : "Refresh"}
-          </button>
-          {row.seller_code === "ebay" && (
-            <button
-              className="text-xs text-fg-subtle hover:text-red-300"
-              type="button"
-              onClick={onUnwatch}
-              disabled={unwatching}
-              title="Remove from your eBay watchlist and delete this local row"
-            >
-              {unwatching ? "Removing…" : "Remove from watchlist"}
-            </button>
-          )}
-          {!row.match_user_confirmed && (
-            <button
-              className="text-xs text-fg-muted hover:text-fg"
-              type="button"
-              onClick={onAutoMatch}
-              disabled={autoMatching}
-              title={
-                matched
-                  ? "Re-run auto-matching — useful after correcting attributes; replaces or clears the current suggestion"
-                  : "Search the registry for a best-effort match (pulls the driver's entries from diecastregistry.com if needed)"
-              }
-            >
-              {autoMatching ? "Matching…" : matched ? "Re-match" : "Auto-match"}
-            </button>
-          )}
-          <button
-            className="text-xs text-fg-muted hover:text-fg"
-            type="button"
-            onClick={onChangeMatch}
-            title="Search the diecastregistry.com catalog and link a result to this listing"
-          >
-            {matched ? "Change match…" : "Match…"}
-          </button>
-          {matched && (
-            <button
-              className="text-xs text-fg-subtle hover:text-fg-muted"
-              type="button"
-              onClick={onClearMatch}
-              title="Remove the link to the registry entry"
-            >
-              Clear
-            </button>
-          )}
-          {!matched && !row.match_user_confirmed && (
-            <button
-              className="text-xs text-fg-subtle hover:text-fg-muted"
-              type="button"
-              onClick={onRejectMatch}
-              title="Mark as having no match in your registry"
-            >
-              Mark no-match
-            </button>
-          )}
-          {row.match_user_confirmed && !matched && (
-            <button
-              className="text-xs text-fg-subtle hover:text-fg-muted"
-              type="button"
-              onClick={onClearMatch}
-              title="Clear the no-match flag"
-            >
-              Reset
-            </button>
-          )}
-        </div>
-        </>
+          </>
         )}
       </div>
       <div className="text-right text-xs tabular-nums shrink-0 space-y-0.5">
@@ -1947,12 +1963,14 @@ function ListingCard({
           )}
           <div className="text-base text-fg">{formatCents(total)}</div>
         </div>
-        {!minimized && row.shipping_cents !== null && row.shipping_cents > 0 && (
-          <div className="text-fg-subtle">
-            {formatCents(row.price_cents)} + {formatCents(row.shipping_cents)}{" "}
-            ship
-          </div>
-        )}
+        {!minimized &&
+          row.shipping_cents !== null &&
+          row.shipping_cents > 0 && (
+            <div className="text-fg-subtle">
+              {formatCents(row.price_cents)} + {formatCents(row.shipping_cents)}{" "}
+              ship
+            </div>
+          )}
         {!minimized && matched && (
           <div className="text-fg-subtle mt-1">
             retail {formatCents(row.matched_retail_cents)}
@@ -2325,12 +2343,14 @@ function AttributesSection({
   if (!open) {
     return (
       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-        {([
-          ["OEM", row.oem],
-          ["Brand", row.brand],
-          ["Make", row.make],
-          ["Finish", row.finish],
-        ] as const).map(
+        {(
+          [
+            ["OEM", row.oem],
+            ["Brand", row.brand],
+            ["Make", row.make],
+            ["Finish", row.finish],
+          ] as const
+        ).map(
           ([label, value]) =>
             value !== null && (
               <span
@@ -2417,12 +2437,14 @@ function AttributesSection({
       onSubmit={submit}
       className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs"
     >
-      {([
-        ["oem", "OEM", oem, setOem, options.oems],
-        ["brand", "Brand", brand, setBrand, options.brands],
-        ["make", "Make", make, setMake, options.makes],
-        ["finish", "Finish", finish, setFinish, options.finishes],
-      ] as const).map(([key, placeholder, value, setValue, opts]) => (
+      {(
+        [
+          ["oem", "OEM", oem, setOem, options.oems],
+          ["brand", "Brand", brand, setBrand, options.brands],
+          ["make", "Make", make, setMake, options.makes],
+          ["finish", "Finish", finish, setFinish, options.finishes],
+        ] as const
+      ).map(([key, placeholder, value, setValue, opts]) => (
         <Fragment key={key}>
           <input
             list={`${idBase}-${key}`}
@@ -2556,19 +2578,20 @@ function GroupedByDriver({
   const driverBuckets = useMemo(() => {
     const map = new Map<string, ListingRow[]>();
     for (const r of rows) {
-      const key =
-        r.matched_driver_name ?? r.auto_driver_name ?? "Unmatched";
+      const key = r.matched_driver_name ?? r.auto_driver_name ?? "Unmatched";
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(r);
     }
-    const entries = Array.from(map.entries()).sort(([a, aItems], [b, bItems]) => {
-      // "Unmatched" always sinks to the bottom regardless of sort.
-      if (a === "Unmatched") return 1;
-      if (b === "Unmatched") return -1;
-      if (bucketSort === "count-desc") return bItems.length - aItems.length;
-      if (bucketSort === "count-asc") return aItems.length - bItems.length;
-      return a.localeCompare(b);
-    });
+    const entries = Array.from(map.entries()).sort(
+      ([a, aItems], [b, bItems]) => {
+        // "Unmatched" always sinks to the bottom regardless of sort.
+        if (a === "Unmatched") return 1;
+        if (b === "Unmatched") return -1;
+        if (bucketSort === "count-desc") return bItems.length - aItems.length;
+        if (bucketSort === "count-asc") return aItems.length - bItems.length;
+        return a.localeCompare(b);
+      },
+    );
     return entries;
   }, [rows, bucketSort]);
 
@@ -2636,7 +2659,9 @@ function GroupedByDriver({
                   <ListingCard
                     row={r}
                     groups={groups}
-                    offer={offersByItemId.get(legacyIdFromExternalId(r.external_id))}
+                    offer={offersByItemId.get(
+                      legacyIdFromExternalId(r.external_id),
+                    )}
                     refreshing={refreshingId === r.listing_id}
                     unwatching={unwatchingId === r.listing_id}
                     onRefresh={() => onRefresh(r.listing_id)}
@@ -3033,10 +3058,7 @@ function GroupChipRow({
   const memberIds = useMemo(() => new Set(row.group_ids), [row.group_ids]);
   // The picker lists members too (with a check) rather than removing them, so
   // rows don't reshuffle under the cursor while multi-adding.
-  const available = useMemo(
-    () => groups.filter((g) => !g.archived),
-    [groups],
-  );
+  const available = useMemo(() => groups.filter((g) => !g.archived), [groups]);
   const filteredAvailable = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return available;
@@ -3074,14 +3096,20 @@ function GroupChipRow({
     if (preferred.length > 0 && driverLabel)
       out.push({ key: "preferred", label: driverLabel, groups: preferred });
     if (clustered.noDriver.length > 0)
-      out.push({ key: "no-driver", label: "No driver", groups: clustered.noDriver });
+      out.push({
+        key: "no-driver",
+        label: "No driver",
+        groups: clustered.noDriver,
+      });
     for (const d of clustered.drivers)
       out.push({ key: `d-${d.id}`, label: d.name, groups: d.groups });
     return out;
   }, [preferred, others, driverLabel]);
 
   const total =
-    row.price_cents !== null ? row.price_cents + (row.shipping_cents ?? 0) : null;
+    row.price_cents !== null
+      ? row.price_cents + (row.shipping_cents ?? 0)
+      : null;
 
   const renderOption = (g: ListingGroup) => {
     const isMember = memberIds.has(g.id);
@@ -3388,7 +3416,11 @@ function BulkGroupMenu({
     for (const d of clustered.drivers)
       out.push({ key: `d-${d.id}`, label: d.name, groups: d.groups });
     if (clustered.archived.length > 0)
-      out.push({ key: "archived", label: "Archived", groups: clustered.archived });
+      out.push({
+        key: "archived",
+        label: "Archived",
+        groups: clustered.archived,
+      });
     return out;
   }, [preferred, others]);
   return (
@@ -3406,10 +3438,7 @@ function BulkGroupMenu({
       </button>
       {open && !disabled && (
         <>
-          <div
-            className="fixed inset-0 z-30"
-            onClick={() => setOpen(false)}
-          />
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
           <div className="absolute z-40 bottom-full mb-1 right-0 min-w-[14rem] rounded border border-border bg-bg-elevated shadow-lg py-1">
             {groups.length > 0 && (
               <div className="px-2 pb-1">
@@ -3555,7 +3584,9 @@ function ManageGroupsDialog({
           </button>
         </div>
 
-        {error && <ErrorBanner error={error} variant="inline" className="mb-2" />}
+        {error && (
+          <ErrorBanner error={error} variant="inline" className="mb-2" />
+        )}
 
         <div className="flex-1 overflow-y-auto -mx-1 px-1 space-y-4 min-h-[6rem]">
           {groups.length === 0 ? (
@@ -3892,7 +3923,8 @@ function GroupEditorDialog({
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [targetDollars, setTargetDollars] = useState(
-    initial?.target_price_cents !== null && initial?.target_price_cents !== undefined
+    initial?.target_price_cents !== null &&
+      initial?.target_price_cents !== undefined
       ? (initial.target_price_cents / 100).toFixed(2)
       : "",
   );
@@ -3964,9 +3996,7 @@ function GroupEditorDialog({
       const pendingDraft = driverDraft.trim();
       if (
         pendingDraft &&
-        !chips.some(
-          (c) => c.name.toLowerCase() === pendingDraft.toLowerCase(),
-        )
+        !chips.some((c) => c.name.toLowerCase() === pendingDraft.toLowerCase())
       ) {
         chips.push({ id: null, name: pendingDraft });
       }
@@ -3976,8 +4006,7 @@ function GroupEditorDialog({
       const driverIds: number[] = [];
       for (const c of chips) {
         const id =
-          c.id ??
-          (await api.ensureDriver(c.name, normalizeDriverName(c.name)));
+          c.id ?? (await api.ensureDriver(c.name, normalizeDriverName(c.name)));
         if (!driverIds.includes(id)) driverIds.push(id);
       }
 
@@ -4040,8 +4069,8 @@ function GroupEditorDialog({
               onDraftChange={setDriverDraft}
             />
             <p className="text-[11px] text-fg-subtle mt-1">
-              Groups the listing under these drivers in the filter and
-              by-group view. Leave empty for a driverless group (e.g. a lot).
+              Groups the listing under these drivers in the filter and by-group
+              view. Leave empty for a driverless group (e.g. a lot).
             </p>
           </div>
           <div>
@@ -4070,7 +4099,9 @@ function GroupEditorDialog({
             </p>
           </div>
         </div>
-        {error && <ErrorBanner error={error} variant="inline" className="mt-2" />}
+        {error && (
+          <ErrorBanner error={error} variant="inline" className="mt-2" />
+        )}
         <div className="flex items-center justify-end gap-2 mt-4 pt-3 border-t border-border">
           <button
             type="button"
@@ -4080,7 +4111,11 @@ function GroupEditorDialog({
           >
             Cancel
           </button>
-          <button className="btn-primary" type="submit" disabled={busy || name.trim() === ""}>
+          <button
+            className="btn-primary"
+            type="submit"
+            disabled={busy || name.trim() === ""}
+          >
             {busy ? "Saving…" : "Save"}
           </button>
         </div>
@@ -4185,7 +4220,9 @@ function GroupMigrationWizard({
   // so the user knows what still needs a rule.
   const unmatchedNames = useMemo(() => {
     return groups
-      .filter((g) => !activeRules.some((r) => clientPrefixMatches(g.name, r.handle)))
+      .filter(
+        (g) => !activeRules.some((r) => clientPrefixMatches(g.name, r.handle)),
+      )
       .map((g) => g.name);
   }, [groups, activeRules]);
 
@@ -4296,9 +4333,7 @@ function GroupMigrationWizard({
     if (!proposals) return m;
     for (const p of proposals) {
       const nm =
-        p.matched_handle !== null
-          ? effectiveName(p)
-          : p.original_name.trim();
+        p.matched_handle !== null ? effectiveName(p) : p.original_name.trim();
       const key = nm.toLowerCase();
       m.set(key, (m.get(key) ?? 0) + 1);
     }
@@ -4331,8 +4366,8 @@ function GroupMigrationWizard({
             <h3 className="text-base font-medium">Clean up group names</h3>
             <p className="text-xs text-fg-subtle mt-0.5 max-w-prose">
               Map each driver-name prefix (a “handle”) to a driver. Preview
-              strips the handle from matching group names and links the
-              driver. Nothing is written until you click Apply.
+              strips the handle from matching group names and links the driver.
+              Nothing is written until you click Apply.
             </p>
           </div>
           <button
@@ -4344,7 +4379,9 @@ function GroupMigrationWizard({
           </button>
         </div>
 
-        {error && <ErrorBanner error={error} variant="inline" className="mb-2" />}
+        {error && (
+          <ErrorBanner error={error} variant="inline" className="mb-2" />
+        )}
         {info && <div className="text-xs text-emerald-400 mb-2">{info}</div>}
 
         <datalist id={driverListId}>
@@ -4384,7 +4421,9 @@ function GroupMigrationWizard({
                       type="text"
                       className="input !py-1 !text-xs"
                       value={r.handle}
-                      onChange={(e) => updateRule(i, { handle: e.target.value })}
+                      onChange={(e) =>
+                        updateRule(i, { handle: e.target.value })
+                      }
                       placeholder="e.g. Zilisch"
                     />
                     <input
@@ -4601,9 +4640,7 @@ function RegistrySearchDialog({
   const [finishInput, setFinishInput] = useState("");
   const [selectedFinishGuid, setSelectedFinishGuid] = useState("");
 
-  const [results, setResults] = useState<ProductionSearchResult[] | null>(
-    null,
-  );
+  const [results, setResults] = useState<ProductionSearchResult[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [criteriaOpen, setCriteriaOpen] = useState(true);
@@ -4666,14 +4703,15 @@ function RegistrySearchDialog({
       const found = scales.find((s) => s.display === scaleDisplay);
       if (found) setSelectedScaleGuid(found.value);
     }
-    const titleTokens = new Set(
-      title.split(/\W+/).filter((t) => t.length > 0),
-    );
+    const titleTokens = new Set(title.split(/\W+/).filter((t) => t.length > 0));
     // Prefer the most specific match: "Dale Earnhardt Sr" should win over
     // "Dale Earnhardt" when both fit the title's tokens.
     let best: { display: string; value: string; len: number } | null = null;
     for (const d of drivers) {
-      const dt = d.display.toLowerCase().split(/\s+/).filter((t) => t.length > 0);
+      const dt = d.display
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((t) => t.length > 0);
       if (dt.length > 0 && dt.every((t) => titleTokens.has(t))) {
         if (best === null || dt.length > best.len) {
           best = { display: d.display, value: d.value, len: dt.length };
@@ -4824,161 +4862,161 @@ function RegistrySearchDialog({
               Search criteria
             </button>
             {criteriaOpen && (
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),1fr))] gap-3 mt-2">
-              <div>
-                <label className="label">Driver</label>
-                <input
-                  list="dcr-drivers-list"
-                  type="text"
-                  value={driverInput}
-                  onChange={(e) => {
-                    setDriverInput(e.target.value);
-                    const match = drivers.find(
-                      (d) => d.display === e.target.value,
-                    );
-                    setSelectedDriverGuid(match?.value ?? "");
-                  }}
-                  className="input"
-                  placeholder="Type to search…"
-                  autoComplete="off"
-                />
-                <datalist id="dcr-drivers-list">
-                  {drivers.map((d) => (
-                    <option key={d.value} value={d.display} />
-                  ))}
-                </datalist>
-              </div>
-              <div>
-                <label className="label">Year</label>
-                <select
-                  value={selectedYear}
-                  onChange={(e) => setSelectedYear(e.target.value)}
-                  className="input"
-                >
-                  <option value="">Any</option>
-                  {years.map((y) => (
-                    <option key={y.value} value={y.value}>
-                      {y.display}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="label">OEM</label>
-                <input
-                  list="dcr-oems-list"
-                  type="text"
-                  value={oemInput}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setOemInput(v);
-                    const match = oems.find((o) => o.display === v);
-                    setSelectedOemGuid(match?.value ?? "");
-                  }}
-                  className="input"
-                  placeholder="Any (type to search…)"
-                  autoComplete="off"
-                />
-                <datalist id="dcr-oems-list">
-                  {(oemInput.trim() === "" && !showAllOems
-                    ? oems.filter((o) => isPreferredOem(o.display))
-                    : oems
-                  ).map((o) => (
-                    <option key={o.value} value={o.display} />
-                  ))}
-                </datalist>
-                {oemInput.trim() === "" && !showAllOems && (
-                  <button
-                    type="button"
-                    className="text-xs text-fg-subtle hover:text-fg-muted mt-1"
-                    onClick={() => setShowAllOems(true)}
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),1fr))] gap-3 mt-2">
+                <div>
+                  <label className="label">Driver</label>
+                  <input
+                    list="dcr-drivers-list"
+                    type="text"
+                    value={driverInput}
+                    onChange={(e) => {
+                      setDriverInput(e.target.value);
+                      const match = drivers.find(
+                        (d) => d.display === e.target.value,
+                      );
+                      setSelectedDriverGuid(match?.value ?? "");
+                    }}
+                    className="input"
+                    placeholder="Type to search…"
+                    autoComplete="off"
+                  />
+                  <datalist id="dcr-drivers-list">
+                    {drivers.map((d) => (
+                      <option key={d.value} value={d.display} />
+                    ))}
+                  </datalist>
+                </div>
+                <div>
+                  <label className="label">Year</label>
+                  <select
+                    value={selectedYear}
+                    onChange={(e) => setSelectedYear(e.target.value)}
+                    className="input"
                   >
-                    More…
-                  </button>
-                )}
+                    <option value="">Any</option>
+                    {years.map((y) => (
+                      <option key={y.value} value={y.value}>
+                        {y.display}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">OEM</label>
+                  <input
+                    list="dcr-oems-list"
+                    type="text"
+                    value={oemInput}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setOemInput(v);
+                      const match = oems.find((o) => o.display === v);
+                      setSelectedOemGuid(match?.value ?? "");
+                    }}
+                    className="input"
+                    placeholder="Any (type to search…)"
+                    autoComplete="off"
+                  />
+                  <datalist id="dcr-oems-list">
+                    {(oemInput.trim() === "" && !showAllOems
+                      ? oems.filter((o) => isPreferredOem(o.display))
+                      : oems
+                    ).map((o) => (
+                      <option key={o.value} value={o.display} />
+                    ))}
+                  </datalist>
+                  {oemInput.trim() === "" && !showAllOems && (
+                    <button
+                      type="button"
+                      className="text-xs text-fg-subtle hover:text-fg-muted mt-1"
+                      onClick={() => setShowAllOems(true)}
+                    >
+                      More…
+                    </button>
+                  )}
+                </div>
+                <div>
+                  <label className="label">Scale</label>
+                  <select
+                    value={selectedScaleGuid}
+                    onChange={(e) => setSelectedScaleGuid(e.target.value)}
+                    className="input"
+                  >
+                    <option value="">Any</option>
+                    {scales.map((s) => (
+                      <option key={s.value} value={s.value}>
+                        {s.display}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Brand</label>
+                  <input
+                    list="dcr-brands-list"
+                    type="text"
+                    value={brandInput}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setBrandInput(v);
+                      const match = brands.find((b) => b.display === v);
+                      setSelectedBrandGuid(match?.value ?? "");
+                    }}
+                    className="input"
+                    placeholder="Any (type to search…)"
+                    autoComplete="off"
+                  />
+                  <datalist id="dcr-brands-list">
+                    {brands.map((b) => (
+                      <option key={b.value} value={b.display} />
+                    ))}
+                  </datalist>
+                </div>
+                <div>
+                  <label className="label">Make</label>
+                  <input
+                    list="dcr-makes-list"
+                    type="text"
+                    value={makeInput}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setMakeInput(v);
+                      const match = makes.find((m) => m.display === v);
+                      setSelectedMakeGuid(match?.value ?? "");
+                    }}
+                    className="input"
+                    placeholder="Any (type to search…)"
+                    autoComplete="off"
+                  />
+                  <datalist id="dcr-makes-list">
+                    {makes.map((m) => (
+                      <option key={m.value} value={m.display} />
+                    ))}
+                  </datalist>
+                </div>
+                <div>
+                  <label className="label">Finish</label>
+                  <input
+                    list="dcr-finishes-list"
+                    type="text"
+                    value={finishInput}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setFinishInput(v);
+                      const match = finishes.find((f) => f.display === v);
+                      setSelectedFinishGuid(match?.value ?? "");
+                    }}
+                    className="input"
+                    placeholder="Any (type to search…)"
+                    autoComplete="off"
+                  />
+                  <datalist id="dcr-finishes-list">
+                    {finishes.map((f) => (
+                      <option key={f.value} value={f.display} />
+                    ))}
+                  </datalist>
+                </div>
               </div>
-              <div>
-                <label className="label">Scale</label>
-                <select
-                  value={selectedScaleGuid}
-                  onChange={(e) => setSelectedScaleGuid(e.target.value)}
-                  className="input"
-                >
-                  <option value="">Any</option>
-                  {scales.map((s) => (
-                    <option key={s.value} value={s.value}>
-                      {s.display}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="label">Brand</label>
-                <input
-                  list="dcr-brands-list"
-                  type="text"
-                  value={brandInput}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setBrandInput(v);
-                    const match = brands.find((b) => b.display === v);
-                    setSelectedBrandGuid(match?.value ?? "");
-                  }}
-                  className="input"
-                  placeholder="Any (type to search…)"
-                  autoComplete="off"
-                />
-                <datalist id="dcr-brands-list">
-                  {brands.map((b) => (
-                    <option key={b.value} value={b.display} />
-                  ))}
-                </datalist>
-              </div>
-              <div>
-                <label className="label">Make</label>
-                <input
-                  list="dcr-makes-list"
-                  type="text"
-                  value={makeInput}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setMakeInput(v);
-                    const match = makes.find((m) => m.display === v);
-                    setSelectedMakeGuid(match?.value ?? "");
-                  }}
-                  className="input"
-                  placeholder="Any (type to search…)"
-                  autoComplete="off"
-                />
-                <datalist id="dcr-makes-list">
-                  {makes.map((m) => (
-                    <option key={m.value} value={m.display} />
-                  ))}
-                </datalist>
-              </div>
-              <div>
-                <label className="label">Finish</label>
-                <input
-                  list="dcr-finishes-list"
-                  type="text"
-                  value={finishInput}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setFinishInput(v);
-                    const match = finishes.find((f) => f.display === v);
-                    setSelectedFinishGuid(match?.value ?? "");
-                  }}
-                  className="input"
-                  placeholder="Any (type to search…)"
-                  autoComplete="off"
-                />
-                <datalist id="dcr-finishes-list">
-                  {finishes.map((f) => (
-                    <option key={f.value} value={f.display} />
-                  ))}
-                </datalist>
-              </div>
-            </div>
             )}
 
             <div className="flex items-center justify-between mt-3">
@@ -5094,11 +5132,7 @@ function RegistrySearchDialog({
         </div>
 
         <div className="flex items-center justify-end gap-2 mt-3 pt-3 border-t border-border">
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={onClose}
-          >
+          <button type="button" className="btn-secondary" onClick={onClose}>
             Cancel
           </button>
         </div>
@@ -5517,7 +5551,8 @@ function OfferBadge({ offer }: { offer: ReceivedOffer }) {
       : offer.discount_percent.toFixed(1);
     parts.push(`${pct}% off`);
   }
-  const label = parts.length > 0 ? `Seller offer: ${parts.join(" · ")}` : "Seller offer";
+  const label =
+    parts.length > 0 ? `Seller offer: ${parts.join(" · ")}` : "Seller offer";
   return (
     <a
       href={offer.item_web_url}

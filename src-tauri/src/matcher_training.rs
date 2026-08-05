@@ -493,8 +493,8 @@ async fn assemble_examples(pool: &SqlitePool) -> AppResult<Vec<Example>> {
             continue;
         }
         let judged: HashSet<i64> = verdicts.iter().map(|(e, _)| *e).collect();
-        if !candidate_cache.contains_key(&driver_id) {
-            candidate_cache.insert(driver_id, load_candidates(pool, driver_id).await?);
+        if let std::collections::hash_map::Entry::Vacant(e) = candidate_cache.entry(driver_id) {
+            e.insert(load_candidates(pool, driver_id).await?);
         }
         let mut rivals: Vec<(f64, MatchFeatures)> = candidate_cache[&driver_id]
             .iter()

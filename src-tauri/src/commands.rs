@@ -1088,6 +1088,11 @@ pub async fn reset_listing_driver(
 /// edits them together in one form. Empty or whitespace-only strings are
 /// stored as NULL. Sets `attributes_user_set = 1` so the auto-fill pass in
 /// `sync::attribute_assoc` leaves this row alone from now on.
+// The argument list IS the IPC contract with the frontend's
+// `setListingAttributes` — Tauri maps each named arg from the JS payload.
+// Bundling them into a struct would mean a matching Deserialize type on both
+// sides for no gain, so the 9 args stay.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn set_listing_attributes(
     state: State<'_, AppState>,
@@ -1910,6 +1915,10 @@ struct CollectionRowRaw {
     raw_json: Option<String>,
 }
 
+// The "complex type" is a sqlx row tuple whose shape is dictated by the
+// SELECT list right below it. A type alias would move the column list away
+// from the query it describes, which is the opposite of clearer.
+#[allow(clippy::type_complexity)]
 #[tauri::command]
 pub async fn list_drivers_with_counts(state: State<'_, AppState>) -> AppResult<Vec<DriverGroup>> {
     let rows: Vec<(i64, String, i64, Option<i64>, Option<i64>)> = sqlx::query_as(

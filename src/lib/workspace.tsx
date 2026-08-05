@@ -138,8 +138,8 @@ function reducer(state: WorkspaceState, action: Action): WorkspaceState {
         const remaining = state.panes.filter((p) => p.id !== action.paneId);
         const activePaneId =
           state.activePaneId === action.paneId
-            ? remaining[Math.max(0, indexOfPane(state, action.paneId) - 1)]?.id ??
-              remaining[0].id
+            ? (remaining[Math.max(0, indexOfPane(state, action.paneId) - 1)]
+                ?.id ?? remaining[0].id)
             : state.activePaneId;
         return { panes: remaining, activePaneId };
       }

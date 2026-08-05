@@ -29,8 +29,9 @@ export function Ebay() {
   const [savedSellers, setSavedSellers] = useState<SavedSeller[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
-  const [syncSummary, setSyncSummary] =
-    useState<EbaySyncAllSummary | null>(null);
+  const [syncSummary, setSyncSummary] = useState<EbaySyncAllSummary | null>(
+    null,
+  );
   const [imgSize, setImgSize] = useImageSize("ebay");
 
   async function loadAll() {
@@ -141,8 +142,8 @@ export function Ebay() {
             {syncSummary.watchlist.skipped_fresh} fresh (skipped),{" "}
             {syncSummary.watchlist.filtered} filtered,{" "}
             {syncSummary.watchlist.failed} failed,{" "}
-            {syncSummary.watchlist.archived} archived,{" "}
-            -{syncSummary.watchlist.pruned} pruned (
+            {syncSummary.watchlist.archived} archived, -
+            {syncSummary.watchlist.pruned} pruned (
             {syncSummary.watchlist.items_seen} seen across{" "}
             {syncSummary.watchlist.pages_fetched} page
             {syncSummary.watchlist.pages_fetched === 1 ? "" : "s"}).
@@ -167,7 +168,9 @@ export function Ebay() {
       {rows === null ? (
         // A failed load leaves this null forever; the error banner above
         // is the state, not "still loading".
-        error ? null : <div className="card text-sm text-fg-muted">Loading…</div>
+        error ? null : (
+          <div className="card text-sm text-fg-muted">Loading…</div>
+        )
       ) : summary === null ? null : (
         <>
           <section className="space-y-3">
@@ -212,7 +215,11 @@ export function Ebay() {
               </div>
               <ul className="divide-y divide-border">
                 {summary.endingSoon.map((r) => (
-                  <ListingPreview key={r.listing_id} row={r} imgSizeClass={IMG_CLASS[imgSize]} />
+                  <ListingPreview
+                    key={r.listing_id}
+                    row={r}
+                    imgSizeClass={IMG_CLASS[imgSize]}
+                  />
                 ))}
               </ul>
             </section>
@@ -230,7 +237,11 @@ export function Ebay() {
               </div>
               <ul className="divide-y divide-border">
                 {summary.bestDeals.map((r) => (
-                  <ListingPreview key={r.listing_id} row={r} imgSizeClass={IMG_CLASS[imgSize]} />
+                  <ListingPreview
+                    key={r.listing_id}
+                    row={r}
+                    imgSizeClass={IMG_CLASS[imgSize]}
+                  />
                 ))}
               </ul>
             </section>
@@ -325,7 +336,9 @@ function ListingPreview({
             className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
           />
         ) : (
-          <div className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`} />
+          <div
+            className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`}
+          />
         ))}
       <div className="flex-1 min-w-0">
         <a

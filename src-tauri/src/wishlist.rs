@@ -117,12 +117,14 @@ pub async fn list_wishlists(pool: &SqlitePool) -> AppResult<Vec<WishlistInfo>> {
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(wishlist_id, name, created_at, entry_count)| WishlistInfo {
-            wishlist_id,
-            name,
-            created_at,
-            entry_count,
-        })
+        .map(
+            |(wishlist_id, name, created_at, entry_count)| WishlistInfo {
+                wishlist_id,
+                name,
+                created_at,
+                entry_count,
+            },
+        )
         .collect())
 }
 
@@ -407,9 +409,7 @@ pub async fn move_entry(
     .map_err(|e| {
         if let sqlx::Error::Database(db_err) = &e {
             if db_err.message().contains("UNIQUE") {
-                return AppError::Config(
-                    "that diecast is already on the target wishlist".into(),
-                );
+                return AppError::Config("that diecast is already on the target wishlist".into());
             }
         }
         map_fk_violation(e)
@@ -421,12 +421,10 @@ pub async fn move_entry(
 }
 
 /// Replace the entry's notes. Empty/whitespace-only clears them.
-pub async fn set_notes(
-    pool: &SqlitePool,
-    entry_id: i64,
-    notes: Option<String>,
-) -> AppResult<()> {
-    let notes = notes.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
+pub async fn set_notes(pool: &SqlitePool, entry_id: i64, notes: Option<String>) -> AppResult<()> {
+    let notes = notes
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty());
     let res = sqlx::query("UPDATE wishlist_entries SET notes = ? WHERE id = ?")
         .bind(notes)
         .bind(entry_id)
@@ -469,9 +467,7 @@ pub async fn unlink_listing(pool: &SqlitePool, entry_id: i64, listing_id: i64) -
 fn map_fk_violation(e: sqlx::Error) -> AppError {
     if let sqlx::Error::Database(db_err) = &e {
         if db_err.message().contains("FOREIGN KEY") {
-            return AppError::Config(
-                "wishlist, entry, or listing no longer exists".into(),
-            );
+            return AppError::Config("wishlist, entry, or listing no longer exists".into());
         }
     }
     AppError::Db(e)

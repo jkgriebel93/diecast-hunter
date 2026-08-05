@@ -449,7 +449,7 @@ pub async fn auto_match_all(
     for (idx, (listing_id,)) in rows.into_iter().enumerate() {
         progress.check_cancelled()?;
         let done = (idx + 1) as u32;
-        if done == 1 || done % 25 == 0 || done == total {
+        if done == 1 || done.is_multiple_of(25) || done == total {
             progress.step(
                 format!("Auto-matching listing {done} of {total}…"),
                 Some(done),
@@ -465,8 +465,8 @@ pub async fn auto_match_all(
             continue;
         };
 
-        if !cache.contains_key(&driver_id) {
-            cache.insert(driver_id, load_candidates(pool, driver_id).await?);
+        if let std::collections::hash_map::Entry::Vacant(e) = cache.entry(driver_id) {
+            e.insert(load_candidates(pool, driver_id).await?);
         }
         if cache[&driver_id].is_empty() && network_ok && prewarm_attempted.insert(driver_id) {
             match prewarm_driver(pool, driver_id, progress).await {
@@ -1566,7 +1566,7 @@ mod tests {
         ];
         let sig = signals("2007 Jeff Gordon #24 DuPont 1:24");
         let (_, conf_ambig, reasons) = pick(&sig, &candidates).unwrap();
-        let (_, conf_clear, _) = pick(&sig, &candidates[..1].to_vec()).unwrap();
+        let (_, conf_clear, _) = pick(&sig, &candidates[..1]).unwrap();
         assert!(conf_ambig < conf_clear);
         assert!(reasons.iter().any(|r| r.contains("almost equally")));
     }
@@ -1584,7 +1584,7 @@ mod tests {
         let right = full_cand(1, 1998, "1:64", "#24 DuPont Chromalusion", None);
         let wrong = full_cand(2, 2005, "1:24", "#24 DuPont Flames", None);
         let sig = signals("1998 Jeff Gordon #24 DuPont Chromalusion 1:64");
-        let (id, _, _) = pick(&sig, &vec![right.clone(), wrong.clone()]).unwrap();
+        let (id, _, _) = pick(&sig, &[right.clone(), wrong.clone()]).unwrap();
         assert_eq!(id, 1);
         let w = MatchWeights::default();
         let (f_wrong, _) = extract_features(&sig, &wrong, true);

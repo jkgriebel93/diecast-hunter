@@ -29,10 +29,7 @@ export function ErrorBanner({
   }
 
   return (
-    <div
-      className={`card border-red-500/40 text-sm ${className}`}
-      role="alert"
-    >
+    <div className={`card border-red-500/40 text-sm ${className}`} role="alert">
       <div className="text-red-300">{title}</div>
       {hint && <div className="text-fg-muted mt-1">{hint}</div>}
       {detail && <TechnicalDetails detail={detail} />}

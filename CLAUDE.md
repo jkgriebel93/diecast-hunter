@@ -10,6 +10,7 @@ Package manager is **pnpm** (enforced by `packageManager` in package.json). Do n
 - `pnpm tauri dev` — run the desktop app (starts Vite on :1420 + Tauri shell). Use this for end-to-end work; first build is slow due to Rust deps.
 - `pnpm dev` — frontend only (no Tauri shell; `invoke` calls will fail)
 - `pnpm build` — `tsc -b && vite build` (TypeScript typecheck + production frontend bundle)
+- `pnpm format` / `pnpm format:check` — prettier over the TS/JS/CSS/JSON/HTML tree. Config is `.prettierrc.json` (prettier's defaults, written out explicitly) and `.prettierignore` (excludes `src-tauri/fixtures/` — captured verbatim from DCR/eBay, so reformatting would change what the parser tests assert — plus `*.md` and `*.rs`). CI gates on `format:check`, so run `pnpm format` before pushing rather than `npx prettier`, which resolves an unpinned version.
 - `pnpm tauri build` — produce Windows installers (msi + nsis)
 - `pnpm tauri icon path/to/source.png` — regenerate `src-tauri/icons/` from a ≥1024px source
 
@@ -18,7 +19,7 @@ Rust side (run from `src-tauri/`):
 - `cargo test` — runs all Rust tests, including the parser tests in `src/dcr/parse.rs`
 - `cargo test parse_details_line` — single test by name
 - `cargo check` — fast compile check without linking
-- `cargo fmt` / `cargo clippy` — formatting / lints
+- `cargo fmt` / `cargo clippy --all-targets -- -D warnings` — formatting / lints. Both are CI gates, and the tree is clean against both, so a repo-wide `cargo fmt` is now safe (it no longer rewrites untouched files). Deliberately-kept clippy findings carry a targeted `#[allow]` with a reason at the item — don't add crate-level allows.
 
 ## Architecture
 

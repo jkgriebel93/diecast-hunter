@@ -7,10 +7,7 @@
   "host_permissions": ["http://localhost/*", "http://127.0.0.1/*"],
   "content_scripts": [
     {
-      "matches": [
-        "https://www.ebay.com/itm/*",
-        "https://m.ebay.com/itm/*"
-      ],
+      "matches": ["https://www.ebay.com/itm/*", "https://m.ebay.com/itm/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
     }

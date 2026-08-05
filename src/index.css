@@ -59,15 +59,33 @@
    hue. Backgrounds and borders use /10–/40 opacity tints and still work
    fine in light mode, so they're left alone. */
 @layer utilities {
-  html:not(.dark) .text-emerald-400 { color: rgb(5 150 105); }
-  html:not(.dark) .text-emerald-300 { color: rgb(4 120 87); }
-  html:not(.dark) .text-red-400 { color: rgb(220 38 38); }
-  html:not(.dark) .text-red-300 { color: rgb(185 28 28); }
-  html:not(.dark) .text-amber-400\/80 { color: rgb(180 83 9 / 0.95); }
-  html:not(.dark) .text-amber-400\/90 { color: rgb(180 83 9); }
-  html:not(.dark) .text-yellow-400 { color: rgb(202 138 4); }
-  html:not(.dark) .hover\:text-red-300:hover { color: rgb(185 28 28); }
-  html:not(.dark) .hover\:text-emerald-300:hover { color: rgb(4 120 87); }
+  html:not(.dark) .text-emerald-400 {
+    color: rgb(5 150 105);
+  }
+  html:not(.dark) .text-emerald-300 {
+    color: rgb(4 120 87);
+  }
+  html:not(.dark) .text-red-400 {
+    color: rgb(220 38 38);
+  }
+  html:not(.dark) .text-red-300 {
+    color: rgb(185 28 28);
+  }
+  html:not(.dark) .text-amber-400\/80 {
+    color: rgb(180 83 9 / 0.95);
+  }
+  html:not(.dark) .text-amber-400\/90 {
+    color: rgb(180 83 9);
+  }
+  html:not(.dark) .text-yellow-400 {
+    color: rgb(202 138 4);
+  }
+  html:not(.dark) .hover\:text-red-300:hover {
+    color: rgb(185 28 28);
+  }
+  html:not(.dark) .hover\:text-emerald-300:hover {
+    color: rgb(4 120 87);
+  }
 }
 
 @layer components {

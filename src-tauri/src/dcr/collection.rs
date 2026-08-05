@@ -2,8 +2,7 @@ use scraper::{ElementRef, Html, Selector};
 
 use crate::dcr::parse::{
     asset_guid_from_id_attr, dollars_to_cents, normalize_driver_name, parse_details_line,
-    parse_seq_produced, registry_guid_from_feedback_url, registry_int_id_from_url,
-    SeqProduced,
+    parse_seq_produced, registry_guid_from_feedback_url, registry_int_id_from_url, SeqProduced,
 };
 use crate::error::{AppError, AppResult};
 
@@ -66,8 +65,7 @@ fn parse_item(el: ElementRef) -> AppResult<CollectionItem> {
 
     // The "info" link with class "diecast-value-feedback" carries the
     // registry-entry GUID in its href.
-    let feedback_sel =
-        Selector::parse("a.diecast-value-feedback").unwrap();
+    let feedback_sel = Selector::parse("a.diecast-value-feedback").unwrap();
     let registry_guid = el
         .select(&feedback_sel)
         .next()
@@ -76,15 +74,12 @@ fn parse_item(el: ElementRef) -> AppResult<CollectionItem> {
 
     // The "additional information" link points to the public detail page,
     // which carries the registry's integer id at the end.
-    let detail_link_sel =
-        Selector::parse("a[href*='/diecast/']").unwrap();
+    let detail_link_sel = Selector::parse("a[href*='/diecast/']").unwrap();
     let detail_href = el
         .select(&detail_link_sel)
         .next()
         .and_then(|a| a.value().attr("href").map(str::to_owned));
-    let registry_int_id = detail_href
-        .as_deref()
-        .and_then(registry_int_id_from_url);
+    let registry_int_id = detail_href.as_deref().and_then(registry_int_id_from_url);
 
     let image_sel = Selector::parse("img.img-thumbnail").unwrap();
     let image_url = el
@@ -108,8 +103,7 @@ fn parse_item(el: ElementRef) -> AppResult<CollectionItem> {
         .next()
         .ok_or_else(|| AppError::Parse("missing diecast-details".into()))?;
     let inner_div_sel = Selector::parse(":scope > div").unwrap();
-    let inner_divs: Vec<ElementRef> =
-        details_div.select(&inner_div_sel).collect();
+    let inner_divs: Vec<ElementRef> = details_div.select(&inner_div_sel).collect();
 
     let mut year = None;
     let mut oem = None;
@@ -155,9 +149,8 @@ fn parse_item(el: ElementRef) -> AppResult<CollectionItem> {
         }
     }
 
-    let value_sel = |class: &str| -> Selector {
-        Selector::parse(&format!("div.{class} span")).unwrap()
-    };
+    let value_sel =
+        |class: &str| -> Selector { Selector::parse(&format!("div.{class} span")).unwrap() };
     let retail_value_cents = el
         .select(&value_sel("retail-value"))
         .next()

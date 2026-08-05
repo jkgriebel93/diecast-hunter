@@ -9,11 +9,19 @@ name: CI
 # keyring crate resolves to its windows-native backend — the same code path
 # users run. The repo is public, so runner minutes are free either way.
 #
-# Deliberately NOT gated (would fail on main today, see DCH-22 PR):
-#   - `cargo fmt --check`   — the tree isn't rustfmt-clean (~100 files differ)
-#   - `cargo clippy`        — never run against this tree; unknown baseline
-#   - worker/ tests         — one stale test fails (DCH-28). Those are already
-#                             gated by deploy-worker.yml on worker/** changes.
+# The four gates DCH-22 left out (each failed against main at the time) were
+# enabled by DCH-29, after one mechanical commit per formatter brought the
+# tree clean: `cargo fmt --check`, `cargo clippy -D warnings`, `prettier
+# --check`, and the worker/ test suite.
+#
+# Formatting checks run BEFORE the compile in each job: they take seconds and
+# catch the most common failure, so a badly-formatted PR doesn't wait on a
+# ~2-minute Rust build to find out.
+#
+# Not gated on purpose: `paths-ignore` for docs-only PRs. It would save a
+# Windows Rust job on markdown changes, but a *required* check that reports
+# "skipped" rather than "passed" can block a PR from merging — the wrong
+# failure mode to trade a few runner minutes for.
 
 on:
   push:
@@ -46,6 +54,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Reads .prettierrc.json + .prettierignore; `prettier` is a pinned
+      # devDependency, so this checks the same version contributors run.
+      - name: Format check
+        run: pnpm format:check
+
       # `pnpm build` is `tsc -b && vite build` — typecheck and bundle in one.
       - name: Typecheck and build
         run: pnpm build
@@ -53,19 +66,61 @@ jobs:
       - name: Test
         run: pnpm test
 
+  worker:
+    name: Worker (tests)
+    # Its own pnpm project with a separate lockfile, so it can't share the
+    # frontend job's install. deploy-worker.yml also runs these, but only on
+    # worker/** pushes to main — this catches a break from any PR.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: worker/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
+        run: pnpm test
+
   rust:
-    name: Rust (cargo test)
+    name: Rust (fmt, clippy, tests)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       # Caches ~/.cargo and src-tauri/target keyed on the lockfile. Without
       # it every run recompiles the full Tauri dependency tree.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+
+      # Needs no compilation, so it runs first and fails in seconds.
+      - name: Format check
+        working-directory: src-tauri
+        run: cargo fmt --check
+
+      # --all-targets covers tests and benches, not just the lib. Findings
+      # that are deliberately kept carry a targeted #[allow] plus a reason
+      # comment at the item; nothing is silenced crate-wide.
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Test
         working-directory: src-tauri
@@ -76,7 +131,7 @@ jobs:
     # Only for commits that land on main (and manual runs) — PRs stop at the
     # gates above. Both must pass before we spend ~10 minutes on a bundle.
     if: github.event_name != 'pull_request'
-    needs: [frontend, rust]
+    needs: [frontend, worker, rust]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

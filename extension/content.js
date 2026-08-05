@@ -53,8 +53,12 @@ function fmtCents(cents) {
 }
 
 function esc(s) {
-  return String(s ?? "").replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
+  return String(s ?? "").replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ],
   );
 }
 
@@ -113,7 +117,9 @@ function mountPanel() {
     <div class="dh-body dh-muted">Checking registry…</div>
   `;
   shadow.appendChild(panel);
-  panel.querySelector(".dh-close").addEventListener("click", () => host.remove());
+  panel
+    .querySelector(".dh-close")
+    .addEventListener("click", () => host.remove());
   document.documentElement.appendChild(host);
   shadowBody = panel.querySelector(".dh-body");
   return panel;
@@ -210,14 +216,20 @@ async function main() {
     const detail =
       resp.status === 401
         ? "shared secret mismatch — copy it again from the app's Settings into the extension options"
-        : esc((resp.body && resp.body.error) || resp.error || `HTTP ${resp.status}`);
+        : esc(
+            (resp.body && resp.body.error) ||
+              resp.error ||
+              `HTTP ${resp.status}`,
+          );
     render(`<span class="dh-muted">Preview failed: ${detail}</span>`);
     return;
   }
 
   const p = resp.body;
   if (!p || (!p.entry && p.skipped_reason)) {
-    render(`<span class="dh-muted">${esc(p ? p.skipped_reason : "no response")}</span>`);
+    render(
+      `<span class="dh-muted">${esc(p ? p.skipped_reason : "no response")}</span>`,
+    );
     return;
   }
 
@@ -256,7 +268,10 @@ async function main() {
     watchBtn.addEventListener("click", async () => {
       watchBtn.disabled = true;
       watchBtn.textContent = "Watching…";
-      const r = await sendMessage({ type: "watch", payload: { input: location.href } });
+      const r = await sendMessage({
+        type: "watch",
+        payload: { input: location.href },
+      });
       if (r.ok && r.body && r.body.listing_id !== null) {
         watchBtn.replaceWith(
           Object.assign(document.createElement("span"), {
@@ -267,7 +282,10 @@ async function main() {
       } else {
         watchBtn.disabled = false;
         watchBtn.textContent = "Watch in app";
-        const err = (r.body && (r.body.error || r.body.filtered_reason)) || r.error || "failed";
+        const err =
+          (r.body && (r.body.error || r.body.filtered_reason)) ||
+          r.error ||
+          "failed";
         render(
           shadowBody.innerHTML +
             `<div class="dh-muted" style="margin-top:6px">Watch failed: ${esc(err)}</div>`,
@@ -303,9 +321,11 @@ function renderVerdictRow(panel, p, alreadySaved) {
     <button class="dh-btn reject" id="dh-reject">✗ Not this car</button>
   `;
   if (confirmedNoMatch) {
-    note.textContent = "Currently marked “no match” in the app — confirming overrides that.";
+    note.textContent =
+      "Currently marked “no match” in the app — confirming overrides that.";
   } else if (!alreadySaved) {
-    note.textContent = "Confirming also watches the listing and saves it to the app.";
+    note.textContent =
+      "Confirming also watches the listing and saves it to the app.";
   }
 
   const done = (text) => {
@@ -329,7 +349,12 @@ function renderVerdictRow(panel, p, alreadySaved) {
         registry_entry_id: p.entry.registry_entry_id,
       },
     });
-    if (r.ok) done(r.body && r.body.saved_now ? "✓ watched + confirmed" : "✓ match confirmed");
+    if (r.ok)
+      done(
+        r.body && r.body.saved_now
+          ? "✓ watched + confirmed"
+          : "✓ match confirmed",
+      );
     else {
       busy(false);
       fail(r, "Confirm");
@@ -342,7 +367,12 @@ function renderVerdictRow(panel, p, alreadySaved) {
       type: "reject",
       payload: { input: location.href },
     });
-    if (r.ok) done(r.body && r.body.saved_now ? "watched + marked no match" : "marked no match");
+    if (r.ok)
+      done(
+        r.body && r.body.saved_now
+          ? "watched + marked no match"
+          : "marked no match",
+      );
     else {
       busy(false);
       fail(r, "Reject");

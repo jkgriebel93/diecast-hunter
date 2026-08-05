@@ -110,6 +110,9 @@ pub struct CompIndex {
 
 impl CompIndex {
     /// Load all sold comps within the window as of `now` (Unix seconds).
+    // The row tuple's shape is dictated by the SELECT list immediately below
+    // it; aliasing it would separate the columns from the query naming them.
+    #[allow(clippy::type_complexity)]
     pub async fn load(pool: &SqlitePool, now: i64) -> AppResult<Self> {
         let cutoff = now - COMP_WINDOW_SECONDS;
         // The sale date is `end_time` when eBay gave us one and `archived_at`

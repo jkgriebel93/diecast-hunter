@@ -57,6 +57,10 @@ async fn fetch_item_from_group(client: &EbayClient, group_id: &str) -> AppResult
 #[derive(Debug, Clone)]
 pub struct EbayItem {
     pub item_id: String,
+    /// Present in the Browse payload; callers derive the legacy id from
+    /// `item_id` via `legacy_id_from_v1` instead. Kept so the parsed item
+    /// mirrors the response rather than silently dropping a field.
+    #[allow(dead_code)]
     pub legacy_item_id: Option<String>,
     pub web_url: String,
     pub title: String,

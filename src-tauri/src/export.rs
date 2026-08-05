@@ -227,10 +227,7 @@ pub async fn export_collection(
 /// Spreadsheet export of the displayed collection rows. No images, so it's
 /// fast and needs no progress plumbing. Money is written as decimal dollars
 /// (`55.00`) rather than display strings so spreadsheets can sum the column.
-pub async fn export_collection_csv(
-    rows: &[CollectionRow],
-    path: &str,
-) -> AppResult<ExportSummary> {
+pub async fn export_collection_csv(rows: &[CollectionRow], path: &str) -> AppResult<ExportSummary> {
     let doc = build_collection_csv(rows);
     tokio::fs::write(path, doc).await?;
     Ok(ExportSummary {
@@ -261,12 +258,8 @@ fn build_collection_csv(rows: &[CollectionRow]) -> String {
             r.finish.clone().unwrap_or_default(),
             r.diecast_type.clone().unwrap_or_default(),
             r.production_qty.map(|n| n.to_string()).unwrap_or_default(),
-            r.retail_value_cents
-                .map(csv_dollars)
-                .unwrap_or_default(),
-            r.wholesale_value_cents
-                .map(csv_dollars)
-                .unwrap_or_default(),
+            r.retail_value_cents.map(csv_dollars).unwrap_or_default(),
+            r.wholesale_value_cents.map(csv_dollars).unwrap_or_default(),
             r.registration_number.clone().unwrap_or_default(),
             r.detail_url
                 .as_deref()
@@ -355,10 +348,7 @@ fn header_line(r: &ProductionSearchResult) -> String {
 fn strip_diecast_type(scheme: &str) -> String {
     if let Some((rest, last)) = scheme.rsplit_once(" - ") {
         let last = last.trim();
-        if DIECAST_TYPES
-            .iter()
-            .any(|t| t.eq_ignore_ascii_case(last))
-        {
+        if DIECAST_TYPES.iter().any(|t| t.eq_ignore_ascii_case(last)) {
             return rest.trim_end().to_string();
         }
     }
@@ -503,10 +493,7 @@ fn split_scheme(scheme: Option<&str>) -> (Option<String>, Option<String>) {
         let number = it.next().unwrap_or("").trim();
         let remainder = it.next().map(str::trim).filter(|r| !r.is_empty());
         if !number.is_empty() {
-            return (
-                Some(number.to_string()),
-                remainder.map(str::to_string),
-            );
+            return (Some(number.to_string()), remainder.map(str::to_string));
         }
     }
     (None, Some(s.to_string()))
@@ -516,7 +503,7 @@ fn format_thousands(n: i64) -> String {
     let raw = n.abs().to_string();
     let mut out = String::with_capacity(raw.len() + raw.len() / 3);
     for (i, c) in raw.chars().enumerate() {
-        if i > 0 && (raw.len() - i) % 3 == 0 {
+        if i > 0 && (raw.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);
@@ -529,7 +516,11 @@ fn format_thousands(n: i64) -> String {
 }
 
 fn format_dollars(cents: i64) -> String {
-    format!("${}.{:02}", format_thousands(cents / 100), (cents % 100).abs())
+    format!(
+        "${}.{:02}",
+        format_thousands(cents / 100),
+        (cents % 100).abs()
+    )
 }
 
 fn html_escape(s: &str) -> String {
@@ -607,7 +598,9 @@ fn build_document(title: &str, noun: &str, entries: &[EntryHtml]) -> String {
             None => body.push_str("<div class=\"noimg\">image unavailable</div>\n"),
         }
         if !e.candidates.is_empty() {
-            body.push_str("<div class=\"cands-label\">Candidate listings</div>\n<ul class=\"cands\">\n");
+            body.push_str(
+                "<div class=\"cands-label\">Candidate listings</div>\n<ul class=\"cands\">\n",
+            );
             for c in &e.candidates {
                 body.push_str(&format!("<li>{}</li>\n", html_escape(c)));
             }
@@ -706,16 +699,14 @@ mod tests {
     #[test]
     fn header_strips_trailing_diecast_type() {
         let mut r = sample();
-        r.scheme_text =
-            Some("#22 AAA Insurance 2021 Ford Mustang - Diecast Chassis".into());
+        r.scheme_text = Some("#22 AAA Insurance 2021 Ford Mustang - Diecast Chassis".into());
         assert_eq!(header_line(&r), "#22 - AAA Insurance 2021 Ford Mustang");
     }
 
     #[test]
     fn header_keeps_variant_qualifiers() {
         let mut r = sample();
-        r.scheme_text =
-            Some("#24 DuPont 1995 Chevy Monte Carlo - Signature Series".into());
+        r.scheme_text = Some("#24 DuPont 1995 Chevy Monte Carlo - Signature Series".into());
         assert_eq!(
             header_line(&r),
             "#24 - DuPont 1995 Chevy Monte Carlo - Signature Series"
@@ -985,7 +976,11 @@ mod tests {
         assert!(doc.contains("1 entry —"));
         assert!(doc.contains("max $60, chrome only"));
         assert!(doc.contains("Jeff Gordon 1:24 DuPont &lt;NIB&gt; — $55.00 (ebay, active)"));
-        let two = build_document("Wishlist", "entry", &[EntryHtml::default(), EntryHtml::default()]);
+        let two = build_document(
+            "Wishlist",
+            "entry",
+            &[EntryHtml::default(), EntryHtml::default()],
+        );
         assert!(two.contains("2 entries —"));
     }
 }

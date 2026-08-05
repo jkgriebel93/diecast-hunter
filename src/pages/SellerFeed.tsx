@@ -306,14 +306,11 @@ export function SellerFeed() {
     const parts: string[] = [];
     if (activeQuery) parts.push(`"${activeQuery}"`);
     if (conditions.length) parts.push(`cond: ${conditions.join(", ")}`);
-    if (buyingOptions.length)
-      parts.push(`format: ${buyingOptions.join(", ")}`);
+    if (buyingOptions.length) parts.push(`format: ${buyingOptions.join(", ")}`);
     if (priceMin || priceMax)
       parts.push(`price: ${priceMin || "—"} – ${priceMax || "—"}`);
     if (sellerSubset.size > 0)
-      parts.push(
-        `sellers: ${sellerSubset.size} of ${sellers?.length ?? "—"}`,
-      );
+      parts.push(`sellers: ${sellerSubset.size} of ${sellers?.length ?? "—"}`);
     if (sort) parts.push(`sort: ${sort}`);
     return parts.length ? parts.join(" · ") : "no filters";
   }, [
@@ -509,7 +506,9 @@ export function SellerFeed() {
       ) : page === null ? (
         // A failed load leaves `page` null forever; the error banner above
         // is the state, not "still loading".
-        error ? null : <div className="card text-sm text-fg-muted">Loading…</div>
+        error ? null : (
+          <div className="card text-sm text-fg-muted">Loading…</div>
+        )
       ) : page.items.length === 0 ? (
         <div className="card text-sm text-fg-muted">
           No recent listings match the current filters.
@@ -518,8 +517,8 @@ export function SellerFeed() {
         <>
           <div className="flex items-center justify-between text-xs text-fg-subtle">
             <div>
-              Showing {showingFrom}–{showingTo} of{" "}
-              {page.total.toLocaleString()} results
+              Showing {showingFrom}–{showingTo} of {page.total.toLocaleString()}{" "}
+              results
             </div>
             <div className="flex items-center gap-2">
               <ImageSizeToggle size={imgSize} onChange={setImgSize} />
@@ -615,8 +614,8 @@ function ManageSellersPanel({
         <div className="border-t border-border px-4 py-3 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <div className="text-xs text-fg-subtle">
-              Bookmark eBay sellers you trust — their recent listings show up
-              in the feed.
+              Bookmark eBay sellers you trust — their recent listings show up in
+              the feed.
             </div>
             <div className="flex gap-2">
               <button
@@ -641,9 +640,7 @@ function ManageSellersPanel({
             <div className="text-xs text-emerald-400">{syncMessage}</div>
           )}
           {sellers === null ? null : sellers.length === 0 ? (
-            <div className="text-xs text-fg-muted">
-              No saved sellers yet.
-            </div>
+            <div className="text-xs text-fg-muted">No saved sellers yet.</div>
           ) : (
             <ul className="space-y-2 max-h-72 overflow-y-auto">
               {sellers.map((s) => (
@@ -799,7 +796,9 @@ function FeedCard({
               className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
             />
           ) : (
-            <div className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`} />
+            <div
+              className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`}
+            />
           ))}
         <div className="min-w-0 flex-1">
           <div
@@ -831,11 +830,13 @@ function FeedCard({
           <div className="text-base text-fg">
             {formatCents(item.price_cents)}
           </div>
-          {!minimized && item.shipping_cents !== null && item.shipping_cents > 0 && (
-            <div className="text-fg-subtle">
-              + {formatCents(item.shipping_cents)} ship
-            </div>
-          )}
+          {!minimized &&
+            item.shipping_cents !== null &&
+            item.shipping_cents > 0 && (
+              <div className="text-fg-subtle">
+                + {formatCents(item.shipping_cents)} ship
+              </div>
+            )}
           {!minimized &&
             total !== null &&
             item.shipping_cents !== null &&
@@ -845,37 +846,37 @@ function FeedCard({
         </div>
       </div>
       {!minimized && (
-      <div className="flex items-center justify-end gap-3 text-xs">
-        <a
-          className="text-accent hover:underline"
-          href={item.web_url}
-          onClick={(e) => {
-            e.preventDefault();
-            void openExternal(item.web_url);
-          }}
-        >
-          View on eBay →
-        </a>
-        {watched ? (
-          <button
-            type="button"
-            className="text-fg-muted hover:text-red-300 disabled:opacity-50"
-            onClick={onUnwatch}
-            disabled={busy}
+        <div className="flex items-center justify-end gap-3 text-xs">
+          <a
+            className="text-accent hover:underline"
+            href={item.web_url}
+            onClick={(e) => {
+              e.preventDefault();
+              void openExternal(item.web_url);
+            }}
           >
-            {busy ? "Unwatching…" : "✓ Watching · Unwatch"}
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="text-fg-muted hover:text-fg disabled:opacity-50"
-            onClick={onWatch}
-            disabled={busy}
-          >
-            {busy ? "Watching…" : "Watch"}
-          </button>
-        )}
-      </div>
+            View on eBay →
+          </a>
+          {watched ? (
+            <button
+              type="button"
+              className="text-fg-muted hover:text-red-300 disabled:opacity-50"
+              onClick={onUnwatch}
+              disabled={busy}
+            >
+              {busy ? "Unwatching…" : "✓ Watching · Unwatch"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="text-fg-muted hover:text-fg disabled:opacity-50"
+              onClick={onWatch}
+              disabled={busy}
+            >
+              {busy ? "Watching…" : "Watch"}
+            </button>
+          )}
+        </div>
       )}
     </li>
   );

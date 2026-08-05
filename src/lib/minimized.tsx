@@ -14,7 +14,9 @@ function load(): Set<string> {
     if (raw) {
       const parsed: unknown = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return new Set(parsed.filter((k): k is string => typeof k === "string"));
+        return new Set(
+          parsed.filter((k): k is string => typeof k === "string"),
+        );
       }
     }
   } catch {
@@ -60,7 +62,10 @@ export function setManyMinimized(keys: string[], value: boolean) {
     if (value) next.add(key);
     else next.delete(key);
   }
-  if (next.size === minimized.size && keys.every((k) => next.has(k) === minimized.has(k))) {
+  if (
+    next.size === minimized.size &&
+    keys.every((k) => next.has(k) === minimized.has(k))
+  ) {
     return;
   }
   minimized = next;
@@ -71,7 +76,10 @@ export function setManyMinimized(keys: string[], value: boolean) {
 /** Whether one item is minimized, plus a toggle. */
 export function useMinimized(key: string): [boolean, () => void] {
   const value = useSyncExternalStore(subscribe, () => minimized.has(key));
-  const toggle = useCallback(() => setMinimized(key, !minimized.has(key)), [key]);
+  const toggle = useCallback(
+    () => setMinimized(key, !minimized.has(key)),
+    [key],
+  );
   return [value, toggle];
 }
 

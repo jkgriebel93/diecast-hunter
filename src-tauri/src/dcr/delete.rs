@@ -33,10 +33,7 @@ pub enum DeleteOutcome {
     NotFound,
 }
 
-pub async fn delete_from_garage(
-    client: &DcrClient,
-    asset_guid: &str,
-) -> AppResult<DeleteOutcome> {
+pub async fn delete_from_garage(client: &DcrClient, asset_guid: &str) -> AppResult<DeleteOutcome> {
     if !is_asset_guid(asset_guid) {
         return Err(AppError::Parse(format!(
             "not a valid garage asset GUID: {asset_guid}"
@@ -49,8 +46,7 @@ pub async fn delete_from_garage(
 }
 
 static ASSET_GUID_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-        .unwrap()
+    Regex::new(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$").unwrap()
 });
 
 fn is_asset_guid(s: &str) -> bool {
@@ -110,8 +106,7 @@ mod tests {
 
     #[test]
     fn failure_with_message_is_an_error() {
-        let err =
-            parse_delete_response(r#"{"success":false,"message":"Nope."}"#).unwrap_err();
+        let err = parse_delete_response(r#"{"success":false,"message":"Nope."}"#).unwrap_err();
         assert!(err.to_string().contains("Nope."));
     }
 
@@ -141,22 +136,20 @@ mod tests {
             .filename(data_dir.join("diecast-hunter.sqlite"))
             .read_only(true);
         let pool = sqlx::SqlitePool::connect_with(options).await.unwrap();
-        let (username,): (String,) = sqlx::query_as(
-            "SELECT value FROM settings WHERE key = 'diecastregistry.username'",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let (username,): (String,) =
+            sqlx::query_as("SELECT value FROM settings WHERE key = 'diecastregistry.username'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         let password = crate::settings::secret_get(crate::settings::ENTRY_DCR_PASSWORD)
             .unwrap()
             .expect("DCR password in keyring");
 
         let client = DcrClient::new().unwrap();
         client.login(&username, &password).await.unwrap();
-        let outcome =
-            delete_from_garage(&client, "7d3f2a91-5c4e-4b8a-9f1e-2a6b8c0d4e5f")
-                .await
-                .unwrap();
+        let outcome = delete_from_garage(&client, "7d3f2a91-5c4e-4b8a-9f1e-2a6b8c0d4e5f")
+            .await
+            .unwrap();
         assert_eq!(outcome, DeleteOutcome::NotFound);
     }
 }

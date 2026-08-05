@@ -247,6 +247,64 @@ pub async fn mark_no_match(pool: &SqlitePool, listing_id: i64, source: &str) -> 
     Ok(())
 }
 
+async fn run_targeted_enrichment(
+    pool: &SqlitePool,
+    entry_id: i64,
+    registry_guid: &str,
+    detail_url: Option<&str>,
+) -> AppResult<bool> {
+    let detail_url = match detail_url {
+        Some(u) => u.to_string(),
+        None => match lookup_detail_url(pool, entry_id).await? {
+            Some(u) => u,
+            None => {
+                tracing::warn!(
+                    "registry-link: entry {entry_id} has no detail_url — skipping enrichment"
+                );
+                return Ok(false);
+            }
+        },
+    };
+
+    let (username, password) = load_dcr_credentials(pool).await?;
+    let client = DcrClient::new()?;
+    client.login(&username, &password).await?;
+
+    dcr_registry::enrich_one(pool, &client, entry_id, registry_guid, &detail_url).await?;
+    Ok(true)
+}
+
+async fn lookup_detail_url(pool: &SqlitePool, entry_id: i64) -> AppResult<Option<String>> {
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT raw_json FROM registry_entries WHERE id = ?")
+            .bind(entry_id)
+            .fetch_optional(pool)
+            .await?;
+    let raw_json = match row.and_then(|(rj,)| rj) {
+        Some(rj) => rj,
+        None => return Ok(None),
+    };
+    let v: serde_json::Value = match serde_json::from_str(&raw_json) {
+        Ok(v) => v,
+        Err(_) => return Ok(None),
+    };
+    Ok(v.get("detail_url")
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_string()))
+}
+
+async fn load_dcr_credentials(pool: &SqlitePool) -> AppResult<(String, String)> {
+    let username = settings::get(pool, settings::KEY_DCR_USERNAME)
+        .await?
+        .ok_or_else(|| {
+            AppError::NotConfigured("diecastregistry.com username not set in Settings".into())
+        })?;
+    let password = settings::secret_get(settings::ENTRY_DCR_PASSWORD)?.ok_or_else(|| {
+        AppError::NotConfigured("diecastregistry.com password not set in Settings".into())
+    })?;
+    Ok((username, password))
+}
+
 #[cfg(test)]
 mod tests {
     //! Tests for the shared verdict-persistence cores used by both the
@@ -438,62 +496,4 @@ mod tests {
             vec![(None, "rejected".into(), "reject_button".into())]
         );
     }
-}
-
-async fn run_targeted_enrichment(
-    pool: &SqlitePool,
-    entry_id: i64,
-    registry_guid: &str,
-    detail_url: Option<&str>,
-) -> AppResult<bool> {
-    let detail_url = match detail_url {
-        Some(u) => u.to_string(),
-        None => match lookup_detail_url(pool, entry_id).await? {
-            Some(u) => u,
-            None => {
-                tracing::warn!(
-                    "registry-link: entry {entry_id} has no detail_url — skipping enrichment"
-                );
-                return Ok(false);
-            }
-        },
-    };
-
-    let (username, password) = load_dcr_credentials(pool).await?;
-    let client = DcrClient::new()?;
-    client.login(&username, &password).await?;
-
-    dcr_registry::enrich_one(pool, &client, entry_id, registry_guid, &detail_url).await?;
-    Ok(true)
-}
-
-async fn lookup_detail_url(pool: &SqlitePool, entry_id: i64) -> AppResult<Option<String>> {
-    let row: Option<(Option<String>,)> =
-        sqlx::query_as("SELECT raw_json FROM registry_entries WHERE id = ?")
-            .bind(entry_id)
-            .fetch_optional(pool)
-            .await?;
-    let raw_json = match row.and_then(|(rj,)| rj) {
-        Some(rj) => rj,
-        None => return Ok(None),
-    };
-    let v: serde_json::Value = match serde_json::from_str(&raw_json) {
-        Ok(v) => v,
-        Err(_) => return Ok(None),
-    };
-    Ok(v.get("detail_url")
-        .and_then(|s| s.as_str())
-        .map(|s| s.to_string()))
-}
-
-async fn load_dcr_credentials(pool: &SqlitePool) -> AppResult<(String, String)> {
-    let username = settings::get(pool, settings::KEY_DCR_USERNAME)
-        .await?
-        .ok_or_else(|| {
-            AppError::NotConfigured("diecastregistry.com username not set in Settings".into())
-        })?;
-    let password = settings::secret_get(settings::ENTRY_DCR_PASSWORD)?.ok_or_else(|| {
-        AppError::NotConfigured("diecastregistry.com password not set in Settings".into())
-    })?;
-    Ok((username, password))
 }

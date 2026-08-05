@@ -31,7 +31,9 @@ document.getElementById("form").addEventListener("submit", async (e) => {
   try {
     const resp = await fetch(root + "/health");
     if (resp.ok) {
-      setStatus(`<span class="success">Connected — health check passed.</span>`);
+      setStatus(
+        `<span class="success">Connected — health check passed.</span>`,
+      );
     } else {
       setStatus(
         `<span class="error">Health check returned HTTP ${resp.status}.</span>`,

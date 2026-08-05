@@ -47,8 +47,9 @@ export function Settings() {
   const [syncEnrich, setSyncEnrich] = useState(true);
 
   const [refreshing, setRefreshing] = useState(false);
-  const [refreshSummary, setRefreshSummary] =
-    useState<EnrichSummary | null>(null);
+  const [refreshSummary, setRefreshSummary] = useState<EnrichSummary | null>(
+    null,
+  );
   const [refreshError, setRefreshError] = useState<string | null>(null);
 
   const [optionsRefreshing, setOptionsRefreshing] = useState(false);
@@ -70,8 +71,9 @@ export function Settings() {
   const [prewarmInput, setPrewarmInput] = useState("");
   const [prewarmDriverGuid, setPrewarmDriverGuid] = useState("");
   const [prewarming, setPrewarming] = useState(false);
-  const [prewarmSummary, setPrewarmSummary] =
-    useState<PrewarmSummary | null>(null);
+  const [prewarmSummary, setPrewarmSummary] = useState<PrewarmSummary | null>(
+    null,
+  );
   const [prewarmError, setPrewarmError] = useState<string | null>(null);
   const [prewarmedDrivers, setPrewarmedDrivers] = useState<PrewarmedDriver[]>(
     [],
@@ -86,9 +88,7 @@ export function Settings() {
     useState<DetailUrlBackfillSummary | null>(null);
   const [linkRepairError, setLinkRepairError] = useState<string | null>(null);
 
-  const [ebayCreds, setEbayCreds] = useState<EbayCredentialsState | null>(
-    null,
-  );
+  const [ebayCreds, setEbayCreds] = useState<EbayCredentialsState | null>(null);
   const [ebayAppId, setEbayAppId] = useState("");
   const [ebayCertId, setEbayCertId] = useState("");
   const [ebayEnv, setEbayEnv] = useState<"sandbox" | "production">("sandbox");
@@ -578,15 +578,17 @@ export function Settings() {
             Each sync also re-walks stale pre-warmed registry drivers (older
             than 30 days), up to this many entries per run so a single sync
             never tries the whole registry at once. Drivers that don't fit are
-            picked up on later runs, oldest first. Set to 0 to skip the
-            registry refresh entirely.
+            picked up on later runs, oldest first. Set to 0 to skip the registry
+            refresh entirely.
           </p>
         </form>
 
         <div className="space-y-1">
           <div className="text-xs">
             {autoSyncEnabled && autoSyncScheduled && (
-              <span className="text-emerald-400">✓ Scheduled task registered</span>
+              <span className="text-emerald-400">
+                ✓ Scheduled task registered
+              </span>
             )}
             {autoSyncEnabled && !autoSyncScheduled && (
               <span className="text-amber-400">
@@ -669,11 +671,7 @@ export function Settings() {
               {saving ? "Saving…" : "Save"}
             </button>
             {creds?.diecastregistry_has_password && (
-              <button
-                className="btn-secondary"
-                type="button"
-                onClick={onClear}
-              >
+              <button className="btn-secondary" type="button" onClick={onClear}>
                 Clear
               </button>
             )}
@@ -695,9 +693,7 @@ export function Settings() {
             <button
               className="btn-primary"
               type="button"
-              disabled={
-                syncing || !creds?.diecastregistry_has_password
-              }
+              disabled={syncing || !creds?.diecastregistry_has_password}
               onClick={onSync}
             >
               {syncing ? "Syncing…" : "Sync now"}
@@ -736,9 +732,7 @@ export function Settings() {
               )}
             </div>
           )}
-          {syncError && (
-            <ErrorBanner error={syncError} variant="inline" />
-          )}
+          {syncError && <ErrorBanner error={syncError} variant="inline" />}
         </div>
 
         <div className="border-t border-border pt-4 space-y-3">
@@ -746,17 +740,15 @@ export function Settings() {
             <div>
               <div className="text-sm font-medium">Registry details</div>
               <div className="text-xs text-fg-subtle">
-                Re-fetch detail pages for cars in your collection. Stale
-                entries (older than 30 days) refresh automatically.
+                Re-fetch detail pages for cars in your collection. Stale entries
+                (older than 30 days) refresh automatically.
               </div>
             </div>
             <div className="flex gap-2">
               <button
                 className="btn-secondary"
                 type="button"
-                disabled={
-                  refreshing || !creds?.diecastregistry_has_password
-                }
+                disabled={refreshing || !creds?.diecastregistry_has_password}
                 onClick={() => onRefresh(false)}
               >
                 {refreshing ? "Refreshing…" : "Refresh stale"}
@@ -764,9 +756,7 @@ export function Settings() {
               <button
                 className="btn-secondary"
                 type="button"
-                disabled={
-                  refreshing || !creds?.diecastregistry_has_password
-                }
+                disabled={refreshing || !creds?.diecastregistry_has_password}
                 onClick={() => onRefresh(true)}
               >
                 Force refresh all
@@ -775,10 +765,9 @@ export function Settings() {
           </div>
           {refreshSummary && (
             <div className="text-xs text-emerald-400">
-              Refreshed {refreshSummary.enriched} of{" "}
-              {refreshSummary.considered} (
-              {refreshSummary.failed} failed,{" "}
-              {refreshSummary.skipped} skipped).
+              Refreshed {refreshSummary.enriched} of {refreshSummary.considered}{" "}
+              ({refreshSummary.failed} failed, {refreshSummary.skipped}{" "}
+              skipped).
             </div>
           )}
           {refreshError && (
@@ -793,8 +782,8 @@ export function Settings() {
               <div className="text-xs text-fg-subtle">
                 Cache driver / OEM / brand / scale / finish dropdown choices
                 from diecastregistry.com. Used by the "Search registry…" dialog
-                on saved listings. Refresh occasionally to pick up new
-                drivers / brands.
+                on saved listings. Refresh occasionally to pick up new drivers /
+                brands.
               </div>
             </div>
             <button
@@ -818,13 +807,15 @@ export function Settings() {
 
         <div className="border-t border-border pt-4 space-y-3">
           <div>
-            <div className="text-sm font-medium">Pre-warm registry by driver</div>
+            <div className="text-sm font-medium">
+              Pre-warm registry by driver
+            </div>
             <div className="text-xs text-fg-subtle mt-1">
-              Pull every registry entry for one driver and store them locally
-              so the registry-search dialog can surface candidates without
-              hitting diecastregistry.com on every keystroke. Takes a minute
-              or two for a prolific driver — pages are paced to be polite.
-              Repeat for every driver you watch.
+              Pull every registry entry for one driver and store them locally so
+              the registry-search dialog can surface candidates without hitting
+              diecastregistry.com on every keystroke. Takes a minute or two for
+              a prolific driver — pages are paced to be polite. Repeat for every
+              driver you watch.
             </div>
           </div>
 
@@ -864,9 +855,8 @@ export function Settings() {
 
           {prewarmSummary && (
             <div className="text-xs text-emerald-400">
-              {prewarmSummary.driver_name}: pulled{" "}
-              {prewarmSummary.results_seen} entries across{" "}
-              {prewarmSummary.pages_fetched} page
+              {prewarmSummary.driver_name}: pulled {prewarmSummary.results_seen}{" "}
+              entries across {prewarmSummary.pages_fetched} page
               {prewarmSummary.pages_fetched === 1 ? "" : "s"} (
               {prewarmSummary.registry_entries_upserted} upserted).
             </div>
@@ -917,7 +907,11 @@ export function Settings() {
               </label>
             ))}
             {searchModeError && (
-              <ErrorBanner error={searchModeError} variant="inline" className="mt-1" />
+              <ErrorBanner
+                error={searchModeError}
+                variant="inline"
+                className="mt-1"
+              />
             )}
           </div>
 
@@ -1025,9 +1019,9 @@ export function Settings() {
         <div>
           <h3 className="text-base font-medium">eBay Developers</h3>
           <p className="text-xs text-fg-subtle mt-1">
-            App ID and Cert ID from your eBay developer keyset. Used for
-            looking up item details via the Browse API. Stored in the Windows
-            Credential Manager. User OAuth (for watchlist sync) comes later.
+            App ID and Cert ID from your eBay developer keyset. Used for looking
+            up item details via the Browse API. Stored in the Windows Credential
+            Manager. User OAuth (for watchlist sync) comes later.
           </p>
         </div>
 
@@ -1105,9 +1099,7 @@ export function Settings() {
               className="btn-secondary"
               type="button"
               disabled={
-                ebayTesting ||
-                !ebayCreds?.has_app_id ||
-                !ebayCreds?.has_cert_id
+                ebayTesting || !ebayCreds?.has_app_id || !ebayCreds?.has_cert_id
               }
               onClick={onEbayTest}
             >
@@ -1127,9 +1119,7 @@ export function Settings() {
         {ebayMessage && (
           <div className="text-xs text-emerald-400">{ebayMessage}</div>
         )}
-        {ebayError && (
-          <ErrorBanner error={ebayError} variant="inline" />
-        )}
+        {ebayError && <ErrorBanner error={ebayError} variant="inline" />}
 
         <div className="border-t border-border pt-4 space-y-3">
           <div>
@@ -1241,9 +1231,7 @@ export function Settings() {
           {oauthMessage && (
             <div className="text-xs text-emerald-400">{oauthMessage}</div>
           )}
-          {oauthError && (
-            <ErrorBanner error={oauthError} variant="inline" />
-          )}
+          {oauthError && <ErrorBanner error={oauthError} variant="inline" />}
         </div>
 
         <div className="border-t border-border pt-4 space-y-3">
@@ -1251,10 +1239,10 @@ export function Settings() {
             <h4 className="text-sm font-medium">Diecast filter</h4>
             <p className="text-xs text-fg-subtle mt-1">
               Reject non-diecast eBay listings on save. Watchlist sync still
-              sees them but doesn't store them; manual URL adds error out
-              with a helpful message. Heuristic is a substring check on
-              eBay's category path — turn it off if you want to track an
-              accessory or transporter that lives in a different category.
+              sees them but doesn't store them; manual URL adds error out with a
+              helpful message. Heuristic is a substring check on eBay's category
+              path — turn it off if you want to track an accessory or
+              transporter that lives in a different category.
             </p>
           </div>
 
@@ -1285,9 +1273,7 @@ export function Settings() {
           {filterMessage && (
             <div className="text-xs text-emerald-400">{filterMessage}</div>
           )}
-          {filterError && (
-            <ErrorBanner error={filterError} variant="inline" />
-          )}
+          {filterError && <ErrorBanner error={filterError} variant="inline" />}
         </div>
 
         <div className="border-t border-border pt-4 space-y-3">
@@ -1295,10 +1281,10 @@ export function Settings() {
             <h4 className="text-sm font-medium">Shipping quote location</h4>
             <p className="text-xs text-fg-subtle mt-1">
               Your US zip code, sent to eBay so it can price shipping for
-              listings that calculate it from the buyer's location. Without
-              it, those listings come back with no shipping cost at all and
-              show price-only totals. After saving, run “Refresh all” on the
-              Listings page to backfill.
+              listings that calculate it from the buyer's location. Without it,
+              those listings come back with no shipping cost at all and show
+              price-only totals. After saving, run “Refresh all” on the Listings
+              page to backfill.
             </p>
           </div>
 
@@ -1333,9 +1319,7 @@ export function Settings() {
 
       <ExtensionSection />
 
-      {message && (
-        <div className="text-sm text-emerald-400">{message}</div>
-      )}
+      {message && <div className="text-sm text-emerald-400">{message}</div>}
       {error && <ErrorBanner error={error} variant="inline" />}
     </div>
   );
@@ -1421,11 +1405,10 @@ function ExtensionSection() {
           Browser extension &amp; background
         </h3>
         <p className="text-xs text-fg-subtle mt-1">
-          The eBay browser extension talks to a local server inside this app
-          to show registry matches and valuations while you browse. Copy the
+          The eBay browser extension talks to a local server inside this app to
+          show registry matches and valuations while you browse. Copy the
           endpoint and secret into the extension&apos;s options page. The
-          toggles below keep that server available when the window is
-          closed.
+          toggles below keep that server available when the window is closed.
         </p>
       </div>
 
@@ -1490,8 +1473,8 @@ function ExtensionSection() {
                 onToggle({ run_in_background: e.target.checked })
               }
             />
-            Keep running in the background when the window is closed (tray
-            icon reopens it)
+            Keep running in the background when the window is closed (tray icon
+            reopens it)
           </label>
           <label className="flex items-center gap-2 cursor-pointer">
             <input
@@ -1568,9 +1551,9 @@ function MatcherLearningSection() {
         <p className="text-xs text-fg-subtle mt-1">
           Every match you confirm, reject, or re-link is recorded and used to
           tune the auto-matcher&apos;s scoring weights to your collection.
-          Retraining also runs automatically at startup once enough new
-          verdicts accumulate. A learned model only activates when it beats
-          the built-in weights in cross-validation.
+          Retraining also runs automatically at startup once enough new verdicts
+          accumulate. A learned model only activates when it beats the built-in
+          weights in cross-validation.
         </p>
       </div>
 
@@ -1598,8 +1581,8 @@ function MatcherLearningSection() {
               {status.positives ?? 0} confirms,{" "}
               {(status.explicit_negatives ?? 0) +
                 (status.implicit_negatives ?? 0)}{" "}
-              negatives ({status.implicit_negatives ?? 0} implied by
-              runner-up candidates).
+              negatives ({status.implicit_negatives ?? 0} implied by runner-up
+              candidates).
             </div>
           )}
           <div className="text-xs text-fg-subtle">

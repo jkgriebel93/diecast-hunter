@@ -25,11 +25,7 @@ pub async fn sync_all(
 ) -> AppResult<EbaySyncAllSummary> {
     // Two-phase: watchlist first (longest, involves enriching each item),
     // then saved searches + sellers (one-shot Trading API call).
-    progress.step(
-        "Syncing eBay watchlist…".to_string(),
-        Some(1),
-        Some(2),
-    );
+    progress.step("Syncing eBay watchlist…".to_string(), Some(1), Some(2));
     let watchlist = sync_watchlist(pool, progress).await?;
 
     progress.check_cancelled()?;

@@ -77,12 +77,7 @@ impl ProgressEmitter {
         }
     }
 
-    pub fn step(
-        &self,
-        label: impl Into<String>,
-        current: Option<u32>,
-        total: Option<u32>,
-    ) {
+    pub fn step(&self, label: impl Into<String>, current: Option<u32>, total: Option<u32>) {
         self.emit(label.into(), current, total, false, false, false);
     }
 

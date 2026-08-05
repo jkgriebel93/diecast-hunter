@@ -84,7 +84,9 @@ pub async fn backfill_detail_urls(
         );
         match prewarm_driver_with_client(pool, &client, guid, progress).await {
             Ok(_) => drivers_processed += 1,
-            Err(crate::error::AppError::Cancelled) => return Err(crate::error::AppError::Cancelled),
+            Err(crate::error::AppError::Cancelled) => {
+                return Err(crate::error::AppError::Cancelled)
+            }
             Err(e) => tracing::warn!("detail-url backfill: {name} failed: {e}"),
         }
     }

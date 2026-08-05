@@ -18,8 +18,8 @@ pub mod registry_prewarm;
 
 pub use dcr_collection::{enrich_only, sync_dcr_collection_and_enrich, SyncSummary};
 pub use dcr_register::{register_in_garage, RegisterDiecastSummary};
-pub use dcr_remove::{remove_collection_entry, RemoveEntrySummary};
 pub use dcr_registry::EnrichSummary;
+pub use dcr_remove::{remove_collection_entry, RemoveEntrySummary};
 pub use detail_url_backfill::{backfill_detail_urls, DetailUrlBackfillSummary};
 pub use ebay_all::{sync_all as sync_all_ebay, EbaySyncAllSummary};
 pub use ebay_listing::{
@@ -31,6 +31,4 @@ pub use ebay_watchlist::{
 };
 pub use registry_auto_match::{AutoMatchOutcome, AutoMatchSummary};
 pub use registry_link::{link_listing_to_registry, LinkResult};
-pub use registry_prewarm::{
-    prewarm_by_driver, refresh_stale_prewarms, PrewarmRefreshSummary, PrewarmSummary,
-};
+pub use registry_prewarm::{prewarm_by_driver, refresh_stale_prewarms, PrewarmSummary};

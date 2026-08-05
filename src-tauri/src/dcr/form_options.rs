@@ -11,8 +11,8 @@ use scraper::{Html, Selector};
 use serde::Serialize;
 use sqlx::SqlitePool;
 
-use crate::dcr::DcrClient;
 use crate::dcr::parse::normalize_driver_name;
+use crate::dcr::DcrClient;
 use crate::error::AppResult;
 
 /// Logical name → form field name on the page. The DB stores logical names.
@@ -74,12 +74,7 @@ pub async fn refresh_form_options(
     }
     summary.fields_seen = seen_fields.len() as u32;
 
-    crate::settings::set(
-        pool,
-        "dcr.last_form_options_refresh",
-        &now.to_string(),
-    )
-    .await?;
+    crate::settings::set(pool, "dcr.last_form_options_refresh", &now.to_string()).await?;
     Ok(summary)
 }
 

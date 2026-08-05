@@ -14,8 +14,7 @@ pub fn dollars_to_cents(s: &str) -> Option<i64> {
     Some((f * 100.0).round() as i64)
 }
 
-static SCALE_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\b(?P<scale>\d{1,3}:\d{1,3})\b").unwrap());
+static SCALE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b(?P<scale>\d{1,3}:\d{1,3})\b").unwrap());
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct DetailsLine {
@@ -76,10 +75,7 @@ fn split_oem_brand_inner(s: &str) -> (String, Option<String>) {
         let (left, right) = s.split_at(idx);
         let right = right.trim();
         let left = left.trim();
-        if !right.is_empty()
-            && !right.contains('/')
-            && !left.is_empty()
-        {
+        if !right.is_empty() && !right.contains('/') && !left.is_empty() {
             return (left.to_string(), Some(right.to_string()));
         }
     }
@@ -136,7 +132,8 @@ pub fn registry_guid_from_feedback_url(url: &str) -> Option<String> {
 }
 
 static ASSET_GUID_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^asset(?P<id>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$").unwrap()
+    Regex::new(r"^asset(?P<id>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$")
+        .unwrap()
 });
 
 pub fn asset_guid_from_id_attr(id_attr: &str) -> Option<String> {
@@ -298,6 +295,9 @@ mod tests {
     #[test]
     fn driver_norm() {
         assert_eq!(normalize_driver_name("Jeff Gordon"), "jeff-gordon");
-        assert_eq!(normalize_driver_name("Dale Earnhardt Jr."), "dale-earnhardt-jr");
+        assert_eq!(
+            normalize_driver_name("Dale Earnhardt Jr."),
+            "dale-earnhardt-jr"
+        );
     }
 }
