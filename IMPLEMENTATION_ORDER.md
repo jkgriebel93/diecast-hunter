@@ -1,9 +1,9 @@
 # Implementation order for open DCH tickets
 
-As of 2026-08-05 (rev 7: DCH-15 merged; DCH-14 in progress). Ten tickets are merged —
-DCH-8, DCH-9, DCH-10, DCH-11, DCH-15, DCH-17, DCH-18, DCH-22, DCH-28, DCH-29 — which
-empties the "ship now" and "contained features" tiers of rev 5 and leaves nine substantive
-items plus the roadmap buckets.
+As of 2026-08-05 (rev 8: DCH-14 merged; DCH-30 and DCH-31 filed for two items that had been
+living only in prose). Eleven tickets are merged — DCH-8, DCH-9, DCH-10, DCH-11, DCH-14,
+DCH-15, DCH-17, DCH-18, DCH-22, DCH-28, DCH-29 — leaving ten substantive items plus the
+roadmap buckets.
 
 The ordering principle has not changed: compounding work (training data, CI safety, anything
 that makes later tickets cheaper or safer) goes before features that only pay off once.
@@ -16,6 +16,7 @@ that makes later tickets cheaper or safer) goes before features that only pay of
 | DCH-9 | Spike: every external sold-price source is closed to us. Build on the archive. |
 | DCH-10 | Sold-price comps on the Listings page and the extension overlay. |
 | DCH-11 | Confirm/correct registry match from the extension. |
+| DCH-14 | Named registry pre-searches. Caches `registry_entries` via the saved filter combo; refreshed by the overnight auto-sync. |
 | DCH-15 | Year-range filters on registry search, the Match… dialog, Listings, and Collection. |
 | DCH-17 | Thousands separators via shared `Intl.NumberFormat` helpers. |
 | DCH-18 | Error translation layer + `ErrorBanner`. |
@@ -37,9 +38,10 @@ Two things worth carrying forward:
 
 | # | Ticket | What | Why here |
 | --- | --- | --- | --- |
-| ~~1~~ | ~~DCH-14~~ | Saved pre-searches, cached & filtered live | 🚧 In progress. Caches `registry_entries` via the filter combo rather than materializing result sets; refreshed by the overnight auto-sync. |
-| 2 | DCH-12 | My Collection entries not in DCR | **Blocked on two decisions.** (a) What value basis to use for an entry with no registry entry — there's no retail/wholesale to inherit. (b) How such rows survive `sync::dcr_collection`, which treats DCR as the source of truth and prunes local rows missing from My Garage. Settle both before coding. |
-| 3 | DCH-16 | Improve Saved Seller browsing | Still a one-liner ticket. Write the problem statement first; it can't be estimated as written. |
+| 1 | DCH-31 | Build the extension zip in CI | Small, and it closes a live gap: DCH-10's and DCH-11's extension work is on `main` but not in any browser, because packaging is manual *and* Windows-only. Fixing it stops that recurring. |
+| 2 | DCH-30 | Alert on `deletion_insert_failed` | Dashboard config, not code. The last piece of the DCH-28 compliance story — until it exists, a lost deletion notification is invisible. |
+| 3 | DCH-12 | My Collection entries not in DCR | **Blocked on two decisions.** (a) What value basis to use for an entry with no registry entry — there's no retail/wholesale to inherit. (b) How such rows survive `sync::dcr_collection`, which treats DCR as the source of truth and prunes local rows missing from My Garage. Settle both before coding. |
+| 4 | DCH-16 | Improve Saved Seller browsing | Still a one-liner ticket. Write the problem statement first; it can't be estimated as written. |
 
 ## UI track (dependency-fixed order)
 
@@ -47,29 +49,27 @@ Worth doing as a run rather than piecemeal — 20 and 21 both execute the checkl
 
 | # | Ticket | What |
 | --- | --- | --- |
-| 4 | DCH-19 | UI audit + standardization guidelines |
-| 5 | DCH-20 | Redesign Saved Listing detail panel (follows audit checklist) |
-| 6 | DCH-21 | Reorganize Settings screen (follows audit checklist) |
+| 5 | DCH-19 | UI audit + standardization guidelines |
+| 6 | DCH-20 | Redesign Saved Listing detail panel (follows audit checklist) |
+| 7 | DCH-21 | Reorganize Settings screen (follows audit checklist) |
 
 ## Later
 
 | # | Ticket | What | Notes |
 | --- | --- | --- | --- |
-| 7 | DCH-25 | "Production ready" definition spike | Spawns the real production work items — goes before them. |
-| 8 | DCH-24 | User documentation | After UI standardization so screenshots don't go stale. |
-| 9 | DCH-23 | Performance profiling pass | When something is actually slow, or pre-production. |
-| 10 | DCH-13 | Photo-tagging feasibility spike | Flagged likely-expensive; confirm or kill cheaply. |
-| 11 | DCH-26 | Lionel website integration | Expansion waits for solid core; needs use-case decision. |
-| 12 | DCH-27 | Revive Facebook Marketplace integration | Plugs back into the listing-receiver architecture. |
+| 8 | DCH-25 | "Production ready" definition spike | Spawns the real production work items — goes before them. |
+| 9 | DCH-24 | User documentation | After UI standardization so screenshots don't go stale. |
+| 10 | DCH-23 | Performance profiling pass | When something is actually slow, or pre-production. |
+| 11 | DCH-13 | Photo-tagging feasibility spike | Flagged likely-expensive; confirm or kill cheaply. |
+| 12 | DCH-26 | Lionel website integration | Expansion waits for solid core; needs use-case decision. |
+| 13 | DCH-27 | Revive Facebook Marketplace integration | Plugs back into the listing-receiver architecture. |
 
 ## Open items that aren't tickets
 
-- **Cloudflare alert on `deletion_insert_failed`.** DCH-28 made the event stable and
-  alertable and documented how, but the alert itself is dashboard config outside this repo.
-  Until it exists, a lost deletion notification is only visible to someone reading logs.
-  Flagged in `worker/README.md`.
+- ~~Cloudflare alert on `deletion_insert_failed`~~ — now **DCH-30**.
 - **Roadmap buckets DCH-2 … DCH-7 may be closeable.** DCH-2 ("Listing lifecycle &
   valuation") has had all its children — DCH-8, DCH-9, DCH-10 — shipped. They're High
   priority in the board view, which makes the backlog look busier than it is.
-- **Extension needs repackaging** (`pnpm ext:package`) plus a desktop rebuild before
-  DCH-11's confirm/reject buttons and DCH-10's comps rows appear in a real browser.
+- ~~Extension needs repackaging~~ — the *automation* is now **DCH-31**. Running
+  `pnpm ext:package` once on a Windows machine, plus a desktop rebuild, still surfaces
+  DCH-10's and DCH-11's extension work today; DCH-31 stops it being a manual step at all.
