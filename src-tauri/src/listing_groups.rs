@@ -73,10 +73,7 @@ impl From<GroupRow> for ListingGroup {
 /// Load the driver associations for the given groups and attach them in
 /// place. One query for the whole set, grouped by `group_id` in memory —
 /// avoids an N+1 over the group list.
-async fn attach_drivers(
-    pool: &SqlitePool,
-    groups: &mut [ListingGroup],
-) -> AppResult<()> {
+async fn attach_drivers(pool: &SqlitePool, groups: &mut [ListingGroup]) -> AppResult<()> {
     if groups.is_empty() {
         return Ok(());
     }
@@ -145,18 +142,14 @@ pub async fn list_groups(pool: &SqlitePool) -> AppResult<Vec<ListingGroup>> {
            FROM listing_groups g
           ORDER BY g.archived ASC, g.name COLLATE NOCASE"
     );
-    let rows = sqlx::query_as::<_, GroupRow>(&sql)
-        .fetch_all(pool)
-        .await?;
+    let rows = sqlx::query_as::<_, GroupRow>(&sql).fetch_all(pool).await?;
     let mut groups: Vec<ListingGroup> = rows.into_iter().map(Into::into).collect();
     attach_drivers(pool, &mut groups).await?;
     Ok(groups)
 }
 
 async fn fetch_group(pool: &SqlitePool, id: i64) -> AppResult<ListingGroup> {
-    let sql = format!(
-        "SELECT {GROUP_SELECT} FROM listing_groups g WHERE g.id = ?"
-    );
+    let sql = format!("SELECT {GROUP_SELECT} FROM listing_groups g WHERE g.id = ?");
     let row = sqlx::query_as::<_, GroupRow>(&sql)
         .bind(id)
         .fetch_optional(pool)
@@ -190,10 +183,7 @@ fn normalize_target(cents: Option<i64>) -> AppResult<Option<i64>> {
     }
 }
 
-pub async fn create_group(
-    pool: &SqlitePool,
-    input: ListingGroupInput,
-) -> AppResult<ListingGroup> {
+pub async fn create_group(pool: &SqlitePool, input: ListingGroupInput) -> AppResult<ListingGroup> {
     let name = clean_name(&input.name)?;
     let description = clean_description(input.description.as_deref());
     let target = normalize_target(input.target_price_cents)?;
@@ -266,11 +256,7 @@ pub async fn delete_group(pool: &SqlitePool, id: i64) -> AppResult<()> {
     Ok(())
 }
 
-pub async fn add_listing(
-    pool: &SqlitePool,
-    group_id: i64,
-    listing_id: i64,
-) -> AppResult<()> {
+pub async fn add_listing(pool: &SqlitePool, group_id: i64, listing_id: i64) -> AppResult<()> {
     let now = Utc::now().timestamp();
     sqlx::query(
         "INSERT INTO listing_group_members (group_id, listing_id, added_at)
@@ -286,18 +272,12 @@ pub async fn add_listing(
     Ok(())
 }
 
-pub async fn remove_listing(
-    pool: &SqlitePool,
-    group_id: i64,
-    listing_id: i64,
-) -> AppResult<()> {
-    sqlx::query(
-        "DELETE FROM listing_group_members WHERE group_id = ? AND listing_id = ?",
-    )
-    .bind(group_id)
-    .bind(listing_id)
-    .execute(pool)
-    .await?;
+pub async fn remove_listing(pool: &SqlitePool, group_id: i64, listing_id: i64) -> AppResult<()> {
+    sqlx::query("DELETE FROM listing_group_members WHERE group_id = ? AND listing_id = ?")
+        .bind(group_id)
+        .bind(listing_id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
@@ -318,11 +298,10 @@ pub async fn add_listings(
     group_id: i64,
     listing_ids: &[i64],
 ) -> AppResult<BulkAddResult> {
-    let group_exists: (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM listing_groups WHERE id = ?")
-            .bind(group_id)
-            .fetch_one(pool)
-            .await?;
+    let group_exists: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM listing_groups WHERE id = ?")
+        .bind(group_id)
+        .fetch_one(pool)
+        .await?;
     if group_exists.0 == 0 {
         return Err(AppError::Config(format!(
             "no listing group with id {group_id}"
@@ -453,11 +432,10 @@ pub async fn propose_migration(
     pool: &SqlitePool,
     handles: Vec<String>,
 ) -> AppResult<Vec<GroupMigrationProposal>> {
-    let rows: Vec<(i64, String)> = sqlx::query_as(
-        "SELECT id, name FROM listing_groups ORDER BY name COLLATE NOCASE",
-    )
-    .fetch_all(pool)
-    .await?;
+    let rows: Vec<(i64, String)> =
+        sqlx::query_as("SELECT id, name FROM listing_groups ORDER BY name COLLATE NOCASE")
+            .fetch_all(pool)
+            .await?;
 
     Ok(rows
         .into_iter()
@@ -494,10 +472,7 @@ pub struct GroupMigrationItem {
 /// transaction. Driver ids must already exist (the UI resolves/creates them
 /// via `ensure_driver` before calling). Returns the number of groups
 /// updated.
-pub async fn apply_migration(
-    pool: &SqlitePool,
-    items: Vec<GroupMigrationItem>,
-) -> AppResult<i64> {
+pub async fn apply_migration(pool: &SqlitePool, items: Vec<GroupMigrationItem>) -> AppResult<i64> {
     let mut tx = pool.begin().await?;
     let mut count = 0i64;
     for item in &items {
@@ -526,9 +501,7 @@ pub async fn apply_migration(
 fn map_fk_violation(e: sqlx::Error) -> AppError {
     if let sqlx::Error::Database(db_err) = &e {
         if db_err.message().contains("FOREIGN KEY") {
-            return AppError::Config(
-                "group or listing no longer exists".into(),
-            );
+            return AppError::Config("group or listing no longer exists".into());
         }
     }
     AppError::Db(e)
@@ -635,12 +608,11 @@ mod tests {
             .execute(pool)
             .await
             .unwrap();
-        let (id,): (i64,) =
-            sqlx::query_as("SELECT id FROM drivers WHERE normalized_name = ?")
-                .bind(norm)
-                .fetch_one(pool)
-                .await
-                .unwrap();
+        let (id,): (i64,) = sqlx::query_as("SELECT id FROM drivers WHERE normalized_name = ?")
+            .bind(norm)
+            .fetch_one(pool)
+            .await
+            .unwrap();
         id
     }
 
@@ -658,8 +630,12 @@ mod tests {
     async fn duplicate_names_allowed_after_unique_drop() {
         // The whole point of migration 0012: two groups may share a name.
         let pool = migrated_pool().await;
-        let a = create_group(&pool, input("Rookie Year", vec![])).await.unwrap();
-        let b = create_group(&pool, input("Rookie Year", vec![])).await.unwrap();
+        let a = create_group(&pool, input("Rookie Year", vec![]))
+            .await
+            .unwrap();
+        let b = create_group(&pool, input("Rookie Year", vec![]))
+            .await
+            .unwrap();
         assert_ne!(a.id, b.id);
         assert_eq!(list_groups(&pool).await.unwrap().len(), 2);
     }
@@ -682,19 +658,17 @@ mod tests {
         // Deleting the group cascades through the FK rebuilt by 0012; the
         // driver row itself is untouched.
         delete_group(&pool, g.id).await.unwrap();
-        let (gd,): (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM group_drivers WHERE group_id = ?")
-                .bind(g.id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let (gd,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM group_drivers WHERE group_id = ?")
+            .bind(g.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(gd, 0);
-        let (dcnt,): (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM drivers WHERE id = ?")
-                .bind(driver)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let (dcnt,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM drivers WHERE id = ?")
+            .bind(driver)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(dcnt, 1);
     }
 

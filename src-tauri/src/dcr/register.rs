@@ -90,9 +90,9 @@ pub async fn register_diecast(
     let path = format!("/MyGarage/RegisterDiecast/{}", input.registry_guid);
 
     let form_html = client.get_html_xhr(&path).await.map_err(|e| match e {
-        AppError::Network(msg) => AppError::Network(format!(
-            "GET register-diecast form failed ({path}): {msg}"
-        )),
+        AppError::Network(msg) => {
+            AppError::Network(format!("GET register-diecast form failed ({path}): {msg}"))
+        }
         other => other,
     })?;
 
@@ -114,9 +114,7 @@ pub async fn register_diecast(
     }
 
     let token = extract_form_token(&form_html).ok_or_else(|| {
-        AppError::Parse(
-            "no anti-forgery token on register-diecast form (not logged in?)".into(),
-        )
+        AppError::Parse("no anti-forgery token on register-diecast form (not logged in?)".into())
     })?;
     let is_sequentially_numbered = form_has_chassis_input(&form_html);
     tracing::debug!(
@@ -154,8 +152,7 @@ fn looks_like_register_form(html: &str) -> bool {
 }
 
 static REGISTRY_GUID_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-        .unwrap()
+    Regex::new(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$").unwrap()
 });
 
 fn is_registry_guid(s: &str) -> bool {
@@ -196,10 +193,7 @@ pub(crate) fn build_form(
     // the browser posts when IsForSale is disabled.
     form.push(("AskingPrice".into(), String::new()));
     form.push(("Shipping".into(), String::new()));
-    form.push((
-        "Details".into(),
-        input.comments.clone().unwrap_or_default(),
-    ));
+    form.push(("Details".into(), input.comments.clone().unwrap_or_default()));
     form
 }
 
@@ -221,9 +215,7 @@ struct RegisterResponse {
     html: String,
 }
 
-static REG_NUMBER_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\b(\d{3}-\d{3}-\d{3})\b").unwrap()
-});
+static REG_NUMBER_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b(\d{3}-\d{3}-\d{3})\b").unwrap());
 
 pub(crate) fn parse_register_response(body: &str) -> AppResult<RegisterDiecastResult> {
     let envelope: RegisterResponse = serde_json::from_str(body).map_err(|e| {
@@ -252,8 +244,7 @@ pub(crate) fn parse_register_response(body: &str) -> AppResult<RegisterDiecastRe
         .map(|m| m.as_str().to_string())
         .ok_or_else(|| {
             AppError::Parse(
-                "register-diecast success response did not contain a registration number"
-                    .into(),
+                "register-diecast success response did not contain a registration number".into(),
             )
         })?;
 
@@ -288,8 +279,7 @@ mod tests {
 
     const FORM_SEQ: &str = include_str!("../../fixtures/dcr/register_diecast_form_seq.html");
     const FORM_NSN: &str = include_str!("../../fixtures/dcr/register_diecast_form_nsn.html");
-    const RESPONSE_SUCCESS: &str =
-        include_str!("../../fixtures/dcr/register_diecast_success.json");
+    const RESPONSE_SUCCESS: &str = include_str!("../../fixtures/dcr/register_diecast_success.json");
 
     #[test]
     fn detects_sequentially_numbered_form() {
@@ -338,8 +328,7 @@ mod tests {
             ("Shipping", ""),
             ("Details", "This is a comment for Claude"),
         ];
-        let got: Vec<(&str, &str)> =
-            form.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        let got: Vec<(&str, &str)> = form.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
         assert_eq!(got, expected);
     }
 
@@ -400,8 +389,14 @@ mod tests {
     #[test]
     fn condition_guid_round_trip() {
         // Spot-check the seven mappings against the GUIDs we saw in the form.
-        assert_eq!(Condition::Mint.as_guid(), "c84378d8-1ee5-4c24-a432-fe54397cb7d1");
-        assert_eq!(Condition::New.as_guid(), "03ca91c4-3fd2-4eee-9800-37ceffd8d268");
+        assert_eq!(
+            Condition::Mint.as_guid(),
+            "c84378d8-1ee5-4c24-a432-fe54397cb7d1"
+        );
+        assert_eq!(
+            Condition::New.as_guid(),
+            "03ca91c4-3fd2-4eee-9800-37ceffd8d268"
+        );
         assert_eq!(
             Condition::BelowAverage.as_guid(),
             "05030c2c-4d3e-494a-a586-57cd96ef7af6"
@@ -432,7 +427,9 @@ mod tests {
     fn rejects_success_without_registration_number() {
         let body = r#"{"success":true,"title":"OK","html":"<div>no number here</div>"}"#;
         let err = parse_register_response(body).unwrap_err();
-        assert!(err.to_string().contains("did not contain a registration number"));
+        assert!(err
+            .to_string()
+            .contains("did not contain a registration number"));
     }
 
     #[test]

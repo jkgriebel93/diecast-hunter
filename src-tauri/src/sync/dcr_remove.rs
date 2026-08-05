@@ -24,15 +24,13 @@ pub async fn remove_collection_entry(
     progress: &ProgressEmitter,
     collection_id: i64,
 ) -> AppResult<RemoveEntrySummary> {
-    let row: Option<(String, String)> = sqlx::query_as(
-        "SELECT external_id, source FROM my_collection WHERE id = ?",
-    )
-    .bind(collection_id)
-    .fetch_optional(pool)
-    .await?;
-    let (asset_guid, source) = row.ok_or_else(|| {
-        AppError::Parse(format!("collection entry {collection_id} not found"))
-    })?;
+    let row: Option<(String, String)> =
+        sqlx::query_as("SELECT external_id, source FROM my_collection WHERE id = ?")
+            .bind(collection_id)
+            .fetch_optional(pool)
+            .await?;
+    let (asset_guid, source) =
+        row.ok_or_else(|| AppError::Parse(format!("collection entry {collection_id} not found")))?;
 
     let found_on_dcr = if source == "diecastregistry" {
         progress.step("Logging in to diecastregistry.com…", None, None);

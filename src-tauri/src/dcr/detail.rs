@@ -187,8 +187,7 @@ pub fn registry_guid_from_register_url(href: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    const FIXTURE: &str =
-        include_str!("../../fixtures/dcr/registry_detail.html");
+    const FIXTURE: &str = include_str!("../../fixtures/dcr/registry_detail.html");
 
     #[test]
     fn parses_full_detail() {

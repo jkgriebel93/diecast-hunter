@@ -19,8 +19,8 @@ use serde::Serialize;
 use sqlx::SqlitePool;
 
 use crate::ebay::{
-    fetch_my_ebay_favorites, invalidate_user_token_cache, is_iaf_token_expired_error,
-    search_url, user_iaf_token, MyEbayFavorites,
+    fetch_my_ebay_favorites, invalidate_user_token_cache, is_iaf_token_expired_error, search_url,
+    user_iaf_token, MyEbayFavorites,
 };
 use crate::error::{AppError, AppResult};
 use crate::progress::ProgressEmitter;
@@ -56,10 +56,7 @@ pub async fn sync_saved_from_ebay(
 
     progress.check_cancelled()?;
     progress.step(
-        format!(
-            "Reconciling {} saved searches…",
-            favorites.searches.len()
-        ),
+        format!("Reconciling {} saved searches…", favorites.searches.len()),
         Some(2),
         Some(3),
     );
@@ -115,16 +112,12 @@ pub async fn sync_saved_from_ebay(
             summary.searches_created += 1;
         }
     }
-    summary.searches_pruned =
-        saved::prune_searches_not_in(pool, &seen_search_ids).await?;
+    summary.searches_pruned = saved::prune_searches_not_in(pool, &seen_search_ids).await?;
 
     // --- sellers ---------------------------------------------------------
     progress.check_cancelled()?;
     progress.step(
-        format!(
-            "Reconciling {} saved sellers…",
-            favorites.sellers.len()
-        ),
+        format!("Reconciling {} saved sellers…", favorites.sellers.len()),
         Some(3),
         Some(3),
     );
@@ -145,21 +138,14 @@ pub async fn sync_saved_from_ebay(
         .await?
         .is_some();
 
-        saved::upsert_seller_from_ebay(
-            pool,
-            &fav.user_id,
-            fav.store_name.as_deref(),
-            now,
-        )
-        .await?;
+        saved::upsert_seller_from_ebay(pool, &fav.user_id, fav.store_name.as_deref(), now).await?;
         if existed_before {
             summary.sellers_updated += 1;
         } else {
             summary.sellers_created += 1;
         }
     }
-    summary.sellers_pruned =
-        saved::prune_sellers_not_in(pool, &seen_usernames_lower).await?;
+    summary.sellers_pruned = saved::prune_sellers_not_in(pool, &seen_usernames_lower).await?;
 
     progress.done(format!(
         "Saved sync done: searches +{}/~{}/-{}, sellers +{}/~{}/-{}.",
@@ -178,9 +164,7 @@ async fn fetch_with_token_retry(pool: &SqlitePool) -> AppResult<MyEbayFavorites>
     let (env, token) = user_iaf_token(pool).await?;
     match fetch_my_ebay_favorites(env, &token).await {
         Err(AppError::Network(msg)) if is_iaf_token_expired_error(&msg) => {
-            tracing::info!(
-                "saved sync: IAF token rejected ({msg}); refreshing and retrying"
-            );
+            tracing::info!("saved sync: IAF token rejected ({msg}); refreshing and retrying");
             invalidate_user_token_cache(pool, env).await?;
             let (env2, token2) = user_iaf_token(pool).await?;
             fetch_my_ebay_favorites(env2, &token2).await

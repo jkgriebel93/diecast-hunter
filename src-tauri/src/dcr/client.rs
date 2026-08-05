@@ -71,9 +71,7 @@ impl DcrClient {
         let body = self.http.get(&login_url).send().await?.text().await?;
 
         let form_token = extract_form_token(&body).ok_or_else(|| {
-            AppError::LoginFailed(
-                "could not find anti-forgery token on login page".into(),
-            )
+            AppError::LoginFailed("could not find anti-forgery token on login page".into())
         })?;
 
         let form = [
@@ -132,10 +130,7 @@ impl DcrClient {
             if xhr {
                 req = req
                     .header("X-Requested-With", "XMLHttpRequest")
-                    .header(
-                        reqwest::header::ACCEPT,
-                        "text/html, */*; q=0.01",
-                    );
+                    .header(reqwest::header::ACCEPT, "text/html, */*; q=0.01");
             }
             match req.send().await {
                 Ok(resp) => {
@@ -164,9 +159,8 @@ impl DcrClient {
                     if attempt < MAX_RETRIES && is_retryable_status(Some(status)) {
                         tokio::time::sleep(backoff).await;
                         backoff *= 2;
-                        last_err = Some(AppError::Network(format!(
-                            "HTTP {status} for {final_url}"
-                        )));
+                        last_err =
+                            Some(AppError::Network(format!("HTTP {status} for {final_url}")));
                         continue;
                     }
                     return Err(AppError::Network(format!(
@@ -201,11 +195,7 @@ impl DcrClient {
     /// switch between rendering full pages vs returning JSON envelopes
     /// based on these headers, and the filter-update endpoints we use 404
     /// without them.
-    pub async fn post_form(
-        &self,
-        path: &str,
-        form: &[(String, String)],
-    ) -> AppResult<String> {
+    pub async fn post_form(&self, path: &str, form: &[(String, String)]) -> AppResult<String> {
         let url = if path.starts_with("http") {
             path.to_string()
         } else {
@@ -290,9 +280,8 @@ impl DcrClient {
                     if attempt < MAX_RETRIES && is_retryable_status(Some(status)) {
                         tokio::time::sleep(backoff).await;
                         backoff *= 2;
-                        last_err = Some(AppError::Network(format!(
-                            "HTTP {status} for {final_url}"
-                        )));
+                        last_err =
+                            Some(AppError::Network(format!("HTTP {status} for {final_url}")));
                         continue;
                     }
                     return Err(AppError::Network(format!(
@@ -360,10 +349,7 @@ fn is_retryable_network_err(e: &reqwest::Error) -> bool {
 
 pub fn extract_form_token(html: &str) -> Option<String> {
     let doc = Html::parse_document(html);
-    let sel = Selector::parse(
-        r#"input[name="__RequestVerificationToken"][type="hidden"]"#,
-    )
-    .ok()?;
+    let sel = Selector::parse(r#"input[name="__RequestVerificationToken"][type="hidden"]"#).ok()?;
     doc.select(&sel)
         .next()
         .and_then(|el| el.value().attr("value").map(str::to_owned))

@@ -47,8 +47,7 @@ pub struct SavedSearchInput {
     pub sort: Option<String>,
 }
 
-const SEARCH_COLUMNS: &str =
-    "id, name, query, conditions_json, buying_options_json, sellers_json,
+const SEARCH_COLUMNS: &str = "id, name, query, conditions_json, buying_options_json, sellers_json,
      price_min_cents, price_max_cents, sort, created_at, last_run_at,
      ebay_origin, ebay_external_id, last_synced_at";
 
@@ -65,9 +64,7 @@ pub async fn list_searches(pool: &SqlitePool) -> AppResult<Vec<SavedSearch>> {
 }
 
 pub async fn get_search(pool: &SqlitePool, id: i64) -> AppResult<SavedSearch> {
-    let sql = format!(
-        "SELECT {SEARCH_COLUMNS} FROM saved_searches WHERE id = ?"
-    );
+    let sql = format!("SELECT {SEARCH_COLUMNS} FROM saved_searches WHERE id = ?");
     let row = sqlx::query_as::<_, SavedSearchRow>(&sql)
         .bind(id)
         .fetch_optional(pool)
@@ -76,10 +73,7 @@ pub async fn get_search(pool: &SqlitePool, id: i64) -> AppResult<SavedSearch> {
     row.into_model()
 }
 
-pub async fn create_search(
-    pool: &SqlitePool,
-    input: SavedSearchInput,
-) -> AppResult<SavedSearch> {
+pub async fn create_search(pool: &SqlitePool, input: SavedSearchInput) -> AppResult<SavedSearch> {
     let name = input.name.trim();
     if name.is_empty() {
         return Err(AppError::Config("saved search name is required".into()));
@@ -104,7 +98,13 @@ pub async fn create_search(
         .bind(sellers)
         .bind(input.price_min_cents)
         .bind(input.price_max_cents)
-        .bind(input.sort.as_deref().map(str::trim).filter(|s| !s.is_empty()))
+        .bind(
+            input
+                .sort
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+        )
         .bind(now)
         .fetch_one(pool)
         .await?;
@@ -139,7 +139,13 @@ pub async fn update_search(
         .bind(sellers)
         .bind(input.price_min_cents)
         .bind(input.price_max_cents)
-        .bind(input.sort.as_deref().map(str::trim).filter(|s| !s.is_empty()))
+        .bind(
+            input
+                .sort
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+        )
         .bind(id)
         .fetch_optional(pool)
         .await?
@@ -190,8 +196,7 @@ fn default_seller_code() -> String {
     "ebay".to_string()
 }
 
-const SELLER_COLUMNS: &str =
-    "id, seller_code, username, display_name, notes, created_at,
+const SELLER_COLUMNS: &str = "id, seller_code, username, display_name, notes, created_at,
      ebay_origin, last_synced_at";
 
 pub async fn list_sellers(pool: &SqlitePool) -> AppResult<Vec<SavedSeller>> {
@@ -203,10 +208,7 @@ pub async fn list_sellers(pool: &SqlitePool) -> AppResult<Vec<SavedSeller>> {
     Ok(rows.into_iter().map(SavedSellerRow::into_model).collect())
 }
 
-pub async fn add_seller(
-    pool: &SqlitePool,
-    input: SavedSellerInput,
-) -> AppResult<SavedSeller> {
+pub async fn add_seller(pool: &SqlitePool, input: SavedSellerInput) -> AppResult<SavedSeller> {
     let username = input.username.trim();
     if username.is_empty() {
         return Err(AppError::Config("seller username is required".into()));
@@ -381,11 +383,10 @@ pub async fn prune_searches_not_in(
     pool: &SqlitePool,
     seen_ebay_ids: &std::collections::HashSet<String>,
 ) -> AppResult<u32> {
-    let rows: Vec<(i64, Option<String>)> = sqlx::query_as(
-        "SELECT id, ebay_external_id FROM saved_searches WHERE ebay_origin = 1",
-    )
-    .fetch_all(pool)
-    .await?;
+    let rows: Vec<(i64, Option<String>)> =
+        sqlx::query_as("SELECT id, ebay_external_id FROM saved_searches WHERE ebay_origin = 1")
+            .fetch_all(pool)
+            .await?;
     let mut to_delete = Vec::new();
     for (id, ext) in rows {
         match ext {
@@ -422,9 +423,7 @@ pub async fn upsert_seller_from_ebay(
         return Err(AppError::Config("seller username is required".into()));
     }
     let username_lower = username.to_lowercase();
-    let display = display_name
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
+    let display = display_name.map(str::trim).filter(|s| !s.is_empty());
     // Only fill display_name on insert (so we don't clobber the user's
     // custom label on re-sync). Always flip ebay_origin and stamp
     // last_synced_at.
@@ -563,8 +562,7 @@ fn parse_strings(s: &str) -> AppResult<Vec<String>> {
 }
 
 fn serialize_strings(values: &[String]) -> AppResult<String> {
-    serde_json::to_string(values)
-        .map_err(|e| AppError::Parse(format!("saved-search json: {e}")))
+    serde_json::to_string(values).map_err(|e| AppError::Parse(format!("saved-search json: {e}")))
 }
 
 /// Trim and dedup (case-insensitive) the seller list provided by the user.
@@ -658,8 +656,12 @@ mod tests {
     async fn prune_only_touches_ebay_origin_rows() {
         let pool = migrated_pool().await;
         // Synced from eBay → eligible for prune.
-        upsert_seller_from_ebay(&pool, "kept", None, 1).await.unwrap();
-        upsert_seller_from_ebay(&pool, "dropped", None, 1).await.unwrap();
+        upsert_seller_from_ebay(&pool, "kept", None, 1)
+            .await
+            .unwrap();
+        upsert_seller_from_ebay(&pool, "dropped", None, 1)
+            .await
+            .unwrap();
         // Locally added → must NOT be pruned.
         let _ = add_seller(
             &pool,
@@ -676,7 +678,10 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         seen.insert("kept".to_string());
         let pruned = prune_sellers_not_in(&pool, &seen).await.unwrap();
-        assert_eq!(pruned, 1, "only ebay-origin row missing from the set is pruned");
+        assert_eq!(
+            pruned, 1,
+            "only ebay-origin row missing from the set is pruned"
+        );
 
         let names: Vec<String> = list_sellers(&pool)
             .await

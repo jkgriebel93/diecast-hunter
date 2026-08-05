@@ -102,9 +102,7 @@ pub async fn search_all_pages_with_progress(
 
     // 2. POST /Production/UpdateFilter — sets server-side filter state.
     let form = build_form(&token, filter);
-    let body = client
-        .post_form("/Production/UpdateFilter", &form)
-        .await?;
+    let body = client.post_form("/Production/UpdateFilter", &form).await?;
 
     // 3. Follow the JSON redirect envelope, or refetch /Production directly.
     let first_page_html = match serde_json::from_str::<UpdateFilterResponse>(&body) {
@@ -121,9 +119,7 @@ pub async fn search_all_pages_with_progress(
         crate::dcr::parse::parse_pagination(&first_doc)
     };
 
-    let suffix = subject
-        .map(|s| format!(" for {s}"))
-        .unwrap_or_default();
+    let suffix = subject.map(|s| format!(" for {s}")).unwrap_or_default();
     progress.step(
         format!("Fetching page 1 of {total}{suffix}…"),
         Some(1),
@@ -308,9 +304,8 @@ fn parse_one(el: ElementRef) -> Option<ProductionSearchResult> {
         .and_then(|n| n.value().attr("src"))
         .map(str::to_string);
 
-    let value_span_sel = |class: &str| -> Selector {
-        Selector::parse(&format!("div.{class} span")).unwrap()
-    };
+    let value_span_sel =
+        |class: &str| -> Selector { Selector::parse(&format!("div.{class} span")).unwrap() };
     let retail_value_cents = el
         .select(&value_span_sel("retail-value"))
         .next()
@@ -359,8 +354,7 @@ fn direct_text_only(el: ElementRef) -> String {
 mod tests {
     use super::*;
 
-    const FIXTURE: &str =
-        include_str!("../../fixtures/dcr/production_search_one_result.html");
+    const FIXTURE: &str = include_str!("../../fixtures/dcr/production_search_one_result.html");
 
     #[test]
     fn parses_a_result_block() {

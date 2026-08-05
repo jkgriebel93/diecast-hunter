@@ -181,16 +181,11 @@ pub(crate) async fn logged_in_client(pool: &SqlitePool) -> AppResult<DcrClient> 
     let username = settings::get(pool, settings::KEY_DCR_USERNAME)
         .await?
         .ok_or_else(|| {
-            AppError::NotConfigured(
-                "diecastregistry.com username not set in Settings".into(),
-            )
+            AppError::NotConfigured("diecastregistry.com username not set in Settings".into())
         })?;
-    let password = settings::secret_get(settings::ENTRY_DCR_PASSWORD)?
-        .ok_or_else(|| {
-            AppError::NotConfigured(
-                "diecastregistry.com password not set in Settings".into(),
-            )
-        })?;
+    let password = settings::secret_get(settings::ENTRY_DCR_PASSWORD)?.ok_or_else(|| {
+        AppError::NotConfigured("diecastregistry.com password not set in Settings".into())
+    })?;
     let client = DcrClient::new()?;
     client.login(&username, &password).await?;
     Ok(client)
@@ -215,11 +210,7 @@ pub(crate) async fn prewarm_driver_with_client(
         .map(|(d,)| d)
         .unwrap_or_else(|| "(unknown driver)".to_string());
 
-    progress.step(
-        format!("Searching registry for {driver_name}…"),
-        None,
-        None,
-    );
+    progress.step(format!("Searching registry for {driver_name}…"), None, None);
 
     let filter = ProductionSearchFilter {
         driver_guids: vec![driver_guid.to_string()],
@@ -341,11 +332,7 @@ pub(crate) async fn upsert_stub_from_search(
     Ok(())
 }
 
-async fn upsert_driver(
-    pool: &SqlitePool,
-    name: &str,
-    normalized: &str,
-) -> AppResult<i64> {
+async fn upsert_driver(pool: &SqlitePool, name: &str, normalized: &str) -> AppResult<i64> {
     sqlx::query(
         "INSERT INTO drivers (name, normalized_name) VALUES (?, ?)
          ON CONFLICT(normalized_name) DO UPDATE SET name = excluded.name",
