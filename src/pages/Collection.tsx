@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { ManualEntryDialog } from "@/components/ManualEntryDialog";
+import { findLocalDuplicates } from "@/lib/localEntry";
 import { YearRangeFilter } from "@/components/YearRangeFilter";
 import {
   EMPTY_YEAR_RANGE,
@@ -41,6 +43,16 @@ interface DriverGroupView {
   items: CollectionRow[];
   retail_total_cents: number;
   wholesale_total_cents: number;
+  /** Sum of what the user paid, across the items that record a price.
+   *  Shown next to retail because a manually-added car has no registry
+   *  appraisal and so contributes $0 to the retail total — without the cost
+   *  figure beside it, that zero reads as a defect rather than as "not
+   *  appraised". */
+  cost_total_cents: number;
+  /** Whether any item in the group records a purchase price at all. Groups
+   *  with none don't get a cost figure — an unconditional "$0.00" would be
+   *  the same confusing zero, one column over. */
+  has_cost: boolean;
 }
 
 /**
@@ -90,6 +102,10 @@ export function Collection() {
   const [sortMode, setSortMode] = useState<SortMode>("driver-asc");
   const [groupByDriver, setGroupByDriver] = useGroupByDriver();
   const [imgSize, setImgSize] = useImageSize("collection");
+  /** null = closed. "new" = adding; a row = editing that row. */
+  const [manualEntry, setManualEntry] = useState<CollectionRow | "new" | null>(
+    null,
+  );
 
   async function load() {
     setError(null);
@@ -133,10 +149,15 @@ export function Collection() {
 
   async function onRemove(item: CollectionRow) {
     const label = item.scheme_text ?? item.driver_name ?? "this diecast";
+    // A manual entry was never on DCR, so warning about deleting it there
+    // would be describing something that isn't going to happen.
     const ok = window.confirm(
-      `Remove "${label}" from your collection?\n\n` +
-        "This also deletes it from your diecastregistry.com garage, which " +
-        "cannot be undone.",
+      item.is_local
+        ? `Remove "${label}" from your collection?\n\n` +
+            "It was added by hand, so nothing on diecastregistry.com changes."
+        : `Remove "${label}" from your collection?\n\n` +
+            "This also deletes it from your diecastregistry.com garage, which " +
+            "cannot be undone.",
     );
     if (!ok) return;
     setRemovingId(item.collection_id);
@@ -149,6 +170,9 @@ export function Collection() {
         setSuccessMsg(
           `Removed "${label}" from your diecastregistry.com garage and local collection.`,
         );
+      } else if (result.was_local) {
+        // Expected outcome, not a shortfall — no DCR call was made.
+        setSuccessMsg(`Removed "${label}" from your collection.`);
       } else {
         setNotice(
           `"${label}" wasn't in your diecastregistry.com garage — removed the local entry.`,
@@ -287,12 +311,18 @@ export function Collection() {
           items: [],
           retail_total_cents: 0,
           wholesale_total_cents: 0,
+          cost_total_cents: 0,
+          has_cost: false,
         };
         map.set(key, g);
       }
       g.items.push(it);
       g.retail_total_cents += it.retail_value_cents ?? 0;
       g.wholesale_total_cents += it.wholesale_value_cents ?? 0;
+      if (it.paid_cents != null) {
+        g.cost_total_cents += it.paid_cents;
+        g.has_cost = true;
+      }
     }
 
     // Sort items within each group by year desc (consistent with the
@@ -379,6 +409,11 @@ export function Collection() {
   const totalItems = items?.length ?? 0;
   const filteredItems = filtered?.length ?? 0;
 
+  // Computed over the *unfiltered* set: a duplicate that the current filters
+  // hide is still a duplicate, and the flag would flicker off for no reason
+  // the user can see.
+  const duplicates = useMemo(() => findLocalDuplicates(items ?? []), [items]);
+
   return (
     <div className="p-6 space-y-4">
       <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
@@ -429,6 +464,15 @@ export function Collection() {
             className="btn-secondary"
             type="button"
             disabled={syncing || removingId !== null}
+            onClick={() => setManualEntry("new")}
+            title="Add a car diecastregistry.com doesn't list. Stays local — nothing is added to your DCR garage."
+          >
+            Add manually…
+          </button>
+          <button
+            className="btn-secondary"
+            type="button"
+            disabled={syncing || removingId !== null}
             onClick={onSync}
             title="Pull My Garage from diecastregistry.com. Local entries no longer in the garage are removed."
           >
@@ -436,6 +480,21 @@ export function Collection() {
           </button>
         </div>
       </header>
+
+      {manualEntry && (
+        <ManualEntryDialog
+          editing={manualEntry === "new" ? null : manualEntry}
+          driverNames={driverNames}
+          onClose={() => setManualEntry(null)}
+          onSaved={(message) => {
+            setManualEntry(null);
+            setError(null);
+            setNotice(null);
+            setSuccessMsg(message);
+            void load();
+          }}
+        />
+      )}
 
       {error && <ErrorBanner error={error} />}
       {notice && <div className="card text-sm text-fg-muted">{notice}</div>}
@@ -566,7 +625,8 @@ export function Collection() {
       ) : items.length === 0 ? (
         <div className="card text-sm text-fg-muted">
           Empty. Configure your diecastregistry.com credentials in Settings,
-          then run a sync.
+          then run a sync — or use “Add manually…” for a car the registry
+          doesn&apos;t list.
         </div>
       ) : filtered && filtered.length === 0 ? (
         <div className="card text-sm text-fg-muted">
@@ -600,7 +660,9 @@ export function Collection() {
                   onToggle={() => toggleGroup(key)}
                   imgSizeClass={IMG_CLASS[imgSize]}
                   onRemove={onRemove}
+                  onEdit={setManualEntry}
                   removingId={removingId}
+                  duplicates={duplicates}
                 />
               );
             })
@@ -612,7 +674,9 @@ export function Collection() {
                   item={item}
                   imgSizeClass={IMG_CLASS[imgSize]}
                   onRemove={onRemove}
+                  onEdit={setManualEntry}
                   removingId={removingId}
+                  duplicateOf={duplicates.get(item.collection_id)}
                   showDriver
                 />
               ))}
@@ -630,14 +694,18 @@ function DriverCard({
   onToggle,
   imgSizeClass,
   onRemove,
+  onEdit,
   removingId,
+  duplicates,
 }: {
   group: DriverGroupView;
   expanded: boolean;
   onToggle: () => void;
   imgSizeClass: string;
   onRemove: (item: CollectionRow) => void;
+  onEdit: (item: CollectionRow) => void;
   removingId: number | null;
+  duplicates: Map<number, CollectionRow>;
 }) {
   return (
     <div className="card !p-0 overflow-hidden">
@@ -659,6 +727,7 @@ function DriverCard({
         <div className="text-xs text-fg-muted tabular-nums">
           retail {formatCents(group.retail_total_cents)} · wholesale{" "}
           {formatCents(group.wholesale_total_cents)}
+          {group.has_cost && <> · cost {formatCents(group.cost_total_cents)}</>}
         </div>
       </button>
 
@@ -671,7 +740,9 @@ function DriverCard({
                 item={item}
                 imgSizeClass={imgSizeClass}
                 onRemove={onRemove}
+                onEdit={onEdit}
                 removingId={removingId}
+                duplicateOf={duplicates.get(item.collection_id)}
               />
             ))}
           </ul>
@@ -685,13 +756,19 @@ function CollectionItemRow({
   item,
   imgSizeClass,
   onRemove,
+  onEdit,
   removingId,
+  duplicateOf,
   showDriver = false,
 }: {
   item: CollectionRow;
   imgSizeClass: string;
   onRemove: (item: CollectionRow) => void;
+  onEdit: (item: CollectionRow) => void;
   removingId: number | null;
+  /** Set when this manually-added row now also exists as a synced DCR row —
+   *  see findLocalDuplicates. */
+  duplicateOf?: CollectionRow;
   /** Show the driver name (used by the flat, ungrouped view). */
   showDriver?: boolean;
 }) {
@@ -700,8 +777,16 @@ function CollectionItemRow({
   );
 
   const title = (
-    <div className="text-sm font-medium truncate">
-      {item.scheme_text ?? "(no scheme)"}
+    <div className="text-sm font-medium truncate flex items-center gap-2">
+      <span className="truncate">{item.scheme_text ?? "(no scheme)"}</span>
+      {item.is_local && (
+        <span
+          className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] font-normal uppercase tracking-wide text-fg-subtle"
+          title="Added by hand — not from diecastregistry.com"
+        >
+          Manual
+        </span>
+      )}
     </div>
   );
   const driverLine = showDriver && (
@@ -759,6 +844,22 @@ function CollectionItemRow({
                   .join(" · ")}
               </div>
             )}
+            {item.condition && (
+              <div className="text-xs text-fg-subtle mt-0.5">
+                condition: {item.condition}
+              </div>
+            )}
+            {item.notes && (
+              <div className="text-xs text-fg-muted mt-0.5 whitespace-pre-wrap">
+                {item.notes}
+              </div>
+            )}
+            {duplicateOf && (
+              <div className="text-xs text-amber-400/80 mt-1">
+                diecastregistry.com now lists this car too — you have a synced
+                copy of it. Remove whichever you don&apos;t want.
+              </div>
+            )}
             <div className="flex items-center gap-3 mt-1">
               {item.detail_url && (
                 <a
@@ -772,7 +873,10 @@ function CollectionItemRow({
                   View on diecastregistry.com →
                 </a>
               )}
-              {!item.enriched && (
+              {/* A manual entry has no detail page, so it can never become
+                  "enriched" — the stub warning would be permanent and would
+                  be telling the user to fix something that isn't broken. */}
+              {!item.enriched && !item.is_local && (
                 <span className="text-xs text-amber-400/80">
                   stub — needs registry sync
                 </span>
@@ -792,15 +896,38 @@ function CollectionItemRow({
             {formatCents(item.wholesale_value_cents)}
           </div>
         )}
-        <button
-          type="button"
-          className="text-fg-subtle hover:text-red-400 disabled:opacity-50 mt-1"
-          disabled={removingId !== null}
-          onClick={() => onRemove(item)}
-          title="Remove from collection (also deletes from your DCR garage)"
-        >
-          {removingId === item.collection_id ? "Removing…" : "Remove"}
-        </button>
+        {item.paid_cents != null && (
+          <div title="What you paid — a cost basis, not a registry appraisal">
+            <span className="text-fg-subtle">cost</span>{" "}
+            {formatCents(item.paid_cents)}
+          </div>
+        )}
+        <div className="flex items-center gap-2 mt-1">
+          {item.is_local && (
+            <button
+              type="button"
+              className="text-fg-subtle hover:text-fg disabled:opacity-50"
+              disabled={removingId !== null}
+              onClick={() => onEdit(item)}
+              title="Edit this manually-added entry"
+            >
+              Edit
+            </button>
+          )}
+          <button
+            type="button"
+            className="text-fg-subtle hover:text-red-400 disabled:opacity-50"
+            disabled={removingId !== null}
+            onClick={() => onRemove(item)}
+            title={
+              item.is_local
+                ? "Remove this manually-added entry"
+                : "Remove from collection (also deletes from your DCR garage)"
+            }
+          >
+            {removingId === item.collection_id ? "Removing…" : "Remove"}
+          </button>
+        </div>
       </div>
     </li>
   );

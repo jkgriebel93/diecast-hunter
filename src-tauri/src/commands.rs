@@ -6,6 +6,7 @@ use tauri::State;
 
 use crate::error::{AppError, AppResult};
 use crate::listing_groups;
+use crate::local_collection;
 use crate::match_feedback::{self, FeedbackLabel};
 use crate::progress::ProgressEmitter;
 use crate::saved;
@@ -1829,7 +1830,8 @@ pub async fn list_prewarmed_drivers(state: State<'_, AppState>) -> AppResult<Vec
             (SELECT COUNT(*)
                FROM registry_entries re
                JOIN drivers d ON d.id = re.driver_id
-              WHERE d.normalized_name = o.normalized) AS entry_count,
+              WHERE d.normalized_name = o.normalized
+                AND re.source <> 'local') AS entry_count,
             CAST(s.value AS INTEGER) AS last_prewarmed_at
          FROM settings s
          LEFT JOIN registry_form_options o
@@ -1889,6 +1891,21 @@ pub struct CollectionRow {
     pub wholesale_value_cents: Option<i64>,
     pub registry_int_id: Option<i64>,
     pub enriched: bool,
+    /// Manually added by the user rather than synced from DCR (DCH-12).
+    /// Drives the "Manual" badge and the Edit action, and suppresses the
+    /// "stub — needs registry sync" hint, which would be false: there are no
+    /// registry details to fetch for a car DCR doesn't list.
+    #[serde(default)]
+    pub is_local: bool,
+    /// What the user paid, in cents — a cost basis, not an appraisal. A
+    /// manual entry has no `retail_value_cents`, so this is the only figure
+    /// standing behind it in the collection totals.
+    #[serde(default)]
+    pub paid_cents: Option<i64>,
+    #[serde(default)]
+    pub condition: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -1913,6 +1930,10 @@ struct CollectionRowRaw {
     wholesale_value_cents: Option<i64>,
     details_fetched_at: Option<i64>,
     raw_json: Option<String>,
+    collection_source: Option<String>,
+    paid_cents: Option<i64>,
+    condition: Option<String>,
+    notes: Option<String>,
 }
 
 // The "complex type" is a sqlx row tuple whose shape is dictated by the
@@ -1963,6 +1984,28 @@ pub async fn list_all_collection_items(
     fetch_collection_rows(&state.db.pool, None).await
 }
 
+/// Add a car diecastregistry.com doesn't list. Purely local — no DCR call,
+/// and nothing here ever reaches the user's My Garage. See
+/// `local_collection` for why the entry is stored as a registry row.
+#[tauri::command]
+pub async fn create_local_collection_entry(
+    state: State<'_, AppState>,
+    input: local_collection::LocalEntryInput,
+) -> AppResult<local_collection::LocalEntrySummary> {
+    local_collection::create_local_entry(&state.db.pool, input).await
+}
+
+/// Edit a manually-added entry. Errors on a DCR-sourced row rather than
+/// writing a change the next sync would overwrite.
+#[tauri::command]
+pub async fn update_local_collection_entry(
+    state: State<'_, AppState>,
+    collection_id: i64,
+    input: local_collection::LocalEntryInput,
+) -> AppResult<local_collection::LocalEntrySummary> {
+    local_collection::update_local_entry(&state.db.pool, collection_id, input).await
+}
+
 async fn fetch_collection_rows(
     pool: &SqlitePool,
     driver_id: Option<i64>,
@@ -1986,7 +2029,11 @@ async fn fetch_collection_rows(
                 re.retail_value_cents,
                 re.wholesale_value_cents,
                 re.details_fetched_at,
-                c.raw_json
+                c.raw_json,
+                c.source AS collection_source,
+                c.paid_cents,
+                c.condition,
+                c.notes
          FROM my_collection c
          JOIN registry_entries re ON re.id = c.registry_entry_id
          JOIN drivers d ON d.id = re.driver_id";
@@ -2055,6 +2102,10 @@ async fn fetch_collection_rows(
             wholesale_value_cents: r.wholesale_value_cents,
             registry_int_id,
             enriched: r.details_fetched_at.is_some(),
+            is_local: r.collection_source.as_deref() == Some(local_collection::SOURCE_LOCAL),
+            paid_cents: r.paid_cents,
+            condition: r.condition,
+            notes: r.notes,
         });
     }
 

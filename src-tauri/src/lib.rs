@@ -7,6 +7,7 @@ mod error;
 mod export;
 mod listing_groups;
 mod listing_receiver;
+mod local_collection;
 mod match_feedback;
 mod matcher_training;
 mod presearch;
@@ -214,6 +215,8 @@ pub fn run() {
             commands::list_drivers_with_counts,
             commands::list_collection_for_driver,
             commands::list_all_collection_items,
+            commands::create_local_collection_entry,
+            commands::update_local_collection_entry,
             commands::get_ebay_credentials,
             commands::save_ebay_credentials,
             commands::clear_ebay_credentials,

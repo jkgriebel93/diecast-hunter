@@ -183,6 +183,11 @@ pub async fn enrich_only(
 /// emptied garage, so everything DCR-sourced goes. Linked `registry_entries`
 /// and `drivers` rows are left alone — they're a cache of registry data, not
 /// part of the collection itself.
+///
+/// The `source = 'diecastregistry'` scope is load-bearing, not decorative:
+/// it's the only thing keeping a manually-added entry (DCH-12) — which by
+/// definition can never appear in My Garage — from being pruned on the very
+/// next sync.
 async fn prune_missing_rows(pool: &SqlitePool, seen: &[String]) -> AppResult<u32> {
     let mut sql = String::from("DELETE FROM my_collection WHERE source = 'diecastregistry'");
     if !seen.is_empty() {
@@ -330,4 +335,80 @@ async fn upsert_registry_stub(
         .fetch_one(pool)
         .await?;
     Ok(row.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+    use std::str::FromStr;
+
+    async fn migrated_pool() -> SqlitePool {
+        let opts = SqliteConnectOptions::from_str("sqlite::memory:")
+            .unwrap()
+            .foreign_keys(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(opts)
+            .await
+            .expect("open in-memory db");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+        pool
+    }
+
+    async fn insert_collection_row(pool: &SqlitePool, source: &str, external_id: &str) {
+        sqlx::query(
+            "INSERT INTO my_collection (source, external_id, imported_at)
+             VALUES (?, ?, 1)",
+        )
+        .bind(source)
+        .bind(external_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn surviving_external_ids(pool: &SqlitePool) -> Vec<String> {
+        sqlx::query_as("SELECT external_id FROM my_collection ORDER BY external_id")
+            .fetch_all(pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(id,): (String,)| id)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn prune_drops_dcr_rows_the_garage_no_longer_lists() {
+        let pool = migrated_pool().await;
+        insert_collection_row(&pool, "diecastregistry", "kept").await;
+        insert_collection_row(&pool, "diecastregistry", "gone").await;
+
+        let removed = prune_missing_rows(&pool, &["kept".to_string()])
+            .await
+            .unwrap();
+
+        assert_eq!(removed, 1);
+        assert_eq!(surviving_external_ids(&pool).await, vec!["kept"]);
+    }
+
+    /// A manually-added car is never in My Garage, so every full sync sees it
+    /// as "missing". Without the source scope this is exactly the sync that
+    /// would silently delete the user's hand-entered collection. DCH-12.
+    #[tokio::test]
+    async fn prune_leaves_manually_added_entries_alone() {
+        let pool = migrated_pool().await;
+        insert_collection_row(&pool, "diecastregistry", "from-dcr").await;
+        insert_collection_row(&pool, crate::local_collection::SOURCE_LOCAL, "local-1").await;
+
+        // The harshest case: an emptied garage, where the seen list is empty
+        // and every DCR-sourced row goes.
+        let removed = prune_missing_rows(&pool, &[]).await.unwrap();
+
+        assert_eq!(removed, 1);
+        assert_eq!(surviving_external_ids(&pool).await, vec!["local-1"]);
+    }
 }

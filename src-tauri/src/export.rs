@@ -907,6 +907,10 @@ mod tests {
             wholesale_value_cents: Some(1900),
             registry_int_id: Some(99),
             enriched: true,
+            is_local: false,
+            paid_cents: None,
+            condition: None,
+            notes: None,
         }
     }
 
