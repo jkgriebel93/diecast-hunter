@@ -90,11 +90,13 @@ export function Wishlist() {
         const fromTop = y - rect.top;
         const fromBottom = rect.bottom - y;
         if (fromTop < EDGE) {
-          scroller.scrollTop -=
-            Math.ceil(((EDGE - Math.max(fromTop, 0)) / EDGE) * MAX_STEP);
+          scroller.scrollTop -= Math.ceil(
+            ((EDGE - Math.max(fromTop, 0)) / EDGE) * MAX_STEP,
+          );
         } else if (fromBottom < EDGE) {
-          scroller.scrollTop +=
-            Math.ceil(((EDGE - Math.max(fromBottom, 0)) / EDGE) * MAX_STEP);
+          scroller.scrollTop += Math.ceil(
+            ((EDGE - Math.max(fromBottom, 0)) / EDGE) * MAX_STEP,
+          );
         }
       }
       raf = requestAnimationFrame(step);
@@ -162,10 +164,7 @@ export function Wishlist() {
       setListEditor(null);
       setNameDraft("");
       setActiveId(created.wishlist_id);
-      window.localStorage.setItem(
-        ACTIVE_LIST_KEY,
-        String(created.wishlist_id),
-      );
+      window.localStorage.setItem(ACTIVE_LIST_KEY, String(created.wishlist_id));
       await reload(created.wishlist_id);
     } catch (e) {
       setError(String(e));
@@ -465,7 +464,9 @@ export function Wishlist() {
       {lists === null || entries === null ? (
         // A failed load leaves these null forever; the error banner above
         // is the state, not "still loading".
-        error ? null : <div className="card text-sm text-fg-muted">Loading…</div>
+        error ? null : (
+          <div className="card text-sm text-fg-muted">Loading…</div>
+        )
       ) : entries.length === 0 ? (
         <div className="card text-sm text-fg-muted">
           Nothing on "{activeList?.name ?? "this list"}" yet. Use the "Add to
@@ -692,66 +693,66 @@ function WishlistCard({
             </div>
           </div>
           {!minimized && (
-          <>
-          <div className="text-xs text-fg-subtle mt-0.5">
-            {[entry.oem, entry.brand, entry.scale, entry.make]
-              .filter(Boolean)
-              .join(" · ")}
-          </div>
-          {entry.production_qty !== null && (
-            <div className="text-xs text-fg-faint mt-0.5">
-              production qty {entry.production_qty.toLocaleString()}
-            </div>
-          )}
-          <div className="flex items-center gap-3 mt-1">
-            {entry.detail_url && (
-              <a
-                className="text-xs text-accent hover:underline"
-                href={DCR_BASE + entry.detail_url}
-                onClick={(e) => {
-                  e.preventDefault();
-                  void openExternal(DCR_BASE + entry.detail_url!);
-                }}
-              >
-                View on diecastregistry.com →
-              </a>
-            )}
-            <button
-              type="button"
-              className="text-xs text-accent hover:underline"
-              onClick={onLink}
-              title="Pick a saved listing as a purchase candidate for this wish"
-            >
-              + Link listing
-            </button>
-            {otherLists.length > 0 && (
-              <select
-                className="input !w-auto !py-0 !text-xs !text-accent cursor-pointer"
-                value=""
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  if (v) onMove(v);
-                }}
-                title="Move this entry to another wishlist"
-              >
-                <option value="">Move to…</option>
-                {otherLists.map((l) => (
-                  <option key={l.wishlist_id} value={l.wishlist_id}>
-                    {l.name}
-                  </option>
-                ))}
-              </select>
-            )}
-            <button
-              type="button"
-              className="text-xs text-fg-subtle hover:text-red-400"
-              onClick={onRemove}
-              title="Remove this entry from the wishlist"
-            >
-              Remove
-            </button>
-          </div>
-          </>
+            <>
+              <div className="text-xs text-fg-subtle mt-0.5">
+                {[entry.oem, entry.brand, entry.scale, entry.make]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </div>
+              {entry.production_qty !== null && (
+                <div className="text-xs text-fg-faint mt-0.5">
+                  production qty {entry.production_qty.toLocaleString()}
+                </div>
+              )}
+              <div className="flex items-center gap-3 mt-1">
+                {entry.detail_url && (
+                  <a
+                    className="text-xs text-accent hover:underline"
+                    href={DCR_BASE + entry.detail_url}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      void openExternal(DCR_BASE + entry.detail_url!);
+                    }}
+                  >
+                    View on diecastregistry.com →
+                  </a>
+                )}
+                <button
+                  type="button"
+                  className="text-xs text-accent hover:underline"
+                  onClick={onLink}
+                  title="Pick a saved listing as a purchase candidate for this wish"
+                >
+                  + Link listing
+                </button>
+                {otherLists.length > 0 && (
+                  <select
+                    className="input !w-auto !py-0 !text-xs !text-accent cursor-pointer"
+                    value=""
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (v) onMove(v);
+                    }}
+                    title="Move this entry to another wishlist"
+                  >
+                    <option value="">Move to…</option>
+                    {otherLists.map((l) => (
+                      <option key={l.wishlist_id} value={l.wishlist_id}>
+                        {l.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <button
+                  type="button"
+                  className="text-xs text-fg-subtle hover:text-red-400"
+                  onClick={onRemove}
+                  title="Remove this entry from the wishlist"
+                >
+                  Remove
+                </button>
+              </div>
+            </>
           )}
         </div>
         <div className="text-right text-xs tabular-nums shrink-0 space-y-0.5">
@@ -767,54 +768,54 @@ function WishlistCard({
       </div>
 
       {!minimized && (
-      <div className="border-t border-border pt-2">
-        {editingNotes ? (
-          <div className="space-y-2">
-            <textarea
-              className="input"
-              rows={2}
-              value={notesDraft}
-              onChange={(e) => setNotesDraft(e.target.value)}
-              placeholder="Notes (max price, variants to avoid, …)"
-              disabled={savingNotes}
-            />
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="btn-primary !py-1 !text-xs"
-                onClick={onSaveNotes}
+        <div className="border-t border-border pt-2">
+          {editingNotes ? (
+            <div className="space-y-2">
+              <textarea
+                className="input"
+                rows={2}
+                value={notesDraft}
+                onChange={(e) => setNotesDraft(e.target.value)}
+                placeholder="Notes (max price, variants to avoid, …)"
                 disabled={savingNotes}
-              >
-                {savingNotes ? "Saving…" : "Save notes"}
-              </button>
-              <button
-                type="button"
-                className="btn-secondary !py-1 !text-xs"
-                onClick={() => {
-                  setNotesDraft(entry.notes ?? "");
-                  setEditingNotes(false);
-                }}
-                disabled={savingNotes}
-              >
-                Cancel
-              </button>
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="btn-primary !py-1 !text-xs"
+                  onClick={onSaveNotes}
+                  disabled={savingNotes}
+                >
+                  {savingNotes ? "Saving…" : "Save notes"}
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary !py-1 !text-xs"
+                  onClick={() => {
+                    setNotesDraft(entry.notes ?? "");
+                    setEditingNotes(false);
+                  }}
+                  disabled={savingNotes}
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="text-left w-full text-xs text-fg-muted hover:text-fg"
-            onClick={() => setEditingNotes(true)}
-            title="Edit notes"
-          >
-            {entry.notes ? (
-              <span className="whitespace-pre-wrap">{entry.notes}</span>
-            ) : (
-              <span className="text-fg-faint italic">Add notes…</span>
-            )}
-          </button>
-        )}
-      </div>
+          ) : (
+            <button
+              type="button"
+              className="text-left w-full text-xs text-fg-muted hover:text-fg"
+              onClick={() => setEditingNotes(true)}
+              title="Edit notes"
+            >
+              {entry.notes ? (
+                <span className="whitespace-pre-wrap">{entry.notes}</span>
+              ) : (
+                <span className="text-fg-faint italic">Add notes…</span>
+              )}
+            </button>
+          )}
+        </div>
       )}
 
       {!minimized && entry.listings.length > 0 && (

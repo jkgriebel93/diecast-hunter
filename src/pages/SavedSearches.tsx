@@ -115,7 +115,10 @@ export function SavedSearches() {
     }
   }
 
-  async function onSubmit(input: SavedSearchInput, existing: SavedSearch | null) {
+  async function onSubmit(
+    input: SavedSearchInput,
+    existing: SavedSearch | null,
+  ) {
     setError(null);
     try {
       if (existing) {
@@ -168,7 +171,9 @@ export function SavedSearches() {
       {rows === null ? (
         // A failed load leaves this null forever; the error banner above
         // is the state, not "still loading".
-        error ? null : <div className="card text-sm text-fg-muted">Loading…</div>
+        error ? null : (
+          <div className="card text-sm text-fg-muted">Loading…</div>
+        )
       ) : rows.length === 0 ? (
         <div className="card text-sm text-fg-muted">
           No saved searches yet. Click "New saved search", or save one from the{" "}
@@ -337,7 +342,11 @@ function ResultsPanel({
       </div>
       <ul className="divide-y divide-border">
         {page.items.map((item) => (
-          <ResultRow key={item.item_id} item={item} imgSizeClass={imgSizeClass} />
+          <ResultRow
+            key={item.item_id}
+            item={item}
+            imgSizeClass={imgSizeClass}
+          />
         ))}
       </ul>
     </div>
@@ -370,7 +379,9 @@ function ResultRow({
             className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
           />
         ) : (
-          <div className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`} />
+          <div
+            className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`}
+          />
         ))}
       <div className="flex-1 min-w-0">
         <a
@@ -425,12 +436,14 @@ function SearchEditor({
     (existing?.sellers ?? []).join(", "),
   );
   const [priceMin, setPriceMin] = useState(
-    existing?.price_min_cents !== null && existing?.price_min_cents !== undefined
+    existing?.price_min_cents !== null &&
+      existing?.price_min_cents !== undefined
       ? (existing.price_min_cents / 100).toString()
       : "",
   );
   const [priceMax, setPriceMax] = useState(
-    existing?.price_max_cents !== null && existing?.price_max_cents !== undefined
+    existing?.price_max_cents !== null &&
+      existing?.price_max_cents !== undefined
       ? (existing.price_max_cents / 100).toString()
       : "",
   );
@@ -528,7 +541,9 @@ function SearchEditor({
                           ? "border-accent text-accent bg-accent/10"
                           : "border-border text-fg-muted hover:text-fg"
                       }`}
-                      onClick={() => toggle(conditions, setConditions, opt.value)}
+                      onClick={() =>
+                        toggle(conditions, setConditions, opt.value)
+                      }
                     >
                       {opt.label}
                     </button>
@@ -602,9 +617,7 @@ function SearchEditor({
           </div>
 
           <div>
-            <label className="label">
-              Sellers (comma-separated, optional)
-            </label>
+            <label className="label">Sellers (comma-separated, optional)</label>
             <input
               className="input"
               type="text"

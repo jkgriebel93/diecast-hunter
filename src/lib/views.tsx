@@ -43,13 +43,21 @@ export const VIEWS: Record<ViewId, ViewDef> = {
     Component: Collection,
   },
   "/ebay": { id: "/ebay", label: "eBay", Component: Ebay },
-  "/ebay/feed": { id: "/ebay/feed", label: "Seller feed", Component: SellerFeed },
+  "/ebay/feed": {
+    id: "/ebay/feed",
+    label: "Seller feed",
+    Component: SellerFeed,
+  },
   "/ebay/searches": {
     id: "/ebay/searches",
     label: "Saved Searches",
     Component: SavedSearches,
   },
-  "/listings": { id: "/listings", label: "Saved Listings", Component: Listings },
+  "/listings": {
+    id: "/listings",
+    label: "Saved Listings",
+    Component: Listings,
+  },
   "/browse": { id: "/browse", label: "Browse eBay", Component: Browse },
   "/registry": {
     id: "/registry",

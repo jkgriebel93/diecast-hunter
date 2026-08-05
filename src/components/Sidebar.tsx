@@ -105,11 +105,7 @@ function NavRow({
         onClick={() => open(item.to)}
         title={collapsed ? item.label : undefined}
         className={`flex-1 min-w-0 flex items-center gap-3 ${
-          collapsed
-            ? "justify-center px-0"
-            : indented
-              ? "pl-10 pr-4"
-              : "px-4"
+          collapsed ? "justify-center px-0" : indented ? "pl-10 pr-4" : "px-4"
         } py-2 text-sm transition-colors text-left ${
           isActive
             ? "bg-bg-elevated text-fg border-l-2 border-accent"
@@ -134,13 +130,7 @@ function NavRow({
   );
 }
 
-function NavGroup({
-  item,
-  collapsed,
-}: {
-  item: NavItem;
-  collapsed: boolean;
-}) {
+function NavGroup({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
   const { activeView } = useWorkspace();
   const childActive = (item.children ?? []).some((c) => c.to === activeView);
   const groupKey = GROUP_STORAGE_PREFIX + item.to;
@@ -316,13 +306,8 @@ function SplitIcon() {
   );
 }
 
-function ChevronIcon({
-  direction,
-}: {
-  direction: "left" | "right" | "down";
-}) {
-  const rotate =
-    direction === "right" ? 180 : direction === "down" ? 270 : 0;
+function ChevronIcon({ direction }: { direction: "left" | "right" | "down" }) {
+  const rotate = direction === "right" ? 180 : direction === "down" ? 270 : 0;
   return (
     <svg
       width="14"

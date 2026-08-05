@@ -14,13 +14,7 @@
  */
 
 export type ErrorKind =
-  | "network"
-  | "auth"
-  | "quota"
-  | "setup"
-  | "data"
-  | "cancelled"
-  | "unknown";
+  "network" | "auth" | "quota" | "setup" | "data" | "cancelled" | "unknown";
 
 export interface DescribedError {
   /** One plain sentence: what happened, in the user's terms. */
@@ -129,9 +123,7 @@ function describeNetwork(body: string): DescribedError {
     lower.includes("timed out")
   ) {
     return {
-      title: host
-        ? `Couldn't reach ${host}.`
-        : "Couldn't reach the network.",
+      title: host ? `Couldn't reach ${host}.` : "Couldn't reach the network.",
       hint: "Check your internet connection and try again.",
       detail: body,
       kind: "network",

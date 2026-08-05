@@ -29,9 +29,7 @@ export async function getPublicKeyPem(kid: string, env: Env): Promise<string> {
     { headers: { Authorization: `Bearer ${token}` } },
   );
   if (!resp.ok) {
-    throw new Error(
-      `getPublicKey failed: ${resp.status} ${await resp.text()}`,
-    );
+    throw new Error(`getPublicKey failed: ${resp.status} ${await resp.text()}`);
   }
   const data = (await resp.json()) as {
     key: string;

@@ -257,8 +257,7 @@ export async function handleNotification(
   // directly lands NULLs in every user-data column.
   const notification =
     (body as { notification?: Record<string, unknown> }).notification ?? {};
-  const data =
-    (notification.data as Record<string, unknown> | undefined) ?? {};
+  const data = (notification.data as Record<string, unknown> | undefined) ?? {};
 
   // Answer 200 even when the write ultimately fails — see the "Deletion
   // write contract" section of README.md. Short version: any non-2xx makes

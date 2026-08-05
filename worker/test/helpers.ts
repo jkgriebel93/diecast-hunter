@@ -15,7 +15,8 @@ export function makeKv(): FakeKv {
     async get(key: string, opts?: unknown): Promise<unknown> {
       const raw = store.get(key);
       if (raw === undefined) return null;
-      const type = typeof opts === "string" ? opts : (opts as { type?: string })?.type;
+      const type =
+        typeof opts === "string" ? opts : (opts as { type?: string })?.type;
       if (type === "json") return JSON.parse(raw);
       return raw;
     },
@@ -332,7 +333,12 @@ export function installEbayFetchMock(
     input: RequestInfo | URL,
     _init?: RequestInit,
   ): Promise<Response> => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
     if (url.includes("/identity/v1/oauth2/token")) {
       counts.token++;
       return new Response(

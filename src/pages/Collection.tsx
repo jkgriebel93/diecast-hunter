@@ -26,11 +26,7 @@ const IMG_CLASS: Record<ImageSize, string> = {
 const DCR_BASE = "https://www.diecastregistry.com";
 
 type SortMode =
-  | "driver-asc"
-  | "value-desc"
-  | "count-desc"
-  | "year-desc"
-  | "year-asc";
+  "driver-asc" | "value-desc" | "count-desc" | "year-desc" | "year-asc";
 
 interface DriverGroupView {
   driver_id: number | null;
@@ -212,15 +208,13 @@ export function Collection() {
 
   const scales = useMemo(() => {
     const set = new Set<string>();
-    for (const i of items ?? [])
-      if (i.scale) set.add(i.scale);
+    for (const i of items ?? []) if (i.scale) set.add(i.scale);
     return filterAllowedScales(Array.from(set));
   }, [items]);
 
   const oems = useMemo(() => {
     const set = new Set<string>();
-    for (const i of items ?? [])
-      if (i.oem) set.add(i.oem);
+    for (const i of items ?? []) if (i.oem) set.add(i.oem);
     return Array.from(set).sort();
   }, [items]);
 
@@ -423,9 +417,7 @@ export function Collection() {
       </header>
 
       {error && <ErrorBanner error={error} />}
-      {notice && (
-        <div className="card text-sm text-fg-muted">{notice}</div>
-      )}
+      {notice && <div className="card text-sm text-fg-muted">{notice}</div>}
       {successMsg && (
         <div className="card text-sm text-emerald-400">{successMsg}</div>
       )}
@@ -532,7 +524,9 @@ export function Collection() {
       {items === null ? (
         // A failed load leaves this null forever; the error banner above
         // is the state, not "still loading".
-        error ? null : <div className="card text-sm text-fg-muted">Loading…</div>
+        error ? null : (
+          <div className="card text-sm text-fg-muted">Loading…</div>
+        )
       ) : items.length === 0 ? (
         <div className="card text-sm text-fg-muted">
           Empty. Configure your diecastregistry.com credentials in Settings,
@@ -723,8 +717,7 @@ function CollectionItemRow({
                   item.finish && `finish: ${item.finish}`,
                   item.production_qty &&
                     `qty: ${item.production_qty.toLocaleString()}`,
-                  item.registration_number &&
-                    `reg ${item.registration_number}`,
+                  item.registration_number && `reg ${item.registration_number}`,
                 ]
                   .filter(Boolean)
                   .join(" · ")}

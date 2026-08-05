@@ -1,0 +1,19 @@
+# Build output and deps.
+dist/
+node_modules/
+worker/node_modules/
+src-tauri/target/
+
+# Generated / vendored.
+pnpm-lock.yaml
+extension/diecast-hunter-ebay.zip
+
+# Test fixtures are captured verbatim from diecastregistry.com and eBay.
+# The parsers under test are written against that exact markup, so
+# reformatting them would silently change what the tests are asserting.
+src-tauri/fixtures/
+
+# Rust owns its own formatter (cargo fmt); markdown reflows badly under
+# prettier and several docs use hand-tuned tables and code fences.
+*.md
+*.rs

@@ -129,6 +129,7 @@ export function FontScaleProvider({ children }: { children: ReactNode }) {
 
 export function useFontScale(): FontScaleContextValue {
   const ctx = useContext(FontScaleContext);
-  if (!ctx) throw new Error("useFontScale must be used inside FontScaleProvider");
+  if (!ctx)
+    throw new Error("useFontScale must be used inside FontScaleProvider");
   return ctx;
 }

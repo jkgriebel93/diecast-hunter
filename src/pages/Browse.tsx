@@ -82,9 +82,7 @@ export function Browse() {
   async function loadSavedSellers() {
     try {
       const sellers = await api.listSavedSellers();
-      setSavedSellersSet(
-        new Set(sellers.map((s) => s.username.toLowerCase())),
-      );
+      setSavedSellersSet(new Set(sellers.map((s) => s.username.toLowerCase())));
     } catch {
       // non-fatal — the "Save seller" button just won't reflect existing
       // bookmarks until the user reloads.
@@ -116,10 +114,7 @@ export function Browse() {
 
   async function onSaveCurrentSearch() {
     const defaultName = query.trim() || "Untitled search";
-    const name = window.prompt(
-      "Name this saved search",
-      defaultName,
-    );
+    const name = window.prompt("Name this saved search", defaultName);
     if (name === null) return;
     setSavingSearch(true);
     setSavedSearchMsg(null);
@@ -268,8 +263,8 @@ export function Browse() {
       <header>
         <h2 className="text-2xl font-semibold">Browse eBay</h2>
         <p className="text-sm text-fg-subtle">
-          Search the diecast catalog on eBay. Watch a listing to add it to
-          your eBay watchlist and track it locally.
+          Search the diecast catalog on eBay. Watch a listing to add it to your
+          eBay watchlist and track it locally.
         </p>
       </header>
 
@@ -314,9 +309,7 @@ export function Browse() {
             label="Condition"
             values={conditions}
             options={CONDITION_OPTIONS}
-            onToggle={(v) =>
-              toggleArrayValue(conditions, setConditions, v)
-            }
+            onToggle={(v) => toggleArrayValue(conditions, setConditions, v)}
           />
           <FilterChips
             label="Format"
@@ -414,8 +407,7 @@ export function Browse() {
           {page.items.map((item) => {
             const username = item.seller_username ?? "";
             const sellerSaved =
-              username !== "" &&
-              savedSellersSet.has(username.toLowerCase());
+              username !== "" && savedSellersSet.has(username.toLowerCase());
             return (
               <SearchCard
                 key={item.item_id}
@@ -423,9 +415,7 @@ export function Browse() {
                 busy={busyItemId === item.item_id}
                 watched={watchedByItemId.has(item.item_id)}
                 sellerSaved={sellerSaved}
-                sellerSaving={
-                  username !== "" && savingSeller === username
-                }
+                sellerSaving={username !== "" && savingSeller === username}
                 onWatch={() => onWatch(item)}
                 onUnwatch={() => onUnwatch(item)}
                 onSaveSeller={
@@ -488,7 +478,9 @@ function SearchCard({
               className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
             />
           ) : (
-            <div className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`} />
+            <div
+              className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`}
+            />
           ))}
         <div className="min-w-0 flex-1">
           <div
@@ -523,11 +515,13 @@ function SearchCard({
           <div className="text-base text-fg">
             {formatCents(item.price_cents)}
           </div>
-          {!minimized && item.shipping_cents !== null && item.shipping_cents > 0 && (
-            <div className="text-fg-subtle">
-              + {formatCents(item.shipping_cents)} ship
-            </div>
-          )}
+          {!minimized &&
+            item.shipping_cents !== null &&
+            item.shipping_cents > 0 && (
+              <div className="text-fg-subtle">
+                + {formatCents(item.shipping_cents)} ship
+              </div>
+            )}
           {!minimized &&
             total !== null &&
             item.shipping_cents !== null &&
@@ -537,55 +531,55 @@ function SearchCard({
         </div>
       </div>
       {!minimized && (
-      <div className="flex items-center justify-end gap-3 text-xs">
-        {onSaveSeller && (
-          <button
-            type="button"
-            className="text-fg-subtle hover:text-fg disabled:opacity-50"
-            onClick={onSaveSeller}
-            disabled={sellerSaving}
-            title={`Save ${item.seller_username} to Saved Sellers`}
+        <div className="flex items-center justify-end gap-3 text-xs">
+          {onSaveSeller && (
+            <button
+              type="button"
+              className="text-fg-subtle hover:text-fg disabled:opacity-50"
+              onClick={onSaveSeller}
+              disabled={sellerSaving}
+              title={`Save ${item.seller_username} to Saved Sellers`}
+            >
+              {sellerSaving ? "Saving…" : "Save seller"}
+            </button>
+          )}
+          {sellerSaved && !onSaveSeller && (
+            <span className="text-fg-faint" title="Seller already saved">
+              ✓ Seller saved
+            </span>
+          )}
+          <a
+            className="text-accent hover:underline"
+            href={item.web_url}
+            onClick={(e) => {
+              e.preventDefault();
+              void openExternal(item.web_url);
+            }}
           >
-            {sellerSaving ? "Saving…" : "Save seller"}
-          </button>
-        )}
-        {sellerSaved && !onSaveSeller && (
-          <span className="text-fg-faint" title="Seller already saved">
-            ✓ Seller saved
-          </span>
-        )}
-        <a
-          className="text-accent hover:underline"
-          href={item.web_url}
-          onClick={(e) => {
-            e.preventDefault();
-            void openExternal(item.web_url);
-          }}
-        >
-          View on eBay →
-        </a>
-        {watched ? (
-          <button
-            type="button"
-            className="text-fg-muted hover:text-red-300 disabled:opacity-50"
-            onClick={onUnwatch}
-            disabled={busy}
-            title="Remove from your eBay watchlist and stop tracking locally"
-          >
-            {busy ? "Unwatching…" : "✓ Watching · Unwatch"}
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="text-fg-muted hover:text-fg disabled:opacity-50"
-            onClick={onWatch}
-            disabled={busy}
-            title="Add to your eBay watchlist and track locally"
-          >
-            {busy ? "Watching…" : "Watch"}
-          </button>
-        )}
-      </div>
+            View on eBay →
+          </a>
+          {watched ? (
+            <button
+              type="button"
+              className="text-fg-muted hover:text-red-300 disabled:opacity-50"
+              onClick={onUnwatch}
+              disabled={busy}
+              title="Remove from your eBay watchlist and stop tracking locally"
+            >
+              {busy ? "Unwatching…" : "✓ Watching · Unwatch"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="text-fg-muted hover:text-fg disabled:opacity-50"
+              onClick={onWatch}
+              disabled={busy}
+              title="Add to your eBay watchlist and track locally"
+            >
+              {busy ? "Watching…" : "Watch"}
+            </button>
+          )}
+        </div>
       )}
     </li>
   );

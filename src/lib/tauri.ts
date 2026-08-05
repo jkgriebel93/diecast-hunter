@@ -89,12 +89,10 @@ export const api = {
     invoke<void>("save_diecastregistry_credentials", { username, password }),
   clearDiecastRegistryCredentials: () =>
     invoke<void>("clear_diecastregistry_credentials"),
-  getSetting: (key: string) =>
-    invoke<string | null>("get_setting", { key }),
+  getSetting: (key: string) => invoke<string | null>("get_setting", { key }),
   setSetting: (key: string, value: string) =>
     invoke<void>("set_setting", { key, value }),
-  getAutoSyncSettings: () =>
-    invoke<AutoSyncSettings>("get_auto_sync_settings"),
+  getAutoSyncSettings: () => invoke<AutoSyncSettings>("get_auto_sync_settings"),
   setAutoSyncSettings: (
     enabled: boolean,
     intervalHours: number,
@@ -121,11 +119,7 @@ export const api = {
     invoke<RemoveEntrySummary>("remove_collection_entry", { collectionId }),
   getEbayCredentials: () =>
     invoke<EbayCredentialsState>("get_ebay_credentials"),
-  saveEbayCredentials: (
-    appId: string,
-    certId: string,
-    environment: string,
-  ) =>
+  saveEbayCredentials: (appId: string, certId: string, environment: string) =>
     invoke<void>("save_ebay_credentials", {
       appId,
       certId,
@@ -136,8 +130,7 @@ export const api = {
   getEbayRuName: () => invoke<string | null>("get_ebay_ru_name"),
   saveEbayRuName: (ruName: string) =>
     invoke<void>("save_ebay_ru_name", { ruName }),
-  getEbayOauthStatus: () =>
-    invoke<EbayOauthStatus>("get_ebay_oauth_status"),
+  getEbayOauthStatus: () => invoke<EbayOauthStatus>("get_ebay_oauth_status"),
   startEbayOauth: () => invoke<string>("start_ebay_oauth"),
   completeEbayOauth: (code: string) =>
     invoke<void>("complete_ebay_oauth", { code }),
@@ -163,8 +156,7 @@ export const api = {
     invoke<void>("refresh_ebay_listing", { listingId }),
   refreshAllEbayListings: () =>
     invoke<RefreshSummary>("refresh_all_ebay_listings"),
-  syncEbayWatchlist: () =>
-    invoke<WatchlistSyncSummary>("sync_ebay_watchlist"),
+  syncEbayWatchlist: () => invoke<WatchlistSyncSummary>("sync_ebay_watchlist"),
   listListings: () => invoke<ListingRow[]>("list_listings"),
   clearListingMatch: (listingId: number) =>
     invoke<void>("clear_listing_match", { listingId }),
@@ -179,8 +171,7 @@ export const api = {
   retrainMatcher: () => invoke<TrainOutcome>("retrain_matcher"),
   getListingReceiverStatus: () =>
     invoke<ListingReceiverStatus>("get_listing_receiver_status"),
-  getListingReceiverSecret: () =>
-    invoke<string>("get_listing_receiver_secret"),
+  getListingReceiverSecret: () => invoke<string>("get_listing_receiver_secret"),
   regenerateListingReceiverSecret: () =>
     invoke<string>("regenerate_listing_receiver_secret"),
   getBackgroundSettings: () =>
@@ -261,8 +252,7 @@ export const api = {
   removeNonDiecastListings: () =>
     invoke<CleanupSummary>("remove_non_diecast_listings"),
   getEbayBuyerZip: () => invoke<string | null>("get_ebay_buyer_zip"),
-  setEbayBuyerZip: (zip: string) =>
-    invoke<void>("set_ebay_buyer_zip", { zip }),
+  setEbayBuyerZip: (zip: string) => invoke<void>("set_ebay_buyer_zip", { zip }),
   listSavedSearches: () => invoke<SavedSearch[]>("list_saved_searches"),
   createSavedSearch: (input: SavedSearchInput) =>
     invoke<SavedSearch>("create_saved_search", { input }),
