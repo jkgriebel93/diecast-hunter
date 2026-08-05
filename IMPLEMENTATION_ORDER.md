@@ -1,8 +1,8 @@
 # Implementation order for open DCH tickets
 
-As of 2026-08-05 (rev 7: DCH-15 merged; DCH-14 in progress). Ten tickets are merged —
-DCH-8, DCH-9, DCH-10, DCH-11, DCH-15, DCH-17, DCH-18, DCH-22, DCH-28, DCH-29 — which
-empties the "ship now" and "contained features" tiers of rev 5 and leaves nine substantive
+As of 2026-08-05 (rev 8: DCH-14 and DCH-31 shipped; DCH-30 filed for the last item that had
+been living only in prose). Twelve tickets are merged — DCH-8, DCH-9, DCH-10, DCH-11,
+DCH-14, DCH-15, DCH-17, DCH-18, DCH-22, DCH-28, DCH-29, DCH-31 — leaving nine substantive
 items plus the roadmap buckets.
 
 The ordering principle has not changed: compounding work (training data, CI safety, anything
@@ -16,6 +16,8 @@ that makes later tickets cheaper or safer) goes before features that only pay of
 | DCH-9 | Spike: every external sold-price source is closed to us. Build on the archive. |
 | DCH-10 | Sold-price comps on the Listings page and the extension overlay. |
 | DCH-11 | Confirm/correct registry match from the extension. |
+| DCH-31 | Cross-platform extension packaging, built and uploaded by CI on every run. |
+| DCH-14 | Named registry pre-searches. Caches `registry_entries` via the saved filter combo; refreshed by the overnight auto-sync. |
 | DCH-15 | Year-range filters on registry search, the Match… dialog, Listings, and Collection. |
 | DCH-17 | Thousands separators via shared `Intl.NumberFormat` helpers. |
 | DCH-18 | Error translation layer + `ErrorBanner`. |
@@ -37,7 +39,7 @@ Two things worth carrying forward:
 
 | # | Ticket | What | Why here |
 | --- | --- | --- | --- |
-| ~~1~~ | ~~DCH-14~~ | Saved pre-searches, cached & filtered live | 🚧 In progress. Caches `registry_entries` via the filter combo rather than materializing result sets; refreshed by the overnight auto-sync. |
+| 1 | DCH-30 | Alert on `deletion_insert_failed` | Dashboard config, not code. The last piece of the DCH-28 compliance story — until it exists, a lost deletion notification is invisible. |
 | 2 | DCH-12 | My Collection entries not in DCR | **Blocked on two decisions.** (a) What value basis to use for an entry with no registry entry — there's no retail/wholesale to inherit. (b) How such rows survive `sync::dcr_collection`, which treats DCR as the source of truth and prunes local rows missing from My Garage. Settle both before coding. |
 | 3 | DCH-16 | Improve Saved Seller browsing | Still a one-liner ticket. Write the problem statement first; it can't be estimated as written. |
 
@@ -64,12 +66,12 @@ Worth doing as a run rather than piecemeal — 20 and 21 both execute the checkl
 
 ## Open items that aren't tickets
 
-- **Cloudflare alert on `deletion_insert_failed`.** DCH-28 made the event stable and
-  alertable and documented how, but the alert itself is dashboard config outside this repo.
-  Until it exists, a lost deletion notification is only visible to someone reading logs.
-  Flagged in `worker/README.md`.
+- ~~Cloudflare alert on `deletion_insert_failed`~~ — now **DCH-30**.
 - **Roadmap buckets DCH-2 … DCH-7 may be closeable.** DCH-2 ("Listing lifecycle &
   valuation") has had all its children — DCH-8, DCH-9, DCH-10 — shipped. They're High
   priority in the board view, which makes the backlog look busier than it is.
-- **Extension needs repackaging** (`pnpm ext:package`) plus a desktop rebuild before
-  DCH-11's confirm/reject buttons and DCH-10's comps rows appear in a real browser.
+- ~~Extension needs repackaging~~ — solved by **DCH-31**. CI uploads a
+  `diecast-hunter-extension-<sha>` artifact on every run; download it from the run for the
+  commit you want. That artifact is how DCH-10's comps rows and DCH-11's verdict buttons
+  finally reach a browser. Installing it is still a manual load-unpacked step — Chrome Web
+  Store publishing was explicitly out of scope.
