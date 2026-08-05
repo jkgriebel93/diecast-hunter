@@ -116,7 +116,7 @@ pub async fn associate_all_listings(
     for (idx, (id, title)) in rows.into_iter().enumerate() {
         progress.check_cancelled()?;
         let done = (idx + 1) as u32;
-        if done == 1 || done % 50 == 0 || done == total {
+        if done == 1 || done.is_multiple_of(50) || done == total {
             progress.step(
                 format!("Associating driver {done} of {total}…"),
                 Some(done),

@@ -31,6 +31,4 @@ pub use ebay_watchlist::{
 };
 pub use registry_auto_match::{AutoMatchOutcome, AutoMatchSummary};
 pub use registry_link::{link_listing_to_registry, LinkResult};
-pub use registry_prewarm::{
-    prewarm_by_driver, refresh_stale_prewarms, PrewarmRefreshSummary, PrewarmSummary,
-};
+pub use registry_prewarm::{prewarm_by_driver, refresh_stale_prewarms, PrewarmSummary};

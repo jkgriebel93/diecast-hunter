@@ -23,6 +23,12 @@ const SITE_ID_US: &str = "0";
 #[derive(Debug, Clone)]
 pub struct WatchlistPage {
     pub item_ids: Vec<String>,
+    /// Parsed but deliberately unused for pagination: eBay omits
+    /// `<PageNumber>` at DetailLevel=ReturnSummary, so this falls back to 1
+    /// every time — driving the loop off it once caused an infinite loop on
+    /// page 2. `sync_watchlist` counts pages itself. Kept because it's part
+    /// of the response and the parser test asserts on it.
+    #[allow(dead_code)]
     pub current_page: u32,
     pub total_pages: u32,
 }

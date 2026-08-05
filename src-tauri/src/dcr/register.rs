@@ -6,8 +6,8 @@
 //!      an input named `ChassisNumber` tells us whether the diecast is
 //!      sequentially numbered (those need a DIN) or NSN.
 //!   2. POST /MyGarage/RegisterDiecast/<guid> with the form-encoded body. On
-//!      success the server replies with a JSON envelope:
-//!        {"success": true, "title": "...", "html": "<...>"}
+//!      success the server replies with a JSON envelope
+//!      `{"success": true, "title": "...", "html": "<...>"}`,
 //!      where `html` embeds the freshly-assigned DCR registration number
 //!      (e.g. "000-429-522") and a `/MyGarage?id=429522` deep link.
 

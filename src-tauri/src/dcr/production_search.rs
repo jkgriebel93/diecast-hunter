@@ -147,16 +147,17 @@ pub async fn search_all_pages_with_progress(
 }
 
 pub(crate) fn build_form(token: &str, f: &ProductionSearchFilter) -> Vec<(String, String)> {
-    let mut form = Vec::new();
-    form.push(("__RequestVerificationToken".into(), token.to_string()));
-    form.push(("ForSale".into(), String::new()));
-    form.push((
-        "load".into(),
-        f.diecast_type
-            .clone()
-            .unwrap_or_else(|| "All Diecast".into()),
-    ));
-    form.push(("TypesExpanded".into(), "False".into()));
+    let mut form = vec![
+        ("__RequestVerificationToken".into(), token.to_string()),
+        ("ForSale".into(), String::new()),
+        (
+            "load".into(),
+            f.diecast_type
+                .clone()
+                .unwrap_or_else(|| "All Diecast".into()),
+        ),
+        ("TypesExpanded".into(), "False".into()),
+    ];
     for d in &f.driver_guids {
         form.push(("Drivers".into(), d.clone()));
     }

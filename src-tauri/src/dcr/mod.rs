@@ -18,5 +18,5 @@ pub use form_options::{refresh_form_options, RefreshOptionsSummary};
 pub use production_search::{
     search_all_pages_with_progress, ProductionSearchFilter, ProductionSearchResult,
 };
-pub use register::{register_diecast, Condition, RegisterDiecastInput, RegisterDiecastResult};
+pub use register::{register_diecast, RegisterDiecastInput, RegisterDiecastResult};
 pub use session::DcrSession;

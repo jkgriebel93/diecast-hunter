@@ -120,14 +120,14 @@ pub async fn fetch_received_offers(
         });
     }
     // Most recently received first.
-    out.sort_by(|a, b| b.received_at.cmp(&a.received_at));
+    out.sort_by_key(|o| std::cmp::Reverse(o.received_at));
     Ok(out)
 }
 
 // ---------- step 1: header fetch + filter ----------
 
 #[derive(Debug, Clone)]
-struct OfferHeader {
+pub struct OfferHeader {
     message_id: String,
     item_id: String,
     item_title: String,
@@ -224,7 +224,7 @@ fn parse_discount_pct(subject: &str) -> Option<f64> {
 // ---------- step 2: body fetch + parse ----------
 
 #[derive(Debug, Clone, Default)]
-struct MessageBody {
+pub struct MessageBody {
     original_price_cents: Option<i64>,
     offer_price_cents: Option<i64>,
     currency: Option<String>,

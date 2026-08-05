@@ -63,6 +63,7 @@ impl DcrClient {
     /// Performs the ASP.NET MVC anti-forgery login dance:
     /// 1. GET /Account/Login → captures the cookie token + the hidden form token.
     /// 2. POST /Account/Login with both tokens and credentials.
+    ///
     /// Verifies success by checking the final page isn't still the login form.
     pub async fn login(&self, email: &str, password: &str) -> AppResult<()> {
         let login_url = format!("{BASE}/Account/Login");

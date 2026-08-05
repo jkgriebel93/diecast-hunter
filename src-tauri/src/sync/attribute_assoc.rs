@@ -138,6 +138,9 @@ async fn apply(pool: &SqlitePool, listing_id: i64, d: &Detected) -> AppResult<()
 /// `attrs_from_entry_id`. Entry values win over auto-detected ones (the
 /// entry is the truth about the car); pinned rows are never touched.
 /// Returns false when the listing has no confirmed match.
+// Row tuple shaped by the SELECT list below; see the note on
+// `CompIndex::load` for why these aren't aliased.
+#[allow(clippy::type_complexity)]
 pub async fn backfill_attrs_from_match(pool: &SqlitePool, listing_id: i64) -> AppResult<bool> {
     let row: Option<(
         i64,
@@ -284,7 +287,7 @@ fn finalize_vocab(vocab: &mut Vocab) {
         &mut vocab.makes,
         &mut vocab.finishes,
     ] {
-        list.sort_by(|a, b| b.tokens.len().cmp(&a.tokens.len()));
+        list.sort_by_key(|p| std::cmp::Reverse(p.tokens.len()));
     }
 }
 

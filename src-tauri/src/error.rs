@@ -53,7 +53,7 @@ fn format_error_chain(top: &(dyn std::error::Error + 'static)) -> String {
     let mut src = top.source();
     while let Some(s) = src {
         let msg = s.to_string();
-        if !parts.last().is_some_and(|prev| prev == &msg) {
+        if parts.last().is_none_or(|prev| prev != &msg) {
             parts.push(msg);
         }
         src = s.source();

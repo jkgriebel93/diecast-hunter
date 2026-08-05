@@ -326,6 +326,9 @@ async fn archive_ended_listings(
 ///
 /// Ended and archived rows are always "fresh": their state is final, and
 /// re-enriching them would waste quota on history we've already captured.
+// Row tuple shaped by the SELECT list below; see the note on
+// `CompIndex::load` for why these aren't aliased.
+#[allow(clippy::type_complexity)]
 async fn load_fresh_legacy_ids(pool: &SqlitePool) -> AppResult<HashSet<String>> {
     let now = Utc::now().timestamp();
     let rows: Vec<(String, Option<String>, i64, Option<i64>, String, i64)> = sqlx::query_as(
@@ -465,6 +468,24 @@ pub async fn unwatch_and_delete(pool: &SqlitePool, listing_id: i64) -> AppResult
     Ok(())
 }
 
+/// Fetch one watchlist page, retrying once if eBay rejects the IAF
+/// token as expired. The proactive 10-minute refresh buffer in
+/// `user_iaf_token` should make this rare, but we keep the retry for
+/// the case where our local expiry guess drifts (clock skew) or the
+/// token gets revoked upstream.
+async fn fetch_with_token_retry(pool: &SqlitePool, page: u32) -> AppResult<WatchlistPage> {
+    let (env, token) = user_iaf_token(pool).await?;
+    match fetch_watchlist_page(env, &token, page, 200).await {
+        Err(AppError::Network(msg)) if is_iaf_token_expired_error(&msg) => {
+            tracing::info!("watchlist sync: IAF token rejected ({msg}); refreshing and retrying");
+            invalidate_user_token_cache(pool, env).await?;
+            let (env2, token2) = user_iaf_token(pool).await?;
+            fetch_watchlist_page(env2, &token2, page, 200).await
+        }
+        other => other,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! Tests for the archival SQL: end-reason derivation lands on the row,
@@ -602,23 +623,5 @@ mod tests {
         assert!(!archive_removed_listing(&pool, "999999999999")
             .await
             .unwrap());
-    }
-}
-
-/// Fetch one watchlist page, retrying once if eBay rejects the IAF
-/// token as expired. The proactive 10-minute refresh buffer in
-/// `user_iaf_token` should make this rare, but we keep the retry for
-/// the case where our local expiry guess drifts (clock skew) or the
-/// token gets revoked upstream.
-async fn fetch_with_token_retry(pool: &SqlitePool, page: u32) -> AppResult<WatchlistPage> {
-    let (env, token) = user_iaf_token(pool).await?;
-    match fetch_watchlist_page(env, &token, page, 200).await {
-        Err(AppError::Network(msg)) if is_iaf_token_expired_error(&msg) => {
-            tracing::info!("watchlist sync: IAF token rejected ({msg}); refreshing and retrying");
-            invalidate_user_token_cache(pool, env).await?;
-            let (env2, token2) = user_iaf_token(pool).await?;
-            fetch_watchlist_page(env2, &token2, page, 200).await
-        }
-        other => other,
     }
 }
