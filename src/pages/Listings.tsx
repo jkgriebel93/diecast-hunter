@@ -34,6 +34,15 @@ import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { YearRangeFilter } from "@/components/YearRangeFilter";
+import {
+  EMPTY_YEAR_RANGE,
+  inYearRange,
+  isEmptyRange,
+  parseYear,
+  yearsInRange,
+  type YearRange,
+} from "@/lib/yearRange";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-24 h-24",
@@ -143,6 +152,8 @@ interface ListingFilterState {
   excluded: Set<number>;
   /** "all", "none", or `d:<lowercased driver name>`. */
   driver: string;
+  /** Bounds on the matched registry entry's year; unset = no year filter. */
+  year: YearRange;
   offersByItemId: Map<string, ReceivedOffer>;
 }
 
@@ -198,6 +209,10 @@ function listingPassesFilters(row: ListingRow, f: ListingFilterState): boolean {
       (f.type.has("offers") && row.accepts_offers);
     if (!ok) return false;
   }
+  // Year comes from the registry match: a listing's own title year is
+  // unreliable (race season vs. release year), and an unmatched row has no
+  // trustworthy year at all — so it drops out once a bound is set.
+  if (!inYearRange(row.matched_year, f.year)) return false;
   if (f.driver !== "all") {
     const name = row.matched_driver_name ?? row.auto_driver_name;
     if (f.driver === "none") {
@@ -300,6 +315,7 @@ export function Listings() {
   );
   // "all", "none", or `d:<lowercased driver name>` — see listingPassesFilters.
   const [driverFilter, setDriverFilter] = useState<string>("all");
+  const [yearFilter, setYearFilter] = useState<YearRange>(EMPTY_YEAR_RANGE);
   const [sortMode, setSortMode] = useState<SortMode>("newest");
   const [bucketSort, setBucketSort] = useState<BucketSort>("name");
 
@@ -753,6 +769,7 @@ export function Listings() {
       group: groupFilter,
       excluded: excludedGroupIds,
       driver: driverFilter,
+      year: yearFilter,
       offersByItemId,
     }),
     [
@@ -764,6 +781,7 @@ export function Listings() {
       groupFilter,
       excludedGroupIds,
       driverFilter,
+      yearFilter,
       offersByItemId,
     ],
   );
@@ -881,6 +899,17 @@ export function Listings() {
     return key;
   }, [driverFilter, rows]);
 
+  /** Years present on the loaded listings' registry matches, newest-first.
+   *  Derived from the rows rather than the DCR form options so the dropdown
+   *  only offers years that can actually return something. */
+  const yearFilterOptions = useMemo(() => {
+    const seen = new Set<number>();
+    for (const r of rows ?? []) {
+      if (r.matched_year !== null) seen.add(r.matched_year);
+    }
+    return [...seen].sort((a, b) => b - a).map(String);
+  }, [rows]);
+
   // Number of sidebar filters currently off their defaults, search text
   // included. Shown on the collapsed filters rail so hidden-but-active
   // filters stay visible.
@@ -892,7 +921,8 @@ export function Listings() {
     (typeFilter.size > 0 ? 1 : 0) +
     (groupFilter !== "all" ? 1 : 0) +
     (excludedGroupIds.size > 0 ? 1 : 0) +
-    (driverFilter !== "all" ? 1 : 0);
+    (driverFilter !== "all" ? 1 : 0) +
+    (isEmptyRange(yearFilter) ? 0 : 1);
 
   function clearAllFilters() {
     setSearchText("");
@@ -903,6 +933,7 @@ export function Listings() {
     setGroupFilter("all");
     setExcludedGroupIds(new Set());
     setDriverFilter("all");
+    setYearFilter(EMPTY_YEAR_RANGE);
   }
 
   // Drop exclusions for groups that no longer exist (deleted via the
@@ -1170,6 +1201,20 @@ export function Listings() {
                     onChange={setDriverFilter}
                   />
                 </div>
+                {yearFilterOptions.length > 0 && (
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
+                      Year
+                    </div>
+                    <YearRangeFilter
+                      id="listings-year"
+                      years={yearFilterOptions}
+                      value={yearFilter}
+                      onChange={setYearFilter}
+                      compact
+                    />
+                  </div>
+                )}
                 <div>
                   <div className="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
                     Group
@@ -4628,7 +4673,8 @@ function RegistrySearchDialog({
 
   const [driverInput, setDriverInput] = useState("");
   const [selectedDriverGuid, setSelectedDriverGuid] = useState("");
-  const [selectedYear, setSelectedYear] = useState("");
+  const [dialogYearRange, setDialogYearRange] =
+    useState<YearRange>(EMPTY_YEAR_RANGE);
   const [oemInput, setOemInput] = useState("");
   const [selectedOemGuid, setSelectedOemGuid] = useState("");
   const [showAllOems, setShowAllOems] = useState(false);
@@ -4695,7 +4741,10 @@ function RegistrySearchDialog({
     const yearMatch = title.match(/\b(19[89]\d|20[0-3]\d)\b/);
     if (yearMatch) {
       const yearStr = yearMatch[1];
-      if (years.find((y) => y.value === yearStr)) setSelectedYear(yearStr);
+      if (years.find((y) => y.value === yearStr)) {
+        const n = parseYear(yearStr);
+        if (n !== null) setDialogYearRange({ from: n, to: n });
+      }
     }
     const scaleMatch = title.match(/\b1\s*[:/]\s*(\d{2,3})\b/);
     if (scaleMatch) {
@@ -4748,7 +4797,10 @@ function RegistrySearchDialog({
     try {
       const r = await api.searchDcrProduction({
         driver_guids: selectedDriverGuid ? [selectedDriverGuid] : [],
-        years: selectedYear ? [selectedYear] : [],
+        years: yearsInRange(
+          years.map((y) => y.value),
+          dialogYearRange,
+        ),
         oem_guids: selectedOemGuid ? [selectedOemGuid] : [],
         scale_guids: selectedScaleGuid ? [selectedScaleGuid] : [],
         brand_guids: selectedBrandGuid ? [selectedBrandGuid] : [],
@@ -4888,18 +4940,16 @@ function RegistrySearchDialog({
                 </div>
                 <div>
                   <label className="label">Year</label>
-                  <select
-                    value={selectedYear}
-                    onChange={(e) => setSelectedYear(e.target.value)}
-                    className="input"
-                  >
-                    <option value="">Any</option>
-                    {years.map((y) => (
-                      <option key={y.value} value={y.value}>
-                        {y.display}
-                      </option>
-                    ))}
-                  </select>
+                  {/* Auto-filled from the listing title as a one-year range,
+                      which searches identically to the single year this
+                      replaced — but can now be widened when the title's year
+                      is the race season and the registry's is the release. */}
+                  <YearRangeFilter
+                    id="dialog-year"
+                    years={years.map((y) => y.value)}
+                    value={dialogYearRange}
+                    onChange={setDialogYearRange}
+                  />
                 </div>
                 <div>
                   <label className="label">OEM</label>

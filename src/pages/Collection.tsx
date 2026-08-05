@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { YearRangeFilter } from "@/components/YearRangeFilter";
+import {
+  EMPTY_YEAR_RANGE,
+  inYearRange,
+  isEmptyRange,
+  type YearRange,
+} from "@/lib/yearRange";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -78,6 +85,7 @@ export function Collection() {
   const [driverFilter, setDriverFilter] = useState<string>("");
   const [scaleFilter, setScaleFilter] = useState<string>("");
   const [oemFilter, setOemFilter] = useState<string>("");
+  const [yearFilter, setYearFilter] = useState<YearRange>(EMPTY_YEAR_RANGE);
   const [exporting, setExporting] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>("driver-asc");
   const [groupByDriver, setGroupByDriver] = useGroupByDriver();
@@ -218,6 +226,16 @@ export function Collection() {
     return Array.from(set).sort();
   }, [items]);
 
+  /** Release years present in the collection, newest-first. Derived from the
+   *  items so the range dropdowns only offer years you actually own. */
+  const yearOptions = useMemo(() => {
+    const set = new Set<number>();
+    for (const i of items ?? []) if (i.year != null) set.add(i.year);
+    return Array.from(set)
+      .sort((a, b) => b - a)
+      .map(String);
+  }, [items]);
+
   // Apply the search + scale/OEM filters once; both the grouped and flat
   // views derive from this.
   const filtered: CollectionRow[] | null = useMemo(() => {
@@ -244,9 +262,12 @@ export function Collection() {
         return false;
       if (scaleFilter && it.scale !== scaleFilter) return false;
       if (oemFilter && it.oem !== oemFilter) return false;
+      // `year` is the release year the registry records. Entries without one
+      // drop out as soon as a bound is set — see inYearRange.
+      if (!inYearRange(it.year, yearFilter)) return false;
       return true;
     });
-  }, [items, searchText, driverFilter, scaleFilter, oemFilter]);
+  }, [items, searchText, driverFilter, scaleFilter, oemFilter, yearFilter]);
 
   // Group filtered items by driver, then sort groups.
   const groups: DriverGroupView[] | null = useMemo(() => {
@@ -503,7 +524,21 @@ export function Collection() {
                 ))}
               </select>
             </label>
-            {(searchText || driverFilter || scaleFilter || oemFilter) && (
+            <label className="flex items-center gap-1">
+              <span className="text-fg-subtle">Year:</span>
+              <YearRangeFilter
+                id="collection-year"
+                years={yearOptions}
+                value={yearFilter}
+                onChange={setYearFilter}
+                selectClassName="bg-bg-elevated border border-border rounded px-2 py-0.5 text-fg"
+              />
+            </label>
+            {(searchText ||
+              driverFilter ||
+              scaleFilter ||
+              oemFilter ||
+              !isEmptyRange(yearFilter)) && (
               <button
                 type="button"
                 className="text-fg-subtle hover:text-fg"
@@ -512,6 +547,7 @@ export function Collection() {
                   setDriverFilter("");
                   setScaleFilter("");
                   setOemFilter("");
+                  setYearFilter(EMPTY_YEAR_RANGE);
                 }}
               >
                 Clear filters

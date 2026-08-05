@@ -19,6 +19,12 @@ import {
 import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { MultiSelect } from "@/components/MultiSelect";
+import { YearRangeFilter } from "@/components/YearRangeFilter";
+import {
+  EMPTY_YEAR_RANGE,
+  yearsInRange,
+  type YearRange,
+} from "@/lib/yearRange";
 import { ViewLink } from "@/components/ViewLink";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
@@ -93,11 +99,24 @@ export function Registry() {
 
   const [selectedDriverGuids, setSelectedDriverGuids] = useState<string[]>([]);
   const [selectedYears, setSelectedYears] = useState<string[]>([]);
+  const [yearRange, setYearRange] = useState<YearRange>(EMPTY_YEAR_RANGE);
   const [selectedOemGuids, setSelectedOemGuids] = useState<string[]>([]);
   const [selectedScaleGuids, setSelectedScaleGuids] = useState<string[]>([]);
   const [selectedBrandGuids, setSelectedBrandGuids] = useState<string[]>([]);
   const [selectedMakeGuids, setSelectedMakeGuids] = useState<string[]>([]);
   const [selectedFinishGuids, setSelectedFinishGuids] = useState<string[]>([]);
+
+  /** The years actually sent to the search: the individually-picked ones plus
+   *  everything the range covers, de-duplicated. The two controls are additive
+   *  rather than exclusive, so "1998–2003 and also 2010" is expressible. The
+   *  backend takes a plain list, so a range needs no API of its own. */
+  const searchYears = useMemo(() => {
+    const fromRange = yearsInRange(
+      years.map((y) => y.value),
+      yearRange,
+    );
+    return [...new Set([...selectedYears, ...fromRange])];
+  }, [selectedYears, yearRange, years]);
   const [autographed, setAutographed] = useState(false);
   const [raced, setRaced] = useState(false);
 
@@ -280,7 +299,7 @@ export function Registry() {
     try {
       const r = await api.searchDcrProduction({
         driver_guids: selectedDriverGuids,
-        years: selectedYears,
+        years: searchYears,
         oem_guids: selectedOemGuids,
         scale_guids: selectedScaleGuids,
         brand_guids: selectedBrandGuids,
@@ -338,6 +357,7 @@ export function Registry() {
   function onReset() {
     setSelectedDriverGuids([]);
     setSelectedYears([]);
+    setYearRange(EMPTY_YEAR_RANGE);
     setSelectedOemGuids([]);
     setSelectedScaleGuids([]);
     setSelectedBrandGuids([]);
@@ -359,7 +379,7 @@ export function Registry() {
 
   const canSearch =
     selectedDriverGuids.length > 0 ||
-    selectedYears.length > 0 ||
+    searchYears.length > 0 ||
     selectedOemGuids.length > 0 ||
     selectedScaleGuids.length > 0 ||
     selectedBrandGuids.length > 0 ||
@@ -416,6 +436,21 @@ export function Registry() {
                 selected={selectedYears}
                 onChange={setSelectedYears}
               />
+              {/* A range is additive to the picks above rather than a
+                  replacement — discrete years and spans answer different
+                  questions ("the 2001 car" vs "his Roush era"). */}
+              <div className="mt-1.5">
+                <div className="text-[11px] text-fg-subtle mb-1">
+                  …or a range
+                </div>
+                <YearRangeFilter
+                  id="registry-year"
+                  years={years.map((y) => y.value)}
+                  value={yearRange}
+                  onChange={setYearRange}
+                  compact
+                />
+              </div>
             </div>
             <div>
               <label className="label">OEM</label>
