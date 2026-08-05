@@ -77,6 +77,25 @@ pub async fn run_once(pool: &SqlitePool) -> bool {
         }
     }
 
+    // Saved registry pre-searches. Same shape as the pre-warm refresh above:
+    // only ones past the staleness window, capped per run, quiet when there's
+    // nothing to do. Runs after the pre-warm so a driver walk that already
+    // pulled in the same entries makes this pass cheap.
+    match crate::presearch::refresh_stale(pool, &progress).await {
+        Ok(s) if s.stale == 0 => {}
+        Ok(s) => tracing::info!(
+            "auto-sync pre-search refresh: {} of {} stale refreshed ({} failed), {} entries upserted",
+            s.refreshed,
+            s.stale,
+            s.failed,
+            s.registry_entries_upserted,
+        ),
+        Err(e) => {
+            ok = false;
+            tracing::warn!("auto-sync pre-search refresh failed: {e}");
+        }
+    }
+
     // Record the attempt regardless of per-phase success so the Settings page
     // can show recency. Best-effort — failing to write this shouldn't fail the
     // run.

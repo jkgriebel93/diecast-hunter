@@ -9,6 +9,7 @@ mod listing_groups;
 mod listing_receiver;
 mod match_feedback;
 mod matcher_training;
+mod presearch;
 mod progress;
 mod saved;
 mod scheduler;
@@ -254,6 +255,11 @@ pub fn run() {
             commands::refresh_registry_form_options,
             commands::list_registry_form_options,
             commands::search_dcr_production,
+            commands::list_registry_presearches,
+            commands::create_registry_presearch,
+            commands::update_registry_presearch,
+            commands::delete_registry_presearch,
+            commands::refresh_registry_presearch,
             commands::get_registry_search_mode,
             commands::set_registry_search_mode,
             commands::export_registry_search_html,

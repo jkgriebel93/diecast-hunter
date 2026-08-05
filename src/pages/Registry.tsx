@@ -3,7 +3,9 @@ import { open as openExternal } from "@tauri-apps/plugin-shell";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
   api,
+  formatAgo,
   formatCents,
+  formatCount,
   isPreferredOem,
   prepareBrandOptions,
   prepareMakeOptions,
@@ -13,6 +15,8 @@ import {
   sortDriverOptions,
   type Condition,
   type FormOptionRow,
+  type Presearch,
+  type ProductionSearchFilter,
   type ProductionSearchResult,
   type WishlistInfo,
 } from "@/lib/tauri";
@@ -141,6 +145,10 @@ export function Registry() {
   } | null>(null);
   const [imgSize, setImgSize] = useImageSize("registry");
   const [sortMode, setSortMode] = useState<SortMode>("registry");
+  const [presearches, setPresearches] = useState<Presearch[]>([]);
+  /** Which pre-search action is in flight ("save", "refresh-3", "delete-3"),
+   *  so only the affected row shows a spinner. */
+  const [presearchBusy, setPresearchBusy] = useState<string | null>(null);
   const [retailMin, setRetailMin] = useState("");
   const [retailMax, setRetailMax] = useState("");
   const [wholesaleMin, setWholesaleMin] = useState("");
@@ -197,6 +205,7 @@ export function Registry() {
 
   useEffect(() => {
     void loadOptions();
+    void loadPresearches();
     // Best-effort: mark results that are already wished for (on any list).
     // A failure here only loses the "In wishlist" indicators, so it stays
     // silent.
@@ -292,23 +301,118 @@ export function Registry() {
     }
   }
 
+  /** Current form state as the filter shape the backend and pre-searches
+   *  both take. One place to build it, so "search" and "save as pre-search"
+   *  can never drift apart. */
+  function currentFilter(): ProductionSearchFilter {
+    return {
+      driver_guids: selectedDriverGuids,
+      years: searchYears,
+      oem_guids: selectedOemGuids,
+      scale_guids: selectedScaleGuids,
+      brand_guids: selectedBrandGuids,
+      make_guids: selectedMakeGuids,
+      finish_guids: selectedFinishGuids,
+      autographed,
+      raced,
+    };
+  }
+
+  async function loadPresearches() {
+    try {
+      setPresearches(await api.listRegistryPresearches());
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function onSavePresearch() {
+    const name = window.prompt(
+      'Name this pre-search (e.g. "Action 1:24 Elite"):',
+    );
+    if (name === null) return;
+    setPresearchBusy("save");
+    setError(null);
+    setInfo(null);
+    try {
+      await api.createRegistryPresearch({ name, filter: currentFilter() });
+      await loadPresearches();
+      setInfo(
+        `Saved "${name.trim()}". Refresh it to cache its entries for instant local filtering.`,
+      );
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setPresearchBusy(null);
+    }
+  }
+
+  /** Load a pre-search's filters into the form and run it. With the cache
+   *  warm and the search mode on local/hybrid this answers from local rows —
+   *  which is the whole point of having saved it. */
+  async function onApplyPresearch(ps: Presearch) {
+    const f = ps.filter;
+    setSelectedDriverGuids(f.driver_guids ?? []);
+    setSelectedYears(f.years ?? []);
+    setYearRange(EMPTY_YEAR_RANGE);
+    setSelectedOemGuids(f.oem_guids ?? []);
+    setSelectedScaleGuids(f.scale_guids ?? []);
+    setSelectedBrandGuids(f.brand_guids ?? []);
+    setSelectedMakeGuids(f.make_guids ?? []);
+    setSelectedFinishGuids(f.finish_guids ?? []);
+    setAutographed(f.autographed ?? false);
+    setRaced(f.raced ?? false);
+    setInfo(null);
+    setError(null);
+    // Search off the stored filter rather than the state we just set —
+    // setState is async, so reading it back here would run the *previous*
+    // filter.
+    await runSearch(f);
+  }
+
+  async function onRefreshPresearch(ps: Presearch) {
+    setPresearchBusy(`refresh-${ps.id}`);
+    setError(null);
+    setInfo(null);
+    try {
+      const n = await api.refreshRegistryPresearch(ps.id);
+      setInfo(`Cached ${n} entries for "${ps.name}".`);
+      await loadPresearches();
+    } catch (e) {
+      setError(String(e));
+      await loadPresearches();
+    } finally {
+      setPresearchBusy(null);
+    }
+  }
+
+  async function onDeletePresearch(ps: Presearch) {
+    if (!window.confirm(`Delete the pre-search "${ps.name}"?`)) return;
+    setPresearchBusy(`delete-${ps.id}`);
+    try {
+      await api.deleteRegistryPresearch(ps.id);
+      await loadPresearches();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setPresearchBusy(null);
+    }
+  }
+
   async function onSearch() {
+    setSearching(true);
+    await runSearch(currentFilter());
+  }
+
+  /** The one place a search is actually issued. Takes an explicit filter so
+   *  callers that just set form state (loading a pre-search) don't race
+   *  React's async setState by reading it back. */
+  async function runSearch(filter: ProductionSearchFilter) {
     setSearching(true);
     setError(null);
     setResults(null);
     try {
-      const r = await api.searchDcrProduction({
-        driver_guids: selectedDriverGuids,
-        years: searchYears,
-        oem_guids: selectedOemGuids,
-        scale_guids: selectedScaleGuids,
-        brand_guids: selectedBrandGuids,
-        make_guids: selectedMakeGuids,
-        finish_guids: selectedFinishGuids,
-        autographed,
-        raced,
-      });
-      setResults(r);
+      setResults(await api.searchDcrProduction(filter));
     } catch (e) {
       setError(String(e));
     } finally {
@@ -518,6 +622,96 @@ export function Registry() {
                 </label>
               </div>
             </div>
+          </div>
+
+          {/* Saved filter combinations. Clicking one loads its filters and
+              searches; with its cache warm and the search mode on
+              local/hybrid, that resolves from local rows instead of a
+              multi-page DCR walk. */}
+          <div className="border-t border-border pt-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] uppercase tracking-wide text-fg-subtle">
+                Pre-searches
+              </span>
+              <button
+                type="button"
+                className="text-xs text-fg-subtle hover:text-fg-muted"
+                onClick={onSavePresearch}
+                disabled={!canSearch || presearchBusy !== null}
+                title={
+                  canSearch
+                    ? "Save the current filters as a named pre-search"
+                    : "Pick at least one filter first"
+                }
+              >
+                {presearchBusy === "save"
+                  ? "Saving…"
+                  : "+ Save current filters"}
+              </button>
+            </div>
+            {presearches.length === 0 ? (
+              <p className="text-xs text-fg-subtle">
+                None yet. Save a filter combination you use often, refresh it
+                once, and it will answer from local data from then on.
+              </p>
+            ) : (
+              <ul className="flex flex-wrap gap-2">
+                {presearches.map((ps) => (
+                  <li
+                    key={ps.id}
+                    className="flex items-center gap-1.5 rounded border border-border bg-bg-elevated px-2 py-1 text-xs"
+                  >
+                    <button
+                      type="button"
+                      className="text-fg hover:text-blue-400"
+                      onClick={() => void onApplyPresearch(ps)}
+                      disabled={searching || presearchBusy !== null}
+                      title="Load these filters and search"
+                    >
+                      {ps.name}
+                    </button>
+                    <span
+                      className="text-fg-subtle tabular-nums"
+                      title={
+                        ps.last_refreshed_at === null
+                          ? "Never cached — refresh to pull its entries down"
+                          : `Cached ${formatAgo(ps.last_refreshed_at)}`
+                      }
+                    >
+                      {ps.last_refreshed_at === null
+                        ? "not cached"
+                        : `${formatCount(ps.last_result_count)} · ${formatAgo(ps.last_refreshed_at)}`}
+                    </span>
+                    {ps.last_error !== null && (
+                      <span
+                        className="text-red-400"
+                        title={`Last refresh failed: ${ps.last_error}`}
+                      >
+                        !
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      className="text-fg-subtle hover:text-fg"
+                      onClick={() => void onRefreshPresearch(ps)}
+                      disabled={presearchBusy !== null}
+                      title="Re-walk diecastregistry.com and cache the results"
+                    >
+                      {presearchBusy === `refresh-${ps.id}` ? "…" : "↻"}
+                    </button>
+                    <button
+                      type="button"
+                      className="text-fg-subtle hover:text-red-400"
+                      onClick={() => void onDeletePresearch(ps)}
+                      disabled={presearchBusy !== null}
+                      title="Delete this pre-search"
+                    >
+                      ✕
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           <div className="flex items-center justify-between border-t border-border pt-3">

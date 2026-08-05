@@ -2425,3 +2425,53 @@ pub async fn unlink_listing_from_wishlist(
 ) -> AppResult<()> {
     wishlist::unlink_listing(&state.db.pool, entry_id, listing_id).await
 }
+
+// ---------- registry pre-searches (DCH-14) ----------
+
+#[tauri::command]
+pub async fn list_registry_presearches(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<crate::presearch::Presearch>> {
+    crate::presearch::list(&state.db.pool).await
+}
+
+#[tauri::command]
+pub async fn create_registry_presearch(
+    state: State<'_, AppState>,
+    input: crate::presearch::PresearchInput,
+) -> AppResult<i64> {
+    crate::presearch::create(&state.db.pool, input).await
+}
+
+#[tauri::command]
+pub async fn update_registry_presearch(
+    state: State<'_, AppState>,
+    id: i64,
+    input: crate::presearch::PresearchInput,
+) -> AppResult<()> {
+    crate::presearch::update(&state.db.pool, id, input).await
+}
+
+#[tauri::command]
+pub async fn delete_registry_presearch(state: State<'_, AppState>, id: i64) -> AppResult<()> {
+    crate::presearch::delete(&state.db.pool, id).await
+}
+
+/// Walk DCR for one pre-search and cache the results locally. Shares the
+/// progress/cancel plumbing with the other long-running syncs, since a broad
+/// filter can take several pages.
+#[tauri::command]
+pub async fn refresh_registry_presearch(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    id: i64,
+) -> AppResult<u32> {
+    let progress = ProgressEmitter::new(app, "presearch_refresh");
+    set_active_cancel(&state, &progress).await;
+    let result = crate::presearch::refresh_one(&state.db.pool, id, &progress).await;
+    clear_active_cancel(&state).await;
+    if result.is_err() {
+        finish_progress(&progress, &result, "Pre-search refresh");
+    }
+    result
+}

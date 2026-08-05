@@ -218,6 +218,16 @@ export const api = {
     invoke<RegistrySearchMode>("get_registry_search_mode"),
   setRegistrySearchMode: (mode: RegistrySearchMode) =>
     invoke<void>("set_registry_search_mode", { mode }),
+  listRegistryPresearches: () =>
+    invoke<Presearch[]>("list_registry_presearches"),
+  createRegistryPresearch: (input: PresearchInput) =>
+    invoke<number>("create_registry_presearch", { input }),
+  updateRegistryPresearch: (id: number, input: PresearchInput) =>
+    invoke<void>("update_registry_presearch", { id, input }),
+  deleteRegistryPresearch: (id: number) =>
+    invoke<void>("delete_registry_presearch", { id }),
+  refreshRegistryPresearch: (id: number) =>
+    invoke<number>("refresh_registry_presearch", { id }),
   exportRegistrySearchHtml: (
     results: ProductionSearchResult[],
     finishLabel: string | null,
@@ -666,6 +676,29 @@ export interface ProductionSearchFilter {
   finish_guids?: string[];
   autographed?: boolean;
   raced?: boolean;
+}
+
+/** A saved registry filter combination whose matching entries are pulled
+ *  down ahead of time (DCH-14). What's cached is `registry_entries` itself,
+ *  so opening one answers from local rows — see the Rust `presearch` module. */
+export interface Presearch {
+  id: number;
+  name: string;
+  filter: ProductionSearchFilter;
+  created_at: number;
+  /** When the DCR walk last completed. null = never cached, so opening it
+   *  falls back to whatever local rows happen to exist. */
+  last_refreshed_at: number | null;
+  /** Results the last successful walk saw. */
+  last_result_count: number | null;
+  /** Why the last refresh failed, if it did. Surfaced in the list because
+   *  the overnight auto-sync is headless and would otherwise swallow it. */
+  last_error: string | null;
+}
+
+export interface PresearchInput {
+  name: string;
+  filter: ProductionSearchFilter;
 }
 
 export interface ProductionSearchResult {

@@ -1,9 +1,9 @@
 # Implementation order for open DCH tickets
 
-As of 2026-08-05 (rev 6: DCH-10, DCH-28 and DCH-29 shipped; DCH-15 is green and awaiting
-merge in PR #25). Nine tickets are merged — DCH-8, DCH-9, DCH-10, DCH-11, DCH-17, DCH-18,
-DCH-22, DCH-28, DCH-29 — which empties the "ship now" and "contained features" tiers of the
-previous rev and leaves ten substantive items plus the roadmap buckets.
+As of 2026-08-05 (rev 7: DCH-15 merged; DCH-14 in progress). Ten tickets are merged —
+DCH-8, DCH-9, DCH-10, DCH-11, DCH-15, DCH-17, DCH-18, DCH-22, DCH-28, DCH-29 — which
+empties the "ship now" and "contained features" tiers of rev 5 and leaves nine substantive
+items plus the roadmap buckets.
 
 The ordering principle has not changed: compounding work (training data, CI safety, anything
 that makes later tickets cheaper or safer) goes before features that only pay off once.
@@ -16,7 +16,7 @@ that makes later tickets cheaper or safer) goes before features that only pay of
 | DCH-9 | Spike: every external sold-price source is closed to us. Build on the archive. |
 | DCH-10 | Sold-price comps on the Listings page and the extension overlay. |
 | DCH-11 | Confirm/correct registry match from the extension. |
-| DCH-15 | Year-range filters on registry search, the Match… dialog, Listings, and Collection. *(PR #25, green, not yet merged.)* |
+| DCH-15 | Year-range filters on registry search, the Match… dialog, Listings, and Collection. |
 | DCH-17 | Thousands separators via shared `Intl.NumberFormat` helpers. |
 | DCH-18 | Error translation layer + `ErrorBanner`. |
 | DCH-22 | CI: installers on main, plus build/test gates. |
@@ -37,7 +37,7 @@ Two things worth carrying forward:
 
 | # | Ticket | What | Why here |
 | --- | --- | --- | --- |
-| 1 | DCH-14 | Saved pre-searches, cached & filtered live | The lowest-friction item left: rides the existing pre-warm machinery and needs no decisions first. |
+| ~~1~~ | ~~DCH-14~~ | Saved pre-searches, cached & filtered live | 🚧 In progress. Caches `registry_entries` via the filter combo rather than materializing result sets; refreshed by the overnight auto-sync. |
 | 2 | DCH-12 | My Collection entries not in DCR | **Blocked on two decisions.** (a) What value basis to use for an entry with no registry entry — there's no retail/wholesale to inherit. (b) How such rows survive `sync::dcr_collection`, which treats DCR as the source of truth and prunes local rows missing from My Garage. Settle both before coding. |
 | 3 | DCH-16 | Improve Saved Seller browsing | Still a one-liner ticket. Write the problem statement first; it can't be estimated as written. |
 
