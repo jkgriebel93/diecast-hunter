@@ -1,9 +1,9 @@
 # Implementation order for open DCH tickets
 
-As of 2026-08-06 (rev 10: DCH-12 shipped; DCH-30 re-scoped from Cloudflare to Sentry, code
-shipped, console steps outstanding). Thirteen tickets are merged — DCH-8, DCH-9,
-DCH-10, DCH-11, DCH-12, DCH-14, DCH-15, DCH-17, DCH-18, DCH-22, DCH-28, DCH-29, DCH-31 —
-leaving eight substantive items plus the roadmap buckets.
+As of 2026-08-06 (rev 11: DCH-19's audit done, DCH-16 parked, DCH-30 deployed pending its
+console verification). Fourteen tickets are merged — DCH-8, DCH-9, DCH-10, DCH-11, DCH-12,
+DCH-14, DCH-15, DCH-17, DCH-18, DCH-22, DCH-28, DCH-29, DCH-30, DCH-31 — and DCH-19 spawned
+four follow-ups, so the open list is eleven substantive items plus the roadmap buckets.
 
 The ordering principle has not changed: compounding work (training data, CI safety, anything
 that makes later tickets cheaper or safer) goes before features that only pay off once.
@@ -18,6 +18,8 @@ that makes later tickets cheaper or safer) goes before features that only pay of
 | DCH-11 | Confirm/correct registry match from the extension. |
 | DCH-12 | Manually-added collection entries. Introduced `registry_entries.source`; cost basis lives in `my_collection.paid_cents`, separate from DCR's appraisal. |
 | DCH-31 | Cross-platform extension packaging, built and uploaded by CI on every run. |
+| DCH-30 | Worker reports `deletion_insert_failed` to Sentry. Cloudflare cannot alert on a discrete log event, so the alert had to come from the Worker itself. |
+| DCH-19 | UI audit. Confirmed the app is broadly consistent; the divergence is modals, destructive actions, helper adoption, and filter rows. Spawned DCH-32…35. |
 | DCH-14 | Named registry pre-searches. Caches `registry_entries` via the saved filter combo; refreshed by the overnight auto-sync. |
 | DCH-15 | Year-range filters on registry search, the Match… dialog, Listings, and Collection. |
 | DCH-17 | Thousands separators via shared `Intl.NumberFormat` helpers. |
@@ -40,13 +42,20 @@ Two things worth carrying forward:
 
 | # | Ticket | What | Why here |
 | --- | --- | --- | --- |
-| 1 | DCH-16 | Improve Saved Seller browsing | Still a one-liner ticket. Write the problem statement first; it can't be estimated as written. |
+| 1 | DCH-34 | Finish DCH-17/DCH-18 adoption | Mechanical and greppable. 21 raw error divs are a *visible* defect today — users see the untranslated text DCH-18 existed to remove. |
+| 2 | DCH-32 | Shared `Modal` component | The audit's biggest finding. Eleven hand-built dialogs, four z-layers, Escape on only two. Do it before DCH-20/21, which both add dialogs. |
+| 3 | DCH-33 | `.btn-danger` / `.link-danger` | Small, and DCH-20 needs it — the listing panel is full of destructive actions with no shared treatment. |
+| 4 | DCH-35 | Filter-row parity | "Clear filters" exists on one screen of seven. |
+
+**DCH-16 is parked** (On Hold). The original complaint was forgotten and never written down;
+rather than invent one, wait and see whether the UI track resolves it. Reasoning and the
+technical context are on the ticket.
 
 DCH-30 turned out **not** to be dashboard config: Cloudflare has no way to alert on a
 discrete log event — Workers Logs can't alert at all, and Notifications alert types are
-threshold-shaped. The Worker now reports `deletion_insert_failed` to Sentry itself. The code
-shipped; creating the Sentry project, setting `SENTRY_DSN`, and confirming the alert rule are
-manual console steps, tracked on the ticket.
+threshold-shaped. The Worker now reports `deletion_insert_failed` to Sentry itself, and is
+deployed. What remains is running `POST /api/test-alert` against it and confirming the mail
+arrives — the "observed firing" criterion.
 
 `registry_entries.source` is new as of DCH-12, and it is now the guard every DCR-facing
 registry flow relies on. Anything added later that walks `registry_entries` and then talks to
@@ -55,24 +64,29 @@ detail page, so a lookup for one either 404s or, worse, matches something else.
 
 ## UI track (dependency-fixed order)
 
-Worth doing as a run rather than piecemeal — 20 and 21 both execute the checklist 19 produces.
+DCH-19 is done. Its output is the [UI Audit and Standardization
+Guidelines](https://thistlegrow.atlassian.net/wiki/spaces/DCH/pages/51183617) page, whose
+conventions checklist is what the two redesigns execute against.
+
+Do DCH-32/33 (shared `Modal`, danger classes) **before** these two: both redesigns add
+dialogs and destructive actions, and building them against the hand-rolled patterns would
+mean redoing the work.
 
 | # | Ticket | What |
 | --- | --- | --- |
-| 2 | DCH-19 | UI audit + standardization guidelines |
-| 3 | DCH-20 | Redesign Saved Listing detail panel (follows audit checklist) |
-| 4 | DCH-21 | Reorganize Settings screen (follows audit checklist) |
+| 5 | DCH-20 | Redesign Saved Listing detail panel — 5,626 lines, the audit's worst offender on every axis |
+| 6 | DCH-21 | Reorganize Settings screen — 21 buttons with no hierarchy between sections |
 
 ## Later
 
 | # | Ticket | What | Notes |
 | --- | --- | --- | --- |
-| 5 | DCH-25 | "Production ready" definition spike | Spawns the real production work items — goes before them. |
-| 6 | DCH-24 | User documentation | After UI standardization so screenshots don't go stale. |
-| 7 | DCH-23 | Performance profiling pass | When something is actually slow, or pre-production. |
-| 8 | DCH-13 | Photo-tagging feasibility spike | Flagged likely-expensive; confirm or kill cheaply. |
-| 9 | DCH-26 | Lionel website integration | Expansion waits for solid core; needs use-case decision. |
-| 10 | DCH-27 | Revive Facebook Marketplace integration | Plugs back into the listing-receiver architecture. |
+| 7 | DCH-25 | "Production ready" definition spike | Spawns the real production work items — goes before them. |
+| 8 | DCH-24 | User documentation | After UI standardization so screenshots don't go stale. |
+| 9 | DCH-23 | Performance profiling pass | When something is actually slow, or pre-production. |
+| 10 | DCH-13 | Photo-tagging feasibility spike | Flagged likely-expensive; confirm or kill cheaply. |
+| 11 | DCH-26 | Lionel website integration | Expansion waits for solid core; needs use-case decision. |
+| 12 | DCH-27 | Revive Facebook Marketplace integration | Plugs back into the listing-receiver architecture. |
 
 ## Open items that aren't tickets
 

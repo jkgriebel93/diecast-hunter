@@ -67,6 +67,14 @@ Tauri 2 app: **Rust backend ↔ React/TS frontend** communicating exclusively th
 
 Separate pnpm project — its own `package.json`, `wrangler.toml`, and `tsconfig.json`. Single-file Worker (`src/index.ts`) that satisfies eBay's Marketplace Account Deletion compliance so the prod keyset is unlocked. It (1) responds to eBay's GET verification challenge with the SHA-256 hash, (2) queues deletion POSTs in Cloudflare KV (`DELETIONS` binding), (3) exposes an authenticated polling API the desktop app drains on launch. Two secrets via `wrangler secret put`: `EBAY_VERIFICATION_TOKEN` (32–80 chars, shared with eBay) and `APP_SHARED_SECRET` (Bearer token between Worker and desktop app). Run `pnpm dev` (wrangler local on :8787) / `pnpm deploy` from inside `worker/`. ECDSA signature verification of inbound notifications is intentionally not implemented yet — see `worker/README.md` for the threat-model rationale.
 
+## UI conventions
+
+Before changing anything under `src/pages/` or `src/components/`, read the [UI Audit and Standardization Guidelines](https://thistlegrow.atlassian.net/wiki/spaces/DCH/pages/51183617) (DCH-19). Its checklist is the agreed convention set; the short version of what it found:
+
+- **Already consistent — don't churn it:** `p-6 space-y-4` page container, `<header>` + `h2.text-2xl.font-semibold`, `.card` / `.input` / `.btn-primary` / `.btn-secondary`, `formatCents` for all money, `ImageSizeToggle` + `useMinimized` on every list screen.
+- **Known divergences with tickets:** eleven hand-built modals (DCH-32), no `.btn-danger` (DCH-33), 19 raw `toLocaleString()` and 21 hand-rolled error divs bypassing `formatCount`/`ErrorBanner` (DCH-34), filter-row parity and sort vocabulary (DCH-35). Don't add to any of these piles — use the shared helper even where neighbouring code doesn't.
+- Collection is the reference implementation for filter rows; the Wishlist dialog is the reference for modal behaviour.
+
 ## Working conventions
 
 **Keep `IMPLEMENTATION_ORDER.md` in the feature PR.** When a ticket changes what's next — it ships, it unblocks something, it turns up work worth filing — update the plan in that ticket's own branch, not a follow-up docs PR. A standalone plan PR is only worth it when the revision spans several tickets, or when the ticket's PR has already merged.
