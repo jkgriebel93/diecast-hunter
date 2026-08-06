@@ -57,6 +57,11 @@ pnpm wrangler secret put APP_SHARED_SECRET
 pnpm wrangler secret put EBAY_CLIENT_ID
 pnpm wrangler secret put EBAY_CLIENT_SECRET
 
+# Optional. Sentry DSN for the deletion_insert_failed alert — see "Alerting on
+# a lost notification" below. Unset, reporting is a no-op; everything else
+# works unchanged.
+pnpm wrangler secret put SENTRY_DSN
+
 # First deploy — the URL won't be known until after this runs.
 pnpm wrangler deploy
 ```
@@ -116,6 +121,11 @@ curl "https://diecast-hunter-ebay.<account>.workers.dev/marketplace-deletion?cha
 curl -H "Authorization: Bearer <APP_SHARED_SECRET>" \
      https://diecast-hunter-ebay.<account>.workers.dev/api/pending-deletions
 # Should return: {"deletions":[]}
+
+# Fire a test alert end to end — see "Proving the alert actually works".
+curl -X POST -H "Authorization: Bearer <APP_SHARED_SECRET>" \
+     https://diecast-hunter-ebay.<account>.workers.dev/api/test-alert
+# Should return: {"outcome":"sent","notification_id":"TEST-DO-NOT-ACT-..."}
 ```
 
 ## Local development
@@ -206,10 +216,87 @@ lost — it is the event worth alerting on. The per-request outcome line
 (`event: "deletion_post"`) reports `outcome: "store_failed"` in that case
 rather than `"stored"`, so the two logs agree.
 
-> **Not yet configured:** an actual alert on `deletion_insert_failed`. Until
-> one exists in the Cloudflare dashboard (Workers Observability → alerts, or
-> a Logpush job), a lost notification is only visible to someone reading
-> logs. Set this up before treating the compliance story as complete.
+### Alerting on a lost notification
+
+`deletion_insert_failed` is reported to **Sentry** (project
+`diecast-hunter-worker` in the `thistle-grow-software` org), which emails on
+the resulting issue. `src/sentry.ts` posts the event directly to Sentry's
+envelope endpoint from the failure branch, inside `ctx.waitUntil()` — so a
+slow or unreachable Sentry can neither delay nor change the `200` that keeps
+eBay from retrying.
+
+**Why not the Cloudflare dashboard**, which is where you'd expect this to
+live: it can't do it. Workers Logs stores, filters and queries logs but has
+no alerting, and Cloudflare Notifications only offers threshold-shaped alert
+types (error rate, CPU) that a single lost notification would never cross.
+The log line remains the local signal — `wrangler tail` still shows it, and
+it is what works when `SENTRY_DSN` is unset.
+
+**No Sentry SDK**, deliberately. The deletion path is the one place in this
+Worker where a dependency failure has real cost, and Sentry's ingest API is
+a single POST. Every failure in the reporter is swallowed and logged; an
+alerting path that throws would turn a recoverable D1 problem into an
+unhandled rejection inside the compliance endpoint.
+
+`SENTRY_DSN` is optional. Unset, reporting is a no-op and the Worker behaves
+exactly as it did before this existed — which is what keeps local dev and the
+test suite credential-free.
+
+To (re)configure:
+
+```sh
+# 1. Create the project in Sentry, copy its DSN, then:
+npx wrangler secret put SENTRY_DSN
+# 2. In Sentry, confirm an issue alert rule exists for the project.
+```
+
+One thing to get right on that rule: all occurrences share a fixed
+fingerprint, so they group into a single Sentry issue. A rule conditioned on
+*"a new issue is created"* therefore fires once and then goes quiet. Condition
+it on **"an event is seen"** (with a sensible frequency limit) if you want to
+hear about every lost notification rather than only the first.
+
+### Proving the alert actually works
+
+```sh
+curl -X POST -H "Authorization: Bearer <APP_SHARED_SECRET>" \
+  https://diecast-hunter-ebay.johnkgriebel.workers.dev/api/test-alert
+# {"outcome":"sent","notification_id":"TEST-DO-NOT-ACT-<uuid>"}
+```
+
+`outcome` tells you where the chain broke without reading logs:
+
+| `outcome` | Status | Means |
+| --- | --- | --- |
+| `sent` | 200 | Sentry accepted the event. Check your inbox for the alert. |
+| `skipped` | 200 | `SENTRY_DSN` isn't set on this deployment — the usual cause of silence. |
+| `failed` | 502 | Sentry rejected or was unreachable. A 401 from Sentry means a bad DSN. |
+
+**Why a dedicated route rather than inducing a real failure.** You can't
+manufacture a notification this Worker will accept: `/marketplace-deletion`
+verifies an ECDSA signature against eBay's published public key, and we don't
+have eBay's private key. The only party who can send a valid one is eBay, and
+their test-notification button posts to whatever endpoint is *registered* —
+aiming that at a deliberately broken preview deployment means editing the live
+compliance registration, risking re-validation and real notifications landing
+somewhere that drops them. Far too much exposure to test an alert.
+
+**What it proves:** the deployed secret parses as a DSN, Sentry accepts the
+hand-rolled envelope, the event groups into the expected issue, the alert rule
+matches, and the mail arrives. Those are exactly the links no unit test can
+reach. It does *not* re-prove that the failure branch calls the reporter —
+that link needs no live infrastructure and is covered in
+`test/notification.test.ts`.
+
+The event lands in the **same Sentry issue** as a genuine failure, since that
+issue is what the rule is attached to. The `TEST-DO-NOT-ACT-` id prefix is
+what distinguishes it in the history. Resolve the issue afterwards if you want
+a clean slate; a later real failure will reopen it.
+
+The route is permanent and guarded by `APP_SHARED_SECRET` — the same bar as
+`/api/pending-deletions`, which returns actual user deletion records, so this
+is the less sensitive of the two. Re-run it whenever the DSN rotates, the
+Sentry project moves, or the alert rule changes.
 
 ## Signature verification & abuse
 

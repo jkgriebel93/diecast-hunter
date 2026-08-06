@@ -1,6 +1,7 @@
 # Implementation order for open DCH tickets
 
-As of 2026-08-05 (rev 9: DCH-12 shipped). Thirteen tickets are merged — DCH-8, DCH-9,
+As of 2026-08-06 (rev 10: DCH-12 shipped; DCH-30 re-scoped from Cloudflare to Sentry, code
+shipped, console steps outstanding). Thirteen tickets are merged — DCH-8, DCH-9,
 DCH-10, DCH-11, DCH-12, DCH-14, DCH-15, DCH-17, DCH-18, DCH-22, DCH-28, DCH-29, DCH-31 —
 leaving eight substantive items plus the roadmap buckets.
 
@@ -39,8 +40,13 @@ Two things worth carrying forward:
 
 | # | Ticket | What | Why here |
 | --- | --- | --- | --- |
-| 1 | DCH-30 | Alert on `deletion_insert_failed` | Dashboard config, not code. The last piece of the DCH-28 compliance story — until it exists, a lost deletion notification is invisible. |
-| 2 | DCH-16 | Improve Saved Seller browsing | Still a one-liner ticket. Write the problem statement first; it can't be estimated as written. |
+| 1 | DCH-16 | Improve Saved Seller browsing | Still a one-liner ticket. Write the problem statement first; it can't be estimated as written. |
+
+DCH-30 turned out **not** to be dashboard config: Cloudflare has no way to alert on a
+discrete log event — Workers Logs can't alert at all, and Notifications alert types are
+threshold-shaped. The Worker now reports `deletion_insert_failed` to Sentry itself. The code
+shipped; creating the Sentry project, setting `SENTRY_DSN`, and confirming the alert rule are
+manual console steps, tracked on the ticket.
 
 `registry_entries.source` is new as of DCH-12, and it is now the guard every DCR-facing
 registry flow relies on. Anything added later that walks `registry_entries` and then talks to
@@ -53,27 +59,28 @@ Worth doing as a run rather than piecemeal — 20 and 21 both execute the checkl
 
 | # | Ticket | What |
 | --- | --- | --- |
-| 4 | DCH-19 | UI audit + standardization guidelines |
-| 5 | DCH-20 | Redesign Saved Listing detail panel (follows audit checklist) |
-| 6 | DCH-21 | Reorganize Settings screen (follows audit checklist) |
+| 2 | DCH-19 | UI audit + standardization guidelines |
+| 3 | DCH-20 | Redesign Saved Listing detail panel (follows audit checklist) |
+| 4 | DCH-21 | Reorganize Settings screen (follows audit checklist) |
 
 ## Later
 
 | # | Ticket | What | Notes |
 | --- | --- | --- | --- |
-| 7 | DCH-25 | "Production ready" definition spike | Spawns the real production work items — goes before them. |
-| 8 | DCH-24 | User documentation | After UI standardization so screenshots don't go stale. |
-| 9 | DCH-23 | Performance profiling pass | When something is actually slow, or pre-production. |
-| 10 | DCH-13 | Photo-tagging feasibility spike | Flagged likely-expensive; confirm or kill cheaply. |
-| 11 | DCH-26 | Lionel website integration | Expansion waits for solid core; needs use-case decision. |
-| 12 | DCH-27 | Revive Facebook Marketplace integration | Plugs back into the listing-receiver architecture. |
+| 5 | DCH-25 | "Production ready" definition spike | Spawns the real production work items — goes before them. |
+| 6 | DCH-24 | User documentation | After UI standardization so screenshots don't go stale. |
+| 7 | DCH-23 | Performance profiling pass | When something is actually slow, or pre-production. |
+| 8 | DCH-13 | Photo-tagging feasibility spike | Flagged likely-expensive; confirm or kill cheaply. |
+| 9 | DCH-26 | Lionel website integration | Expansion waits for solid core; needs use-case decision. |
+| 10 | DCH-27 | Revive Facebook Marketplace integration | Plugs back into the listing-receiver architecture. |
 
 ## Open items that aren't tickets
 
-- ~~Cloudflare alert on `deletion_insert_failed`~~ — now **DCH-30**.
-- **Roadmap buckets DCH-2 … DCH-7 may be closeable.** DCH-2 ("Listing lifecycle &
-  valuation") has had all its children — DCH-8, DCH-9, DCH-10 — shipped. They're High
-  priority in the board view, which makes the backlog look busier than it is.
+- ~~Cloudflare alert on `deletion_insert_failed`~~ — became **DCH-30**, and then stopped
+  being a Cloudflare thing at all. See the note under "Next up".
+- ~~Roadmap buckets DCH-2 … DCH-7 may be closeable~~ — checked on 2026-08-06. DCH-2 is
+  already closed; DCH-3 through DCH-7 each still have at least one open child, so none of
+  them is closeable yet. Nothing to do here until those children land.
 - ~~Extension needs repackaging~~ — solved by **DCH-31**. CI uploads a
   `diecast-hunter-extension-<sha>` artifact on every run; download it from the run for the
   commit you want. That artifact is how DCH-10's comps rows and DCH-11's verdict buttons
