@@ -28,7 +28,13 @@ pub struct DetailUrlBackfillSummary {
 
 /// One clause, used consistently everywhere this module decides whether a
 /// row "has" a detail_url.
-const MISSING_DETAIL_URL: &str = "(re.raw_json IS NULL OR re.raw_json = ''
+///
+/// Manually-added entries (`source = 'local'`, DCH-12) are excluded up front.
+/// They have no DCR page, so they'd count as "missing" forever: inflating
+/// `missing_before`, then landing in `still_missing` after a run that could
+/// never have fixed them, and reporting a repair job that isn't broken.
+const MISSING_DETAIL_URL: &str = "re.source <> 'local'
+     AND (re.raw_json IS NULL OR re.raw_json = ''
      OR NOT json_valid(re.raw_json)
      OR json_extract(re.raw_json, '$.detail_url') IS NULL)";
 

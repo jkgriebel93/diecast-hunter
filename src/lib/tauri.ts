@@ -47,6 +47,10 @@ export interface RemoveEntrySummary {
   /** False = the asset wasn't in the DCR garage; the local row was removed
    *  anyway and the UI should show a neutral notice, not an error. */
   found_on_dcr: boolean;
+  /** True for a manually-added entry, which was never on DCR to begin with.
+   *  `found_on_dcr: false` means nothing in that case — report plain
+   *  success rather than a "wasn't in your garage" notice. */
+  was_local: boolean;
 }
 
 export interface DriverGroup {
@@ -80,6 +84,41 @@ export interface CollectionRow {
   wholesale_value_cents: number | null;
   registry_int_id: number | null;
   enriched: boolean;
+  /** Added by hand rather than synced from DCR — a car the registry doesn't
+   *  list. Such a row has no appraisal, so `retail_value_cents` is null and
+   *  `paid_cents` is the only figure behind it. */
+  is_local: boolean;
+  /** What the user paid, in cents. A cost basis, never an appraisal. */
+  paid_cents: number | null;
+  condition: string | null;
+  notes: string | null;
+}
+
+/** Fields of a manually-added collection entry. Mirrors
+ *  `local_collection::LocalEntryInput` (camelCase over the wire). */
+export interface LocalEntryInput {
+  driverName: string;
+  schemeText: string;
+  year: number | null;
+  yearRaced: number | null;
+  carNumber: string | null;
+  oem: string | null;
+  brand: string | null;
+  scale: string | null;
+  make: string | null;
+  finish: string | null;
+  diecastType: string | null;
+  productionQty: number | null;
+  paidCents: number | null;
+  condition: string | null;
+  notes: string | null;
+  imageUrl: string | null;
+}
+
+export interface LocalEntrySummary {
+  collection_id: number;
+  registry_entry_id: number;
+  driver_id: number;
 }
 
 export const api = {
@@ -117,6 +156,13 @@ export const api = {
     invoke<CollectionRow[]>("list_all_collection_items"),
   removeCollectionEntry: (collectionId: number) =>
     invoke<RemoveEntrySummary>("remove_collection_entry", { collectionId }),
+  createLocalCollectionEntry: (input: LocalEntryInput) =>
+    invoke<LocalEntrySummary>("create_local_collection_entry", { input }),
+  updateLocalCollectionEntry: (collectionId: number, input: LocalEntryInput) =>
+    invoke<LocalEntrySummary>("update_local_collection_entry", {
+      collectionId,
+      input,
+    }),
   getEbayCredentials: () =>
     invoke<EbayCredentialsState>("get_ebay_credentials"),
   saveEbayCredentials: (appId: string, certId: string, environment: string) =>

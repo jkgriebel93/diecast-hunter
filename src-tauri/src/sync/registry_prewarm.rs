@@ -84,15 +84,19 @@ pub async fn refresh_stale_prewarms(
     }
 
     let cutoff = Utc::now().timestamp() - PREWARM_STALE_AFTER_SECONDS;
-    // Stale drivers oldest-first, each with its local entry count — the best
+    // Stale drivers oldest-first, each with its cached entry count — the best
     // available estimate of how many entries a re-walk will fetch, since the
-    // original pre-warm stored them all.
+    // original pre-warm stored them all. Manually-added entries (DCH-12) are
+    // excluded: DCR's search won't return them, so counting them would spend
+    // budget the walk never uses and could push a driver over the cap for
+    // cars that aren't on the site at all.
     let stale: Vec<(String, i64)> = sqlx::query_as(
         "SELECT substr(s.key, length('dcr.last_prewarm.') + 1) AS guid,
                 (SELECT COUNT(*)
                    FROM registry_entries re
                    JOIN drivers d ON d.id = re.driver_id
-                  WHERE d.normalized_name = o.normalized) AS entry_count
+                  WHERE d.normalized_name = o.normalized
+                    AND re.source <> 'local') AS entry_count
          FROM settings s
          LEFT JOIN registry_form_options o
             ON o.field = 'driver'
@@ -346,4 +350,92 @@ async fn upsert_driver(pool: &SqlitePool, name: &str, normalized: &str) -> AppRe
         .fetch_one(pool)
         .await?;
     Ok(row.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::local_collection::{create_local_entry, LocalEntryInput, SOURCE_LOCAL};
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+    use std::str::FromStr;
+
+    async fn migrated_pool() -> SqlitePool {
+        let opts = SqliteConnectOptions::from_str("sqlite::memory:")
+            .unwrap()
+            .foreign_keys(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(opts)
+            .await
+            .expect("open in-memory db");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+        pool
+    }
+
+    fn search_result(guid: &str, driver: &str) -> ProductionSearchResult {
+        ProductionSearchResult {
+            registry_guid: guid.to_string(),
+            detail_url: Some("/diecast/some/where".to_string()),
+            image_url: None,
+            driver_name: driver.to_string(),
+            driver_normalized: driver.to_lowercase().replace(' ', "-"),
+            year: Some(2001),
+            oem: Some("Action".to_string()),
+            brand: None,
+            scale: Some("1:24".to_string()),
+            make: None,
+            scheme_text: Some("From DCR".to_string()),
+            seq_produced_total: None,
+            retail_value_cents: Some(13998),
+            wholesale_value_cents: Some(9000),
+        }
+    }
+
+    /// A pre-warm walks the DCR production search and upserts what it finds.
+    /// A manually-added entry for the same driver shares that driver row, so
+    /// the question is whether the upsert can reach across and overwrite it.
+    /// It can't: the ON CONFLICT target is `external_id`, which a local entry
+    /// leaves NULL, and NULL never conflicts. DCH-12.
+    #[tokio::test]
+    async fn prewarm_upsert_leaves_manually_added_entries_untouched() {
+        let pool = migrated_pool().await;
+        let local = create_local_entry(
+            &pool,
+            LocalEntryInput {
+                driver_name: "Jeff Gordon".to_string(),
+                scheme_text: "Hand-entered promo".to_string(),
+                scale: Some("1:24".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        upsert_stub_from_search(&pool, &search_result("dcr-guid-1", "Jeff Gordon"))
+            .await
+            .unwrap();
+
+        let (scheme, source, retail): (Option<String>, String, Option<i64>) = sqlx::query_as(
+            "SELECT scheme_text, source, retail_value_cents
+             FROM registry_entries WHERE id = ?",
+        )
+        .bind(local.registry_entry_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(scheme.as_deref(), Some("Hand-entered promo"));
+        assert_eq!(source, SOURCE_LOCAL);
+        // Crucially, it did not inherit DCR's appraisal for a different car.
+        assert_eq!(retail, None);
+
+        // And the DCR result still landed, as its own row.
+        let (total,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM registry_entries")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(total, 2);
+    }
 }

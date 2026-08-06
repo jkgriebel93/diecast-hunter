@@ -22,6 +22,13 @@ pub struct EnrichSummary {
 ///
 /// `client` is expected to already be logged in. The DcrClient's built-in
 /// rate limiter paces each detail-page fetch.
+///
+/// Manually-added entries (`source = 'local'`, DCH-12) are excluded. They
+/// have no DCR detail page, so they would be considered on every run,
+/// permanently — they can never gain a `details_fetched_at`. The
+/// `external_id IS NOT NULL` clause already keeps them out today, since a
+/// local entry has no GUID; the explicit `source` filter is what makes that
+/// a guarantee rather than a coincidence of how they happen to be stored.
 pub async fn enrich_pending_registry_entries(
     pool: &SqlitePool,
     client: &DcrClient,
@@ -29,27 +36,7 @@ pub async fn enrich_pending_registry_entries(
     progress: &ProgressEmitter,
 ) -> AppResult<EnrichSummary> {
     let cutoff = Utc::now().timestamp() - REFRESH_AFTER_SECONDS;
-    let rows: Vec<(i64, String, Option<String>, Option<i64>)> = if force {
-        sqlx::query_as(
-            "SELECT id, external_id, raw_json, details_fetched_at
-             FROM registry_entries
-             WHERE external_id IS NOT NULL
-             ORDER BY id",
-        )
-        .fetch_all(pool)
-        .await?
-    } else {
-        sqlx::query_as(
-            "SELECT id, external_id, raw_json, details_fetched_at
-             FROM registry_entries
-             WHERE external_id IS NOT NULL
-               AND (details_fetched_at IS NULL OR details_fetched_at < ?)
-             ORDER BY id",
-        )
-        .bind(cutoff)
-        .fetch_all(pool)
-        .await?
-    };
+    let rows = select_entries_to_enrich(pool, force, cutoff).await?;
 
     let total = rows.len() as u32;
     let mut summary = EnrichSummary {
@@ -87,6 +74,40 @@ pub async fn enrich_pending_registry_entries(
     }
 
     Ok(summary)
+}
+
+/// The candidate set for an enrichment pass, split out so the exclusions can
+/// be tested without a logged-in client. Returns
+/// `(id, external_id, raw_json, details_fetched_at)` ordered by id.
+async fn select_entries_to_enrich(
+    pool: &SqlitePool,
+    force: bool,
+    cutoff: i64,
+) -> AppResult<Vec<(i64, String, Option<String>, Option<i64>)>> {
+    let rows = if force {
+        sqlx::query_as(
+            "SELECT id, external_id, raw_json, details_fetched_at
+             FROM registry_entries
+             WHERE external_id IS NOT NULL
+               AND source <> 'local'
+             ORDER BY id",
+        )
+        .fetch_all(pool)
+        .await?
+    } else {
+        sqlx::query_as(
+            "SELECT id, external_id, raw_json, details_fetched_at
+             FROM registry_entries
+             WHERE external_id IS NOT NULL
+               AND source <> 'local'
+               AND (details_fetched_at IS NULL OR details_fetched_at < ?)
+             ORDER BY id",
+        )
+        .bind(cutoff)
+        .fetch_all(pool)
+        .await?
+    };
+    Ok(rows)
 }
 
 pub(crate) async fn enrich_one(
@@ -207,6 +228,8 @@ async fn upsert_driver(pool: &SqlitePool, name: &str, normalized: &str) -> AppRe
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+    use std::str::FromStr;
 
     #[test]
     fn build_raw_json_preserves_detail_url() {
@@ -214,5 +237,53 @@ mod tests {
             "/diecast/jeff-gordon/action-lionel-elite-24/68acf030-a051-4e24-907f-abf2475e5315";
         let raw_json = build_raw_json(&RegistryDetail::default(), url);
         assert_eq!(extract_detail_url(Some(&raw_json)).as_deref(), Some(url));
+    }
+
+    async fn migrated_pool() -> SqlitePool {
+        let opts = SqliteConnectOptions::from_str("sqlite::memory:")
+            .unwrap()
+            .foreign_keys(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(opts)
+            .await
+            .expect("open in-memory db");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+        pool
+    }
+
+    /// A manually-added entry must never enter an enrichment pass — not even
+    /// a forced one, which otherwise sweeps every row on file. DCH-12.
+    #[tokio::test]
+    async fn local_entries_are_never_candidates_for_enrichment() {
+        let pool = migrated_pool().await;
+        sqlx::query(
+            "INSERT INTO registry_entries (external_id, source, fetched_at)
+             VALUES ('dcr-guid', 'diecastregistry', 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // Belt and braces: a local row that somehow *does* carry an
+        // external_id still has to be excluded, since the source flag — not
+        // the absence of a GUID — is what the guard rests on.
+        sqlx::query(
+            "INSERT INTO registry_entries (external_id, source, fetched_at)
+             VALUES ('stray-guid', 'local', 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        for force in [false, true] {
+            let rows = select_entries_to_enrich(&pool, force, i64::MAX)
+                .await
+                .unwrap();
+            let ids: Vec<&str> = rows.iter().map(|r| r.1.as_str()).collect();
+            assert_eq!(ids, vec!["dcr-guid"], "force = {force}");
+        }
     }
 }

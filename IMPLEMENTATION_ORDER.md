@@ -1,9 +1,8 @@
 # Implementation order for open DCH tickets
 
-As of 2026-08-05 (rev 8: DCH-14 and DCH-31 shipped; DCH-30 filed for the last item that had
-been living only in prose). Twelve tickets are merged — DCH-8, DCH-9, DCH-10, DCH-11,
-DCH-14, DCH-15, DCH-17, DCH-18, DCH-22, DCH-28, DCH-29, DCH-31 — leaving nine substantive
-items plus the roadmap buckets.
+As of 2026-08-05 (rev 9: DCH-12 shipped). Thirteen tickets are merged — DCH-8, DCH-9,
+DCH-10, DCH-11, DCH-12, DCH-14, DCH-15, DCH-17, DCH-18, DCH-22, DCH-28, DCH-29, DCH-31 —
+leaving eight substantive items plus the roadmap buckets.
 
 The ordering principle has not changed: compounding work (training data, CI safety, anything
 that makes later tickets cheaper or safer) goes before features that only pay off once.
@@ -16,6 +15,7 @@ that makes later tickets cheaper or safer) goes before features that only pay of
 | DCH-9 | Spike: every external sold-price source is closed to us. Build on the archive. |
 | DCH-10 | Sold-price comps on the Listings page and the extension overlay. |
 | DCH-11 | Confirm/correct registry match from the extension. |
+| DCH-12 | Manually-added collection entries. Introduced `registry_entries.source`; cost basis lives in `my_collection.paid_cents`, separate from DCR's appraisal. |
 | DCH-31 | Cross-platform extension packaging, built and uploaded by CI on every run. |
 | DCH-14 | Named registry pre-searches. Caches `registry_entries` via the saved filter combo; refreshed by the overnight auto-sync. |
 | DCH-15 | Year-range filters on registry search, the Match… dialog, Listings, and Collection. |
@@ -40,8 +40,12 @@ Two things worth carrying forward:
 | # | Ticket | What | Why here |
 | --- | --- | --- | --- |
 | 1 | DCH-30 | Alert on `deletion_insert_failed` | Dashboard config, not code. The last piece of the DCH-28 compliance story — until it exists, a lost deletion notification is invisible. |
-| 2 | DCH-12 | My Collection entries not in DCR | **Blocked on two decisions.** (a) What value basis to use for an entry with no registry entry — there's no retail/wholesale to inherit. (b) How such rows survive `sync::dcr_collection`, which treats DCR as the source of truth and prunes local rows missing from My Garage. Settle both before coding. |
-| 3 | DCH-16 | Improve Saved Seller browsing | Still a one-liner ticket. Write the problem statement first; it can't be estimated as written. |
+| 2 | DCH-16 | Improve Saved Seller browsing | Still a one-liner ticket. Write the problem statement first; it can't be estimated as written. |
+
+`registry_entries.source` is new as of DCH-12, and it is now the guard every DCR-facing
+registry flow relies on. Anything added later that walks `registry_entries` and then talks to
+diecastregistry.com about what it found needs `source <> 'local'` — a manual entry has no
+detail page, so a lookup for one either 404s or, worse, matches something else.
 
 ## UI track (dependency-fixed order)
 
