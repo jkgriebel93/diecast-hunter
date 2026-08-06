@@ -53,12 +53,31 @@ export interface Env {
   // KV-backed signature lookup so throttled floods cost no KV reads. Bound in
   // wrangler.toml via [[unsafe.bindings]] type = "ratelimit".
   POST_LIMITER: RateLimit;
+  // Sentry ingest DSN for the `deletion_insert_failed` alert (DCH-30). A
+  // `wrangler secret`, not a [vars] entry: this repo is public and a
+  // published DSN invites junk events. Optional — unset disables reporting
+  // and the worker behaves exactly as it did before, which is what keeps
+  // local dev and the test suite credential-free.
+  SENTRY_DSN?: string;
 }
 
 import { parseSigHeader, verifyEbaySignature } from "./ebay-signature";
+import { reportInsertFailure } from "./sentry";
+
+/**
+ * The slice of `ExecutionContext` this worker uses. Narrowed so tests can
+ * hand in a collector without constructing a full Cloudflare context.
+ */
+export interface Deferrable {
+  waitUntil(promise: Promise<unknown>): void;
+}
 
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(
+    req: Request,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<Response> {
     const url = new URL(req.url);
     const path = url.pathname;
     // Treat HEAD identically to GET. eBay's URL validator (and many other
@@ -70,7 +89,7 @@ export default {
       return handleVerification(url, env);
     }
     if (path === "/marketplace-deletion" && method === "POST") {
-      return handleNotification(req, env);
+      return handleNotification(req, env, ctx);
     }
     if (path === "/api/pending-deletions" && method === "GET") {
       const auth = checkAuth(req, env);
@@ -195,6 +214,11 @@ function logPost(meta: ReturnType<typeof postMeta>, outcome: string): void {
 export async function handleNotification(
   req: Request,
   env: Env,
+  // Optional so the existing tests, which don't exercise reporting, need no
+  // changes. In production `fetch` always supplies it. Without it a report
+  // still fires, just untracked — acceptable because the only caller that
+  // omits it is a test with no SENTRY_DSN, where reporting is a no-op.
+  ctx?: Deferrable,
 ): Promise<Response> {
   const sigHeader = req.headers.get("x-ebay-signature");
   const meta = postMeta(req, sigHeader);
@@ -270,9 +294,22 @@ export async function handleNotification(
   // It is still harm, and D1 is the only store, so transient blips get a
   // bounded retry here first. That recovers the failure class eBay's retry
   // would have covered, without giving eBay a reason to retry.
-  const stored = await insertDeletion(env, id, notification, data);
+  const result = await insertDeletion(env, id, notification, data);
 
-  logPost(meta, stored ? "stored" : "store_failed");
+  // A lost notification is the one thing here worth waking someone for, and
+  // the log line alone only reaches whoever happens to read logs. Reporting
+  // goes through waitUntil so a slow or unreachable Sentry cannot delay the
+  // 200 that keeps eBay from retrying — see the write contract in README.md.
+  if (!result.stored) {
+    const report = reportInsertFailure(env.SENTRY_DSN, {
+      notificationId: id,
+      attempts: result.attempts,
+      error: result.error ?? "unknown",
+    });
+    if (ctx) ctx.waitUntil(report);
+  }
+
+  logPost(meta, result.stored ? "stored" : "store_failed");
   return new Response("ok", { status: 200 });
 }
 
@@ -281,9 +318,19 @@ const INSERT_ATTEMPTS = 3;
 /** Backoff base; attempt N waits N × this. Worst case adds ~150ms. */
 const INSERT_RETRY_MS = 50;
 
+export interface InsertResult {
+  stored: boolean;
+  /** Attempts actually made — 1 when the first write succeeded. */
+  attempts: number;
+  /** The last error seen, carried out so the Sentry report can name the
+   *  cause instead of just saying a write failed. */
+  error?: string;
+}
+
 /**
  * Insert one deletion notification, retrying a failed write a couple of
- * times before conceding. Returns whether the row actually landed.
+ * times before conceding. Reports whether the row actually landed, and if
+ * not, why.
  *
  * Safe to retry: the statement is `ON CONFLICT(notification_id) DO NOTHING`,
  * so a retry after a write that partially succeeded can't duplicate.
@@ -293,7 +340,8 @@ async function insertDeletion(
   id: string,
   notification: Record<string, unknown>,
   data: Record<string, unknown>,
-): Promise<boolean> {
+): Promise<InsertResult> {
+  let lastError: string | undefined;
   for (let attempt = 1; attempt <= INSERT_ATTEMPTS; attempt++) {
     try {
       await env.DB.prepare(
@@ -311,28 +359,33 @@ async function insertDeletion(
           JSON.stringify(notification),
         )
         .run();
-      return true;
+      return { stored: true, attempts: attempt };
     } catch (err) {
       const giving_up = attempt === INSERT_ATTEMPTS;
+      lastError = err instanceof Error ? err.message : String(err);
       // `deletion_insert_failed` is the alertable event — it means a
       // notification was accepted by eBay and then lost. The retry line is
-      // informational.
+      // informational. The log line is kept alongside the Sentry report:
+      // it's what `wrangler tail` shows, and it still works when SENTRY_DSN
+      // is unset.
       console.error(
         JSON.stringify({
           event: giving_up ? "deletion_insert_failed" : "deletion_insert_retry",
           notification_id: id,
           attempt,
           attempts: INSERT_ATTEMPTS,
-          error: err instanceof Error ? err.message : String(err),
+          error: lastError,
         }),
       );
-      if (giving_up) return false;
+      if (giving_up) {
+        return { stored: false, attempts: attempt, error: lastError };
+      }
       await new Promise((resolve) =>
         setTimeout(resolve, INSERT_RETRY_MS * attempt),
       );
     }
   }
-  return false;
+  return { stored: false, attempts: INSERT_ATTEMPTS, error: lastError };
 }
 
 interface PendingRow {

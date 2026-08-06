@@ -244,6 +244,129 @@ describe("handleNotification", () => {
     expect(lost).toContain("notif-d1-fail");
   });
 
+  describe("Sentry reporting (DCH-30)", () => {
+    /** Collects deferred work so a test can await it, standing in for the
+     *  Cloudflare ExecutionContext. */
+    function makeCtx() {
+      const pending: Promise<unknown>[] = [];
+      return {
+        waitUntil: (p: Promise<unknown>) => void pending.push(p),
+        settled: () => Promise.all(pending),
+      };
+    }
+
+    const DSN = "https://key123@o1.ingest.us.sentry.io/42";
+
+    it("reports a lost notification to Sentry", async () => {
+      const env = makeEnv({ SENTRY_DSN: DSN });
+      env.DB._failAllRuns = true;
+      // Intercept only Sentry. Everything else has to reach the eBay mock
+      // installed in beforeEach, or signature verification fails and the
+      // request never gets as far as the insert.
+      const realFetch = globalThis.fetch;
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation(((input: RequestInfo | URL, init?: RequestInit) =>
+          String(input).includes("sentry.io")
+            ? Promise.resolve(new Response("", { status: 200 }))
+            : realFetch(input as RequestInfo, init)) as typeof fetch);
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const ctx = makeCtx();
+
+      const res = await handleNotification(
+        await signedReq(validNotification("notif-sentry"), keypair.privateKey),
+        env,
+        ctx,
+      );
+      expect(res.status).toBe(200);
+      await ctx.settled();
+
+      const sentryCalls = fetchMock.mock.calls.filter((c) =>
+        String(c[0]).includes("sentry.io"),
+      );
+      expect(sentryCalls).toHaveLength(1);
+      expect(String((sentryCalls[0][1] as RequestInit).body)).toContain(
+        "notif-sentry",
+      );
+      vi.restoreAllMocks();
+    });
+
+    it("sends nothing when the write succeeds", async () => {
+      // The alert must mean something. A successful notification reporting
+      // to Sentry would train whoever gets the email to ignore it.
+      const env = makeEnv({ SENTRY_DSN: DSN });
+      const fetchMock = vi.spyOn(globalThis, "fetch");
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      const ctx = makeCtx();
+
+      const res = await handleNotification(
+        await signedReq(validNotification("notif-ok"), keypair.privateKey),
+        env,
+        ctx,
+      );
+      expect(res.status).toBe(200);
+      await ctx.settled();
+
+      expect(
+        fetchMock.mock.calls.filter((c) => String(c[0]).includes("sentry.io")),
+      ).toHaveLength(0);
+      vi.restoreAllMocks();
+    });
+
+    it("still answers 200 when Sentry itself is unreachable", async () => {
+      // Reporting is best-effort. eBay's response must not depend on it.
+      const env = makeEnv({ SENTRY_DSN: DSN });
+      env.DB._failAllRuns = true;
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const realFetch = globalThis.fetch;
+      vi.spyOn(globalThis, "fetch").mockImplementation(((
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        if (String(input).includes("sentry.io")) {
+          return Promise.reject(new Error("sentry unreachable"));
+        }
+        return realFetch(input as RequestInfo, init);
+      }) as typeof fetch);
+      const ctx = makeCtx();
+
+      const res = await handleNotification(
+        await signedReq(validNotification("notif-down"), keypair.privateKey),
+        env,
+        ctx,
+      );
+      expect(res.status).toBe(200);
+      // The deferred report resolves rather than rejecting, so the runtime
+      // never sees an unhandled rejection.
+      await expect(ctx.settled()).resolves.toBeDefined();
+      vi.restoreAllMocks();
+    });
+
+    it("makes no Sentry call when SENTRY_DSN is unset", async () => {
+      const env = makeEnv(); // no DSN — the default deployment before this ships
+      env.DB._failAllRuns = true;
+      const fetchMock = vi.spyOn(globalThis, "fetch");
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const ctx = makeCtx();
+
+      const res = await handleNotification(
+        await signedReq(validNotification("notif-nodsn"), keypair.privateKey),
+        env,
+        ctx,
+      );
+      expect(res.status).toBe(200);
+      await ctx.settled();
+
+      expect(
+        fetchMock.mock.calls.filter((c) => String(c[0]).includes("sentry.io")),
+      ).toHaveLength(0);
+      vi.restoreAllMocks();
+    });
+  });
+
   it("caches the public key after the first verify", async () => {
     const env = makeEnv();
     const body1 = validNotification("notif-1");

@@ -57,6 +57,11 @@ pnpm wrangler secret put APP_SHARED_SECRET
 pnpm wrangler secret put EBAY_CLIENT_ID
 pnpm wrangler secret put EBAY_CLIENT_SECRET
 
+# Optional. Sentry DSN for the deletion_insert_failed alert — see "Alerting on
+# a lost notification" below. Unset, reporting is a no-op; everything else
+# works unchanged.
+pnpm wrangler secret put SENTRY_DSN
+
 # First deploy — the URL won't be known until after this runs.
 pnpm wrangler deploy
 ```
@@ -206,10 +211,45 @@ lost — it is the event worth alerting on. The per-request outcome line
 (`event: "deletion_post"`) reports `outcome: "store_failed"` in that case
 rather than `"stored"`, so the two logs agree.
 
-> **Not yet configured:** an actual alert on `deletion_insert_failed`. Until
-> one exists in the Cloudflare dashboard (Workers Observability → alerts, or
-> a Logpush job), a lost notification is only visible to someone reading
-> logs. Set this up before treating the compliance story as complete.
+### Alerting on a lost notification
+
+`deletion_insert_failed` is reported to **Sentry** (project
+`diecast-hunter-worker` in the `thistle-grow-software` org), which emails on
+the resulting issue. `src/sentry.ts` posts the event directly to Sentry's
+envelope endpoint from the failure branch, inside `ctx.waitUntil()` — so a
+slow or unreachable Sentry can neither delay nor change the `200` that keeps
+eBay from retrying.
+
+**Why not the Cloudflare dashboard**, which is where you'd expect this to
+live: it can't do it. Workers Logs stores, filters and queries logs but has
+no alerting, and Cloudflare Notifications only offers threshold-shaped alert
+types (error rate, CPU) that a single lost notification would never cross.
+The log line remains the local signal — `wrangler tail` still shows it, and
+it is what works when `SENTRY_DSN` is unset.
+
+**No Sentry SDK**, deliberately. The deletion path is the one place in this
+Worker where a dependency failure has real cost, and Sentry's ingest API is
+a single POST. Every failure in the reporter is swallowed and logged; an
+alerting path that throws would turn a recoverable D1 problem into an
+unhandled rejection inside the compliance endpoint.
+
+`SENTRY_DSN` is optional. Unset, reporting is a no-op and the Worker behaves
+exactly as it did before this existed — which is what keeps local dev and the
+test suite credential-free.
+
+To (re)configure:
+
+```sh
+# 1. Create the project in Sentry, copy its DSN, then:
+npx wrangler secret put SENTRY_DSN
+# 2. In Sentry, confirm an issue alert rule exists for the project.
+```
+
+One thing to get right on that rule: all occurrences share a fixed
+fingerprint, so they group into a single Sentry issue. A rule conditioned on
+*"a new issue is created"* therefore fires once and then goes quiet. Condition
+it on **"an event is seen"** (with a sensible frequency limit) if you want to
+hear about every lost notification rather than only the first.
 
 ## Signature verification & abuse
 

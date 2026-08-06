@@ -44,6 +44,12 @@ crons = ["0 4 * * *"]
 # `deletion_insert_failed` / `deletion_purge` events) queryable in the
 # dashboard and via `wrangler tail`. head_sampling_rate = 1 keeps 100% of
 # logs; volume here is tiny so there's no reason to sample down.
+#
+# Note that these logs are queryable but NOT alertable: Workers Logs has no
+# alerting, and Cloudflare Notifications only offers threshold-shaped alert
+# types that a single lost notification would never cross. That's why the
+# alert on `deletion_insert_failed` goes to Sentry instead (DCH-30) — see
+# SENTRY_DSN in the secrets list in README.md.
 [observability]
 enabled = true
 head_sampling_rate = 1
