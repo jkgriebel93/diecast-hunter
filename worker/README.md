@@ -121,6 +121,11 @@ curl "https://diecast-hunter-ebay.<account>.workers.dev/marketplace-deletion?cha
 curl -H "Authorization: Bearer <APP_SHARED_SECRET>" \
      https://diecast-hunter-ebay.<account>.workers.dev/api/pending-deletions
 # Should return: {"deletions":[]}
+
+# Fire a test alert end to end — see "Proving the alert actually works".
+curl -X POST -H "Authorization: Bearer <APP_SHARED_SECRET>" \
+     https://diecast-hunter-ebay.<account>.workers.dev/api/test-alert
+# Should return: {"outcome":"sent","notification_id":"TEST-DO-NOT-ACT-..."}
 ```
 
 ## Local development
@@ -250,6 +255,48 @@ fingerprint, so they group into a single Sentry issue. A rule conditioned on
 *"a new issue is created"* therefore fires once and then goes quiet. Condition
 it on **"an event is seen"** (with a sensible frequency limit) if you want to
 hear about every lost notification rather than only the first.
+
+### Proving the alert actually works
+
+```sh
+curl -X POST -H "Authorization: Bearer <APP_SHARED_SECRET>" \
+  https://diecast-hunter-ebay.johnkgriebel.workers.dev/api/test-alert
+# {"outcome":"sent","notification_id":"TEST-DO-NOT-ACT-<uuid>"}
+```
+
+`outcome` tells you where the chain broke without reading logs:
+
+| `outcome` | Status | Means |
+| --- | --- | --- |
+| `sent` | 200 | Sentry accepted the event. Check your inbox for the alert. |
+| `skipped` | 200 | `SENTRY_DSN` isn't set on this deployment — the usual cause of silence. |
+| `failed` | 502 | Sentry rejected or was unreachable. A 401 from Sentry means a bad DSN. |
+
+**Why a dedicated route rather than inducing a real failure.** You can't
+manufacture a notification this Worker will accept: `/marketplace-deletion`
+verifies an ECDSA signature against eBay's published public key, and we don't
+have eBay's private key. The only party who can send a valid one is eBay, and
+their test-notification button posts to whatever endpoint is *registered* —
+aiming that at a deliberately broken preview deployment means editing the live
+compliance registration, risking re-validation and real notifications landing
+somewhere that drops them. Far too much exposure to test an alert.
+
+**What it proves:** the deployed secret parses as a DSN, Sentry accepts the
+hand-rolled envelope, the event groups into the expected issue, the alert rule
+matches, and the mail arrives. Those are exactly the links no unit test can
+reach. It does *not* re-prove that the failure branch calls the reporter —
+that link needs no live infrastructure and is covered in
+`test/notification.test.ts`.
+
+The event lands in the **same Sentry issue** as a genuine failure, since that
+issue is what the rule is attached to. The `TEST-DO-NOT-ACT-` id prefix is
+what distinguishes it in the history. Resolve the issue afterwards if you want
+a clean slate; a later real failure will reopen it.
+
+The route is permanent and guarded by `APP_SHARED_SECRET` — the same bar as
+`/api/pending-deletions`, which returns actual user deletion records, so this
+is the less sensitive of the two. Re-run it whenever the DSN rotates, the
+Sentry project moves, or the alert rule changes.
 
 ## Signature verification & abuse
 

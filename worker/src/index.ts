@@ -99,6 +99,10 @@ export default {
       const auth = checkAuth(req, env);
       return auth ?? handleAck(req, env);
     }
+    if (path === "/api/test-alert" && method === "POST") {
+      const auth = checkAuth(req, env);
+      return auth ?? handleTestAlert(env);
+    }
     if (path === "/ebay-oauth-callback" && method === "GET") {
       return handleOauthCallback(url);
     }
@@ -460,6 +464,70 @@ export async function handleAck(req: Request, env: Env): Promise<Response> {
     .run();
 
   return Response.json({ acked: meta?.changes ?? ids.length });
+}
+
+/**
+ * Fire one deletion-failure report on demand, so the alerting chain can be
+ * proven end to end rather than assumed from configuration (DCH-30).
+ *
+ * # Why this route exists at all
+ *
+ * The obvious test — POST a notification at a deployment whose D1 binding is
+ * broken — is impossible from our side. `/marketplace-deletion` verifies an
+ * ECDSA signature against eBay's published public key, and we do not have
+ * eBay's private key, so we cannot manufacture a notification it will
+ * accept. The only party who can is eBay, and their test-notification button
+ * sends to whatever endpoint is registered — pointing that at a deliberately
+ * broken preview deployment means editing the live compliance registration,
+ * which risks re-validation and real notifications landing somewhere that
+ * drops them. Not worth it to test an alert.
+ *
+ * # What this proves, and what it doesn't
+ *
+ * It calls the real `reportInsertFailure` with the real DSN, so it exercises
+ * every link the unit tests cannot: that the deployed secret is a valid DSN,
+ * that Sentry accepts our hand-rolled envelope, that the event groups into
+ * the expected issue, that the alert rule matches, and that the mail arrives.
+ *
+ * It does **not** re-prove that the failure branch of `handleNotification`
+ * calls the reporter — that link is covered by tests, and it's the one link
+ * that needs no live infrastructure to check.
+ *
+ * # Why it's permanent rather than a throwaway
+ *
+ * The same reasoning as a health check: this needs re-running whenever the
+ * DSN rotates, the Sentry project moves, or the alert rule is edited. A
+ * route that has to be re-added each time is a route nobody re-adds.
+ *
+ * Guarded by `APP_SHARED_SECRET`, the same bar as `/api/pending-deletions`,
+ * which returns actual user deletion records — so this is strictly the less
+ * sensitive of the two. Worst case with a leaked secret is a burnt Sentry
+ * quota, and anyone holding that secret already has a far better target.
+ *
+ * Deliberately *not* wired to POST_LIMITER: that limiter's budget belongs to
+ * `/marketplace-deletion`, and sharing it would let test calls throttle a
+ * real notification. A separate namespace is more config than this risk
+ * warrants behind an auth check.
+ */
+export async function handleTestAlert(env: Env): Promise<Response> {
+  // The id is unmistakable on sight. The event lands in the same Sentry
+  // issue as a genuine failure — which is the point, since that issue is
+  // what the alert rule is attached to — so it has to be obvious in the
+  // history that nothing was actually lost.
+  const notificationId = `TEST-DO-NOT-ACT-${crypto.randomUUID()}`;
+  const outcome = await reportInsertFailure(env.SENTRY_DSN, {
+    notificationId,
+    attempts: INSERT_ATTEMPTS,
+    error: "synthetic failure from POST /api/test-alert",
+  });
+  // Returned rather than only logged: the person running this wants to know
+  // whether it worked without going to read Worker logs. `skipped` means
+  // SENTRY_DSN isn't set on this deployment, which is the single most likely
+  // reason for a silent alerting chain.
+  return Response.json(
+    { outcome, notification_id: notificationId },
+    { status: outcome === "failed" ? 502 : 200 },
+  );
 }
 
 function checkAuth(req: Request, env: Env): Response | null {
