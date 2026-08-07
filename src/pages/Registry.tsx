@@ -3,6 +3,7 @@ import { open as openExternal } from "@tauri-apps/plugin-shell";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { describeError } from "@/lib/errors";
 import { Modal } from "@/components/Modal";
+import { ClearFiltersButton, FilteredEmpty } from "@/components/FilterCard";
 import {
   api,
   formatAgo,
@@ -45,13 +46,13 @@ const DCR_BASE = "https://www.diecastregistry.com";
 
 type SortMode =
   | "registry"
-  | "driver"
+  | "driver-asc"
   | "year-desc"
   | "year-asc"
-  | "retail-desc"
-  | "retail-asc"
-  | "qty-asc"
-  | "qty-desc";
+  | "retail-value-desc"
+  | "retail-value-asc"
+  | "production-qty-asc"
+  | "production-qty-desc";
 
 /** Parse a user-typed dollar amount ("25", "$12.50") into cents; null when
  *  blank or unparseable, which means "no bound". */
@@ -155,6 +156,29 @@ export function Registry() {
   const [retailMax, setRetailMax] = useState("");
   const [wholesaleMin, setWholesaleMin] = useState("");
   const [wholesaleMax, setWholesaleMax] = useState("");
+  /** Free-text narrowing of what the remote search returned. DCH-35: the
+   *  search screen had no way to search its own results, which is the
+   *  oddest gap the audit found. This filters locally — the structured
+   *  criteria above are what go to diecastregistry.com. */
+  const [resultSearch, setResultSearch] = useState("");
+
+  /** True when anything is narrowing the returned results — not the search
+   *  criteria themselves, which are a separate concern with their own
+   *  Search button. */
+  const resultFiltersActive =
+    resultSearch.trim() !== "" ||
+    retailMin !== "" ||
+    retailMax !== "" ||
+    wholesaleMin !== "" ||
+    wholesaleMax !== "";
+
+  function clearResultFilters() {
+    setResultSearch("");
+    setRetailMin("");
+    setRetailMax("");
+    setWholesaleMin("");
+    setWholesaleMax("");
+  }
 
   const filteredResults = useMemo(() => {
     if (!results) return null;
@@ -162,15 +186,36 @@ export function Registry() {
     const rMax = parseDollars(retailMax);
     const wMin = parseDollars(wholesaleMin);
     const wMax = parseDollars(wholesaleMax);
-    if (rMin === null && rMax === null && wMin === null && wMax === null) {
+    const q = resultSearch.trim().toLowerCase();
+    if (
+      rMin === null &&
+      rMax === null &&
+      wMin === null &&
+      wMax === null &&
+      !q
+    ) {
       return results;
     }
+    const matchesText = (r: ProductionSearchResult) =>
+      !q ||
+      [
+        r.driver_name,
+        r.scheme_text,
+        r.oem,
+        r.brand,
+        r.scale,
+        r.make,
+        r.year === null ? null : String(r.year),
+      ]
+        .filter(Boolean)
+        .some((f) => (f as string).toLowerCase().includes(q));
     return results.filter(
       (r) =>
+        matchesText(r) &&
         inRange(r.retail_value_cents, rMin, rMax) &&
         inRange(r.wholesale_value_cents, wMin, wMax),
     );
-  }, [results, retailMin, retailMax, wholesaleMin, wholesaleMax]);
+  }, [results, retailMin, retailMax, wholesaleMin, wholesaleMax, resultSearch]);
 
   const sortedResults = useMemo(() => {
     if (!filteredResults || sortMode === "registry") return filteredResults;
@@ -183,7 +228,7 @@ export function Registry() {
     const list = [...filteredResults];
     list.sort((a, b) => {
       switch (sortMode) {
-        case "driver":
+        case "driver-asc":
           return (
             a.driver_name.localeCompare(b.driver_name) ||
             (b.year ?? 0) - (a.year ?? 0)
@@ -192,13 +237,13 @@ export function Registry() {
           return nullsLast(b.year, a.year);
         case "year-asc":
           return nullsLast(a.year, b.year);
-        case "retail-desc":
+        case "retail-value-desc":
           return nullsLast(b.retail_value_cents, a.retail_value_cents);
-        case "retail-asc":
+        case "retail-value-asc":
           return nullsLast(a.retail_value_cents, b.retail_value_cents);
-        case "qty-asc":
+        case "production-qty-asc":
           return nullsLast(a.seq_produced_total, b.seq_produced_total);
-        case "qty-desc":
+        case "production-qty-desc":
           return nullsLast(b.seq_produced_total, a.seq_produced_total);
       }
     });
@@ -782,9 +827,17 @@ export function Registry() {
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <div>
                 {sortedResults!.length === results.length
-                  ? `${results.length} result${results.length === 1 ? "" : "s"}.`
-                  : `${sortedResults!.length} of ${results.length} results.`}
+                  ? `${formatCount(results.length)} result${results.length === 1 ? "" : "s"}.`
+                  : `${formatCount(sortedResults!.length)} of ${formatCount(results.length)} results.`}
               </div>
+              <input
+                type="text"
+                className="input !w-56 !py-0.5 !text-[11px]"
+                value={resultSearch}
+                onChange={(e) => setResultSearch(e.target.value)}
+                placeholder="Search these results…"
+                aria-label="Search results"
+              />
               <ValueRangeFilter
                 label="Retail"
                 min={retailMin}
@@ -799,6 +852,9 @@ export function Registry() {
                 onMin={setWholesaleMin}
                 onMax={setWholesaleMax}
               />
+              {resultFiltersActive && (
+                <ClearFiltersButton onClear={clearResultFilters} />
+              )}
             </div>
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-1.5">
@@ -810,22 +866,28 @@ export function Registry() {
                   title="Sort results"
                 >
                   <option value="registry">Registry order</option>
-                  <option value="driver">Driver A → Z</option>
-                  <option value="year-desc">Year newest first</option>
-                  <option value="year-asc">Year oldest first</option>
-                  <option value="retail-desc">Retail value high → low</option>
-                  <option value="retail-asc">Retail value low → high</option>
-                  <option value="qty-asc">Production qty low → high</option>
-                  <option value="qty-desc">Production qty high → low</option>
+                  <option value="driver-asc">Driver A → Z</option>
+                  <option value="year-desc">Year newest → oldest</option>
+                  <option value="year-asc">Year oldest → newest</option>
+                  <option value="retail-value-desc">
+                    Retail value high → low
+                  </option>
+                  <option value="retail-value-asc">
+                    Retail value low → high
+                  </option>
+                  <option value="production-qty-asc">
+                    Production qty low → high
+                  </option>
+                  <option value="production-qty-desc">
+                    Production qty high → low
+                  </option>
                 </select>
               </div>
               <ImageSizeToggle size={imgSize} onChange={setImgSize} />
             </div>
           </div>
           {sortedResults!.length === 0 ? (
-            <div className="card text-sm text-fg-muted">
-              No results in this value range.
-            </div>
+            <FilteredEmpty onClear={clearResultFilters} />
           ) : (
             <ul className="space-y-2">
               {sortedResults!.map((r) => (

@@ -526,8 +526,8 @@ export function Collection() {
               {groupByDriver && (
                 <option value="count-desc">Item count high → low</option>
               )}
-              <option value="year-desc">Newest year first</option>
-              <option value="year-asc">Oldest year first</option>
+              <option value="year-desc">Year newest → oldest</option>
+              <option value="year-asc">Year oldest → newest</option>
             </select>
           </div>
           <label className="flex items-center gap-2 text-xs text-fg-subtle select-none w-fit">

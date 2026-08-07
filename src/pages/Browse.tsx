@@ -14,6 +14,7 @@ import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { ClearFiltersButton } from "@/components/FilterCard";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-24 h-24",
@@ -195,6 +196,53 @@ export function Browse() {
     await runSearch(0);
   }
 
+  /** `sort` is an ordering, not a filter, so it doesn't count towards
+   *  showing the clear control — otherwise picking "Price low → high" would
+   *  make it appear with nothing to clear. */
+  const filtersActive =
+    query !== "" ||
+    conditions.length > 0 ||
+    buyingOptions.length > 0 ||
+    priceMin !== "" ||
+    priceMax !== "";
+
+  async function onClearFilters() {
+    setQuery("");
+    setConditions([]);
+    setBuyingOptions([]);
+    setPriceMin("");
+    setPriceMax("");
+    setSort("");
+    // Results here are a live eBay query. Clearing the inputs without
+    // re-running would leave the old, still-filtered page on screen under
+    // an empty filter row. Defaults are passed explicitly because the
+    // setters above haven't been applied yet.
+    if (page === null) return;
+    setSearching(true);
+    setError(null);
+    try {
+      const result = await api.searchEbayListings(
+        "",
+        {
+          conditions: [],
+          buying_options: [],
+          sellers: [],
+          price_min_cents: null,
+          price_max_cents: null,
+          sort: null,
+        },
+        PAGE_SIZE,
+        0,
+      );
+      setPage(result);
+      setOffset(0);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSearching(false);
+    }
+  }
+
   async function onWatch(item: EbaySearchItem) {
     setBusyItemId(item.item_id);
     setActionMessage(null);
@@ -298,6 +346,12 @@ export function Browse() {
           >
             {savingSearch ? "Saving…" : "Save search"}
           </button>
+          {filtersActive && (
+            <ClearFiltersButton
+              onClear={() => void onClearFilters()}
+              className="shrink-0"
+            />
+          )}
         </div>
         {savedSearchMsg && (
           <div className="text-xs text-emerald-400">

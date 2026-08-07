@@ -140,7 +140,14 @@ export function SavedSearches() {
     <div className="p-6 space-y-4">
       <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
         <div>
-          <h2 className="text-2xl font-semibold">Saved Searches</h2>
+          <h2 className="text-2xl font-semibold">
+            Saved Searches
+            {rows !== null && (
+              <span className="ml-3 text-sm font-normal text-fg-subtle">
+                {formatCount(rows.length)} saved
+              </span>
+            )}
+          </h2>
           <p className="text-sm text-fg-subtle">
             Save eBay Browse queries and rerun them with one click. Filters
             match the Browse page exactly.

@@ -37,6 +37,7 @@ import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { Modal } from "@/components/Modal";
+import { ClearFiltersButton, FilteredEmpty } from "@/components/FilterCard";
 import { YearRangeFilter } from "@/components/YearRangeFilter";
 import {
   EMPTY_YEAR_RANGE,
@@ -76,15 +77,15 @@ type TypeOption = "auction" | "bin" | "offers";
  *  numeric group id as a string. */
 type GroupFilter = string;
 type SortMode =
-  | "newest"
+  | "seen-desc"
   | "price-asc"
   | "price-desc"
   | "total-asc"
   | "deal-asc"
-  | "ending-soon"
-  | "title";
+  | "ending-asc"
+  | "title-asc";
 /** Ordering of the driver/group sections in the grouped views. */
-type BucketSort = "name" | "count-desc" | "count-asc";
+type BucketSort = "name-asc" | "count-desc" | "count-asc";
 
 /** Cluster groups by driver for the filter dropdown and the by-group view.
  *  A group with multiple drivers appears under each of them. Archived groups
@@ -319,8 +320,8 @@ export function Listings() {
   // "all", "none", or `d:<lowercased driver name>` — see listingPassesFilters.
   const [driverFilter, setDriverFilter] = useState<string>("all");
   const [yearFilter, setYearFilter] = useState<YearRange>(EMPTY_YEAR_RANGE);
-  const [sortMode, setSortMode] = useState<SortMode>("newest");
-  const [bucketSort, setBucketSort] = useState<BucketSort>("name");
+  const [sortMode, setSortMode] = useState<SortMode>("seen-desc");
+  const [bucketSort, setBucketSort] = useState<BucketSort>("name-asc");
 
   // Filters sidebar visibility, persisted so the choice sticks across
   // visits. Collapsing does not clear the filters — they keep applying.
@@ -804,7 +805,7 @@ export function Listings() {
         return av - bv;
       };
       switch (sortMode) {
-        case "newest":
+        case "seen-desc":
           return b.last_seen_at - a.last_seen_at;
         case "price-asc":
           return nullsLast(a.price_cents, b.price_cents);
@@ -819,9 +820,9 @@ export function Listings() {
             a.comp_score ?? a.deal_score,
             b.comp_score ?? b.deal_score,
           );
-        case "ending-soon":
+        case "ending-asc":
           return nullsLast(a.end_time, b.end_time);
-        case "title":
+        case "title-asc":
           return a.title.localeCompare(b.title);
       }
     });
@@ -1285,13 +1286,9 @@ export function Listings() {
                     />
                   </div>
                 </div>
-                <button
-                  type="button"
-                  className="text-xs text-fg-subtle hover:text-fg underline decoration-dotted underline-offset-2"
-                  onClick={clearAllFilters}
-                >
-                  Clear all filters
-                </button>
+                {activeFilterCount > 0 && (
+                  <ClearFiltersButton onClear={clearAllFilters} />
+                )}
               </aside>
             )}
 
@@ -1331,15 +1328,19 @@ export function Listings() {
                       onChange={(e) => setSortMode(e.target.value as SortMode)}
                       title="Sort listings"
                     >
-                      <option value="newest">Newest first</option>
+                      <option value="seen-desc">
+                        Last seen newest → oldest
+                      </option>
                       <option value="price-asc">Price low → high</option>
                       <option value="price-desc">Price high → low</option>
                       <option value="total-asc">
                         Total (price + ship) low → high
                       </option>
-                      <option value="deal-asc">Best deal first</option>
-                      <option value="ending-soon">Ending soonest</option>
-                      <option value="title">Title A → Z</option>
+                      <option value="deal-asc">Deal score low → high</option>
+                      <option value="ending-asc">
+                        Ending soonest → latest
+                      </option>
+                      <option value="title-asc">Title A → Z</option>
                     </select>
                   </div>
                   {viewMode !== "flat" && (
@@ -1355,9 +1356,13 @@ export function Listings() {
                         }
                         title={`Order ${viewMode === "byGroup" ? "groups" : "drivers"} by`}
                       >
-                        <option value="name">Name (A→Z)</option>
-                        <option value="count-desc">Most listings first</option>
-                        <option value="count-asc">Fewest listings first</option>
+                        <option value="name-asc">Name A → Z</option>
+                        <option value="count-desc">
+                          Listing count high → low
+                        </option>
+                        <option value="count-asc">
+                          Listing count low → high
+                        </option>
                       </select>
                     </div>
                   )}
@@ -1445,9 +1450,7 @@ export function Listings() {
               </div>
 
               {filteredRows && filteredRows.length === 0 ? (
-                <div className="card text-sm text-fg-muted">
-                  No listings match the current filters.
-                </div>
+                <FilteredEmpty onClear={clearAllFilters} noun="listings" />
               ) : viewMode === "flat" ? (
                 <ul className="space-y-2">
                   {(filteredRows ?? []).map((r) => (

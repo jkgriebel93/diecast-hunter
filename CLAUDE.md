@@ -72,7 +72,7 @@ Separate pnpm project — its own `package.json`, `wrangler.toml`, and `tsconfig
 Before changing anything under `src/pages/` or `src/components/`, read the [UI Audit and Standardization Guidelines](https://thistlegrow.atlassian.net/wiki/spaces/DCH/pages/51183617) (DCH-19). Its checklist is the agreed convention set; the short version of what it found:
 
 - **Already consistent — don't churn it:** `p-6 space-y-4` page container, `<header>` + `h2.text-2xl.font-semibold`, `.card` / `.input` / `.btn-primary` / `.btn-secondary`, `formatCents` for all money, `ImageSizeToggle` + `useMinimized` on every list screen.
-- **Known divergences with tickets:** filter-row parity and sort vocabulary (DCH-35). Don't add to that pile — use the shared helper even where neighbouring code doesn't.
+- **Known divergences with tickets:** none outstanding — DCH-32/33/34/35 closed the four the audit found.
 - Collection is the reference implementation for filter rows; the Wishlist dialog is the reference for modal behaviour.
 
 **Never format a number or a date inline** (DCH-34). `formatCount` for quantities, `formatCents` for money, `formatDateTime` / `formatDate` / `formatTime` for stored Unix timestamps — all from `@/lib/format`, re-exported by `@/lib/tauri`. Each renders an em dash for null; the inline forms don't, and they fail in ways that read as real data rather than as missing data: `new Date(undefined * 1000).toLocaleString()` renders the string "Invalid Date", and a null timestamp coerces to 0 and renders the Unix epoch as if it were a genuine sync time.
@@ -93,6 +93,12 @@ Do **not** pass a stacking layer. `Modal` derives its own from `src/lib/modalSta
 Severity picks the confirmation, form picks the class. Don't couple them — a solid button on Collection's Remove would look absurd next to a plain-text "Edit", and a text link in Settings' button row would be the faintest thing there.
 
 Colours come from `--color-danger` / `--color-danger-hover` / `--color-danger-fg` in `index.css`, which is the one red ramp; `danger` is wired into `tailwind.config.js` like `accent`. `danger-fg` differs per theme because red-600 is unreadable on the dark page background.
+
+**List screens share a filter contract** (DCH-35). Filters live in one `.card` under the header — `FilterCard` from `@/components/FilterCard` renders it and shows **Clear filters** only while something is narrowing the list (hidden, never disabled: a greyed control implies filters are set). `ClearFiltersButton` is the same control for screens whose filter row already has a home for it, and `FilteredEmpty` is the "your filters excluded everything" state, which is a different message from "nothing here yet" and the only one of the two where offering a way out helps.
+
+The `active` predicate is the caller's, because what counts as set differs per screen — an empty string, an empty `Set`, `EMPTY_YEAR_RANGE`, or Listings' non-empty default of `["active"]`. An ordering is **not** a filter; counting `sort` would leave the control permanently visible. On a screen backed by a live remote query (Browse, Seller feed) clearing must also re-run the query — cleared inputs above stale filtered results is worse than either state alone.
+
+**Sort dropdowns share one vocabulary** (DCH-35). Values are `field-asc` / `field-desc`; labels are built by `sortLabel` in `@/lib/sortOptions` — `A → Z`, `low → high`, `oldest → newest`, always with the arrow. Never a bare `driver` or `name`: a value with no direction in it means two screens can disagree about which way it sorts. Two exemptions, both in `sortOptions.ts`: orderings with no axis (`registry`), and eBay's Browse API wire values (`price`, `-price`, `newlyListed`, `endingSoonest`) which go over the network verbatim and are persisted in SQLite by Saved searches.
 
 All of these are enforced mechanically by `src/lib/conventions.test.ts`, which scans `src/pages/` and `src/components/` and names the offending file and line. Exemptions live in an allowlist there and are themselves tested for staleness — if you need one, add it with the reason, don't loosen the pattern. Whole-line comments are skipped, so prose explaining a rule can name the thing it forbids.
 

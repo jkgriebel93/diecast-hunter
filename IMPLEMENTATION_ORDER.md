@@ -1,10 +1,10 @@
 # Implementation order for open DCH tickets
 
-As of 2026-08-07 (rev 13: DCH-34, DCH-32 and DCH-33 merged, DCH-36 filed, DCH-16 parked, DCH-30
+As of 2026-08-07 (rev 14: DCH-34, DCH-32, DCH-33 and DCH-35 merged, DCH-36 filed, DCH-16 parked, DCH-30
 deployed pending its console verification). Seventeen tickets are merged — DCH-8, DCH-9,
 DCH-10, DCH-11, DCH-12, DCH-14, DCH-15, DCH-17, DCH-18, DCH-22, DCH-28, DCH-29, DCH-30,
-DCH-31, DCH-32, DCH-33, DCH-34 — and DCH-19 spawned five follow-ups, so the open list is
-eight substantive items plus the roadmap buckets.
+DCH-31, DCH-32, DCH-33, DCH-34, DCH-35 — and DCH-19 spawned five follow-ups, of which only
+DCH-36 is open. The list is seven substantive items plus the roadmap buckets.
 
 The ordering principle has not changed: compounding work (training data, CI safety, anything
 that makes later tickets cheaper or safer) goes before features that only pay off once.
@@ -43,8 +43,39 @@ Two things worth carrying forward:
 
 | # | Ticket | What | Why here |
 | --- | --- | --- | --- |
-| 1 | DCH-35 | Filter-row parity | "Clear filters" exists on one screen of seven. |
+| 1 | DCH-20 | Redesign Saved Listing detail panel | 5,626 lines, the audit's worst offender. Both its prerequisites (`Modal`, danger classes) have landed. **Verify the 5,626 first** — see the note on audit numbers below. |
+| 2 | DCH-21 | Reorganize Settings screen | 21 buttons with no hierarchy between sections. |
 | — | DCH-36 | `ErrorBanner` retitles authored prose | Filed from DCH-34. A presentation decision, not a mechanical fix. `Modal` now exists, so a notice variant has somewhere obvious to live. |
+
+**The whole DCH-19 follow-up set is now closed** (DCH-32/33/34/35). The UI has a shared
+`Modal`, danger classes, formatting helpers and a filter contract, all enforced by
+`src/lib/conventions.test.ts` rather than by review.
+
+**DCH-35 is done, and its headline claim was wrong.** The ticket led with "Clear filters
+exists on exactly one screen" and called it the highest-value item. Three screens had one:
+Collection ("Clear filters", conditional), Listings ("Clear all filters", always visible) and
+Seller feed ("Reset", always visible). The audit's table also said Seller feed had no search
+box; it has had one all along. The real gaps were Registry, Browse and Wishlist — three
+screens, not six — plus normalizing the three that already existed to one label and one
+visibility rule.
+
+That makes **four for four** on checking the audit's numbers first: DCH-34 inflated, DCH-32
+slightly pessimistic, DCH-33 accurate, DCH-35 overstated. The habit has paid for itself every
+time; DCH-20's "5,626 lines, worst on every axis" is the next claim worth measuring before
+planning against it.
+
+Two constraints worth not rediscovering:
+
+*eBay sort values are wire format.* Browse, Seller feed and Saved searches send `sort`
+straight to the Browse API, and Saved searches persists it in SQLite. Renaming those to
+`field-asc` would break the request and every saved row, so they keep eBay's values — their
+labels already followed the vocabulary. `sortOptions.ts` states the exemption once, and the
+convention test reads it from there.
+
+*Wishlist filtering and drag-reorder can't both be live.* Reordering a filtered subset would
+write that partial order back over the full list. Dragging is disabled while a search is
+active, ranks shown are the entry's true stack-rank rather than its position in the subset,
+and the UI says why.
 
 **DCH-33 is done**, and it clears the last dependency on the two redesigns: `Modal` and the
 danger classes both exist, so DCH-20 and DCH-21 can start whenever you want them.
@@ -128,20 +159,17 @@ registry flow relies on. Anything added later that walks `registry_entries` and 
 diecastregistry.com about what it found needs `source <> 'local'` — a manual entry has no
 detail page, so a lookup for one either 404s or, worse, matches something else.
 
-## UI track (dependency-fixed order)
+## UI track
 
-DCH-19 is done. Its output is the [UI Audit and Standardization
-Guidelines](https://thistlegrow.atlassian.net/wiki/spaces/DCH/pages/51183617) page, whose
-conventions checklist is what the two redesigns execute against.
+The dependency ordering this section used to express is satisfied: DCH-32 gave the redesigns
+`Modal`, DCH-33 gave them the danger classes, DCH-34 the formatting helpers and DCH-35 the
+filter contract — the four things DCH-20 and DCH-21 would otherwise have had to redo. Both
+now sit in "Next up" above.
 
-Both prerequisites have landed. DCH-32 gave the redesigns `Modal`, and DCH-33 gave them
-`.btn-danger` / `.link-danger` — the two things that would have had to be redone if DCH-20 and
-DCH-21 had gone first. Nothing now blocks either.
-
-| # | Ticket | What |
-| --- | --- | --- |
-| 2 | DCH-20 | Redesign Saved Listing detail panel — 5,626 lines, the audit's worst offender on every axis |
-| 3 | DCH-21 | Reorganize Settings screen — 21 buttons with no hierarchy between sections |
+The standing reference is the [UI Audit and Standardization
+Guidelines](https://thistlegrow.atlassian.net/wiki/spaces/DCH/pages/51183617) page, but the
+conventions themselves are in `CLAUDE.md` and enforced by `src/lib/conventions.test.ts` —
+read those first; they're the ones that fail a build.
 
 ## Later
 
