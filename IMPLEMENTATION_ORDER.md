@@ -15,11 +15,11 @@ cheaper or safer — goes before features that only pay off once.
 
 | # | Ticket | What | Why here |
 | --- | --- | --- | --- |
-| 1 | DCH-24 | User documentation | Its own precondition just cleared: it was sequenced behind UI standardization so screenshots wouldn't go stale, and that finished today. ~20 screenshots already sit in `docs/screenshots/` from the UI work and can seed it. |
-| 2 | DCH-23 | Performance profiling pass | Findings note plus follow-ups. No known slowness driving it. |
-| 3 | DCH-13 | Photo-tagging feasibility | Spike. Flagged likely-expensive; confirm or kill cheaply. |
-| 4 | DCH-26 | Lionel website integration | Scope still open — needs a use case before an implementation. |
-| 5 | DCH-27 | Revive Facebook Marketplace | Its stated precondition (matching/valuation epics) is met, but the real blocker was never sequencing: FB has no API, and the previous integration was removed deliberately. |
+| 1 | DCH-23 | Performance profiling pass | Findings note plus follow-ups. No known slowness driving it. |
+| 2 | DCH-13 | Photo-tagging feasibility | Spike. Flagged likely-expensive; confirm or kill cheaply. |
+| 3 | DCH-26 | Lionel website integration | Scope still open — needs a use case before an implementation. |
+| 4 | DCH-27 | Revive Facebook Marketplace | Its stated precondition (matching/valuation epics) is met, but the real blocker was never sequencing: FB has no API, and the previous integration was removed deliberately. |
+| — | DCH-42 | Database backup and restore | Filed from DCH-25. Only the manually-entered slice is genuinely at risk — DCR data re-syncs — but the sold-listings archive can't be backfilled at all. |
 
 **DCH-16 is parked** (On Hold). The original complaint was forgotten and never written down.
 Rather than invent one, wait and see whether the UI track resolved it.
@@ -70,6 +70,7 @@ read-only projection.
 | DCH-34 | `formatCount` / `formatDateTime` adoption; the `String(e)` prefix fix. |
 | DCH-35 | Filter contract and one sort vocabulary across seven list screens. |
 | DCH-36 | `NoticeBanner` — a third message channel for authored prose. |
+| DCH-24 | [User guide](https://thistlegrow.atlassian.net/wiki/spaces/DCH/pages/51609624) in Confluence — five pages, written against the standardized UI. |
 
 ## Things worth not rediscovering
 
@@ -119,7 +120,7 @@ latter resolves an unpinned version.
 - ~~Extension needs repackaging~~ — solved by **DCH-31**. CI uploads a
   `diecast-hunter-extension-<sha>` artifact on every run. Installing it is still a manual
   load-unpacked step; Chrome Web Store publishing was explicitly out of scope.
-- **Backup and restore is only half-solved.** DCH-25 noted that a published snapshot is an
-  off-machine copy of the *display* data — but it excludes `raw_json` and settings, so it is
-  not a restore path. Worth a ticket once DCH-37 lands, since the collection represents
-  manual entry that would hurt to lose.
+- ~~Backup and restore is only half-solved~~ — filed as **DCH-42**. A published snapshot is an
+  off-machine copy of the *display* data, but it excludes `raw_json` and settings, so it is
+  not a restore path. The ticket also records the WAL trap: copying the `.sqlite` file while
+  the app runs can miss committed data still in the `-wal`.

@@ -69,6 +69,16 @@ real source PNG (≥1024px square):
 pnpm tauri icon path\to\source.png
 ```
 
+## Documentation
+
+User-facing docs live in Confluence: [Diecast Hunter — User
+Guide](https://thistlegrow.atlassian.net/wiki/spaces/DCH/pages/51609624). Setup on a new
+machine, everyday use, what the valuation numbers mean, the browser extension, and
+troubleshooting.
+
+`CLAUDE.md` is the developer-facing counterpart — conventions, architecture, and the
+constraints that aren't obvious from the code.
+
 ## Roadmap
 
 This is milestone 1 of 6. See conversation history for the full plan.
