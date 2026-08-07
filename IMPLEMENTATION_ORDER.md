@@ -1,6 +1,6 @@
 # Implementation order for open DCH tickets
 
-As of 2026-08-07 (rev 14: DCH-34, DCH-32, DCH-33 and DCH-35 merged, DCH-36 filed, DCH-16 parked, DCH-30
+As of 2026-08-07 (rev 15: the whole UI track merged (DCH-20, 21, 32, 33, 34, 35), DCH-36 filed, DCH-16 parked, DCH-30
 deployed pending its console verification). Seventeen tickets are merged — DCH-8, DCH-9,
 DCH-10, DCH-11, DCH-12, DCH-14, DCH-15, DCH-17, DCH-18, DCH-22, DCH-28, DCH-29, DCH-30,
 DCH-31, DCH-32, DCH-33, DCH-34, DCH-35 — and DCH-19 spawned five follow-ups, of which only
@@ -43,8 +43,22 @@ Two things worth carrying forward:
 
 | # | Ticket | What | Why here |
 | --- | --- | --- | --- |
-| 1 | DCH-21 | Reorganize Settings screen | 21 buttons with no hierarchy between sections. 1,698 lines. |
-| — | DCH-36 | `ErrorBanner` retitles authored prose | Filed from DCH-34. A presentation decision, not a mechanical fix. `Modal` now exists, so a notice variant has somewhere obvious to live. |
+| 1 | DCH-36 | `ErrorBanner` retitles authored prose | Filed from DCH-34. A presentation decision, not a mechanical fix. `Modal` now exists, so a notice variant has somewhere obvious to live. |
+
+**DCH-21 is done, and the roadmap's UI work with it.** Settings is four tabs — Accounts,
+Sync, Search & matching, Extension — with the choice persisted so you reopen where you left.
+
+The tabs are the visible part; the substantive change is underneath. Two cards were doing
+more than one job: the diecastregistry.com card held the sign-in *and* four registry
+maintenance tools, and the eBay card held API keys *and* two search preferences. Every
+sub-block is now its own card, filed by what it is rather than by which integration it
+happened to arrive with — credentials for both services together, registry tools under Sync,
+search preferences under Search.
+
+The ticket suggested an "Appearance/Display" group. There is nothing to put in it: theme and
+font scale live in the sidebar footer and aren't Settings state at all. Moving them would be
+a change to where those controls live, which is a different decision from organizing what's
+already here.
 
 **DCH-20 is done.** The Saved Listing card is collapsed by default and its expanded state
 is three labelled groups (match & valuation / details / actions) instead of seven flat rows.
