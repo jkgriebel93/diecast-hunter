@@ -3,6 +3,8 @@ import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
   api,
   formatCents,
+  formatCount,
+  formatDateTime,
   type EbaySearchItem,
   type EbaySearchPage,
   type SavedSearch,
@@ -204,12 +206,12 @@ export function SavedSearches() {
                   </div>
                   <div className="text-xs text-fg-faint mt-1">
                     {s.last_run_at
-                      ? `Last run ${new Date(s.last_run_at * 1000).toLocaleString()}`
+                      ? `Last run ${formatDateTime(s.last_run_at)}`
                       : "Never run"}
                     {s.last_synced_at && (
                       <span>
                         {" · synced "}
-                        {new Date(s.last_synced_at * 1000).toLocaleString()}
+                        {formatDateTime(s.last_synced_at)}
                       </span>
                     )}
                   </div>
@@ -310,7 +312,7 @@ function ResultsPanel({
       <div className="flex items-center justify-between text-xs text-fg-subtle">
         <div>
           {page.total > 0
-            ? `Showing ${showingFrom}–${showingTo} of ${page.total.toLocaleString()}`
+            ? `Showing ${showingFrom}–${showingTo} of ${formatCount(page.total)}`
             : "No results."}
         </div>
         <div className="flex items-center gap-2">

@@ -1160,4 +1160,4 @@ export async function driverListingCounts(): Promise<Map<string, number>> {
 // Re-exported so the many existing `import { formatCents } from "@/lib/tauri"`
 // sites keep working; the implementation lives in format.ts (Tauri-free,
 // unit-testable).
-export { formatAgo, formatCents, formatCount } from "./format";
+export { formatAgo, formatCents, formatCount, formatDateTime } from "./format";

@@ -69,10 +69,21 @@ interface Split {
   body: string;
 }
 
+/** `String(e)` on a real `Error` yields "Error: network error: …" — the
+ *  constructor name gets glued on the front, and every prefix in `PREFIXES`
+ *  then fails to match, so a perfectly recognizable backend failure falls
+ *  through to "Something went wrong."
+ *
+ *  Call sites reach `String(e)` in over a hundred places. Stripping the
+ *  constructor name here fixes all of them at once, which is strictly better
+ *  than rewriting each `catch` and hoping the next one remembers. */
+const CONSTRUCTOR_NAME = /^(?:[A-Z][A-Za-z]*)?Error:\s+/;
+
 function splitPrefix(raw: string): Split {
+  const text = raw.replace(CONSTRUCTOR_NAME, "");
   for (const [prefix, kind] of PREFIXES) {
-    if (raw.startsWith(prefix)) {
-      return { prefix, kind, body: raw.slice(prefix.length).trim() };
+    if (text.startsWith(prefix)) {
+      return { prefix, kind, body: text.slice(prefix.length).trim() };
     }
   }
   return { prefix: null, kind: "unknown", body: raw };

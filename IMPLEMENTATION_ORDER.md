@@ -42,10 +42,31 @@ Two things worth carrying forward:
 
 | # | Ticket | What | Why here |
 | --- | --- | --- | --- |
-| 1 | DCH-34 | Finish DCH-17/DCH-18 adoption | Mechanical and greppable. 21 raw error divs are a *visible* defect today — users see the untranslated text DCH-18 existed to remove. |
-| 2 | DCH-32 | Shared `Modal` component | The audit's biggest finding. Eleven hand-built dialogs, four z-layers, Escape on only two. Do it before DCH-20/21, which both add dialogs. |
-| 3 | DCH-33 | `.btn-danger` / `.link-danger` | Small, and DCH-20 needs it — the listing panel is full of destructive actions with no shared treatment. |
-| 4 | DCH-35 | Filter-row parity | "Clear filters" exists on one screen of seven. |
+| 1 | DCH-32 | Shared `Modal` component | The audit's biggest finding. Eleven hand-built dialogs, four z-layers, Escape on only two. Do it before DCH-20/21, which both add dialogs. |
+| 2 | DCH-33 | `.btn-danger` / `.link-danger` | Small, and DCH-20 needs it — the listing panel is full of destructive actions with no shared treatment. |
+| 3 | DCH-35 | Filter-row parity | "Clear filters" exists on one screen of seven. |
+| — | DCH-36 | `ErrorBanner` retitles authored prose | Filed from DCH-34. Order it with DCH-32/33 if a shared notice variant falls out of that work; it's a presentation decision, not a mechanical fix. |
+
+**DCH-34 is done**, and half of it was a false alarm worth recording, because the same
+mistake is easy to repeat when reading the audit's other findings.
+
+The audit reported "21 hand-rolled error divs". That number came from counting `text-red-*`
+occurrences, and almost all of them are `hover:text-red-400` on destructive icon buttons —
+which is **DCH-33's** subject, not DCH-18's. Exactly one genuine hand-rolled error box
+existed (`ManualEntryDialog`'s save failure, added by DCH-12 after the helper landed). The
+"visible defect today" framing in the ticket was wrong; `ErrorBanner` adoption was already
+essentially complete. Treat the audit's other raw-grep counts (DCH-33's especially) as
+upper bounds until someone eyeballs the hits.
+
+The `formatCount` half was real, and bigger than stated once dates were separated out: of
+the 19 `toLocaleString()` calls, 8 were counts and 11 were `new Date(x * 1000)`. The date
+half had a live bug — a null timestamp coerces to 0 and renders the Unix epoch as a
+plausible-looking sync time — so `formatDateTime` is new in `lib/format.ts` and all 19 sites
+now route through a helper.
+
+Both rules are now enforced by `src/lib/conventions.test.ts` rather than by review. That is
+the part worth copying: DCH-17 and DCH-18 each shipped a helper and were quietly bypassed
+for months, and a checklist line would not have caught the twentieth violation either.
 
 **DCH-16 is parked** (On Hold). The original complaint was forgotten and never written down;
 rather than invent one, wait and see whether the UI track resolves it. Reasoning and the
@@ -74,19 +95,19 @@ mean redoing the work.
 
 | # | Ticket | What |
 | --- | --- | --- |
-| 5 | DCH-20 | Redesign Saved Listing detail panel — 5,626 lines, the audit's worst offender on every axis |
-| 6 | DCH-21 | Reorganize Settings screen — 21 buttons with no hierarchy between sections |
+| 4 | DCH-20 | Redesign Saved Listing detail panel — 5,626 lines, the audit's worst offender on every axis |
+| 5 | DCH-21 | Reorganize Settings screen — 21 buttons with no hierarchy between sections |
 
 ## Later
 
 | # | Ticket | What | Notes |
 | --- | --- | --- | --- |
-| 7 | DCH-25 | "Production ready" definition spike | Spawns the real production work items — goes before them. |
-| 8 | DCH-24 | User documentation | After UI standardization so screenshots don't go stale. |
-| 9 | DCH-23 | Performance profiling pass | When something is actually slow, or pre-production. |
-| 10 | DCH-13 | Photo-tagging feasibility spike | Flagged likely-expensive; confirm or kill cheaply. |
-| 11 | DCH-26 | Lionel website integration | Expansion waits for solid core; needs use-case decision. |
-| 12 | DCH-27 | Revive Facebook Marketplace integration | Plugs back into the listing-receiver architecture. |
+| 6 | DCH-25 | "Production ready" definition spike | Spawns the real production work items — goes before them. |
+| 7 | DCH-24 | User documentation | After UI standardization so screenshots don't go stale. |
+| 8 | DCH-23 | Performance profiling pass | When something is actually slow, or pre-production. |
+| 9 | DCH-13 | Photo-tagging feasibility spike | Flagged likely-expensive; confirm or kill cheaply. |
+| 10 | DCH-26 | Lionel website integration | Expansion waits for solid core; needs use-case decision. |
+| 11 | DCH-27 | Revive Facebook Marketplace integration | Plugs back into the listing-receiver architecture. |
 
 ## Open items that aren't tickets
 

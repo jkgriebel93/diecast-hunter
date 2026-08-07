@@ -5,6 +5,7 @@ import {
   api,
   formatCents,
   formatCount,
+  formatDateTime,
   type EbaySyncAllSummary,
   type ListingRow,
   type SavedSearch,
@@ -357,7 +358,7 @@ function ListingPreview({
             {row.end_time && row.status === "active" && (
               <span>
                 {" · ends "}
-                {new Date(row.end_time * 1000).toLocaleString()}
+                {formatDateTime(row.end_time)}
               </span>
             )}
           </div>

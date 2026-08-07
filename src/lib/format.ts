@@ -21,6 +21,25 @@ export function formatCount(n: number | null | undefined): string {
   return COUNT.format(n);
 }
 
+/** "1/23/2026, 4:05:00 PM" — a stored Unix timestamp as a local date+time.
+ *
+ *  Takes *seconds*, because that's what every timestamp column in the schema
+ *  holds; the `* 1000` belongs here rather than at eleven call sites.
+ *
+ *  Em dash for missing values, which is the point of routing through a
+ *  helper at all. A NULL `last_synced_at` is an ordinary state, and the
+ *  inline form got it wrong two different ways: `undefined * 1000` is NaN
+ *  and renders the literal string "Invalid Date", while `null * 1000` is 0
+ *  and renders the Unix epoch — a plausible-looking date that is simply not
+ *  true. The second is the worse failure, and the harder one to notice. */
+export function formatDateTime(unixSeconds: number | null | undefined): string {
+  if (unixSeconds === null || unixSeconds === undefined) return "—";
+  if (!Number.isFinite(unixSeconds)) return "—";
+  const d = new Date(unixSeconds * 1000);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString();
+}
+
 /** Coarse age of a past event, e.g. "3 weeks ago", for sold-comp recency.
  *  Deliberately imprecise: the question a comp answers is "is this still the
  *  current market?", not "what date exactly?". Future timestamps clamp to

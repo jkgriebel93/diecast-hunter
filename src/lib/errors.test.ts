@@ -142,3 +142,39 @@ describe("describeError — everything else", () => {
     expect(d.detail).toBeNull();
   });
 });
+
+describe("constructor-name prefixes from String(e)", () => {
+  // Over a hundred `catch` blocks in the app do `setError(String(e))`. When
+  // the caught value is a real `Error` rather than a Tauri rejection string,
+  // that glues the constructor name onto the front and every prefix in
+  // PREFIXES stopped matching — a recognizable backend failure fell through
+  // to "Something went wrong."
+  it("classifies an AppError that came through String(e)", () => {
+    const d = describeError("Error: network error: dns error: no such host");
+    expect(d.title).toMatch(/Couldn't reach/);
+    expect(d.kind).toBe("network");
+  });
+
+  it("strips subclass names too", () => {
+    const d = describeError("TypeError: database error: disk I/O error");
+    expect(d.title).toBe("Couldn't read or write the local database.");
+  });
+
+  it("keeps the untouched original in the details disclosure", () => {
+    // Stripping is for matching only — the technical details should still
+    // show exactly what was thrown.
+    const raw = "Error: keyring error: no backend";
+    expect(describeError(raw).detail).toBe("no backend");
+    expect(describeError("Error: something unrecognized").detail).toBe(
+      "Error: something unrecognized",
+    );
+  });
+
+  it("does not eat a message that merely mentions an error", () => {
+    // "Error:" has to be at the start and followed by a known prefix to do
+    // anything; ordinary prose is untouched.
+    const d = describeError("The importer reported: Error: bad row");
+    expect(d.title).toBe("Something went wrong.");
+    expect(d.detail).toBe("The importer reported: Error: bad row");
+  });
+});

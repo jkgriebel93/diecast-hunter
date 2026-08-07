@@ -3,6 +3,8 @@ import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
   api,
   formatCents,
+  formatCount,
+  formatDateTime,
   type EbaySearchFilters,
   type EbaySearchItem,
   type EbaySearchPage,
@@ -149,8 +151,10 @@ export function Browse() {
       setWatchedByItemId(m);
     } catch (e) {
       // Non-fatal — Watch buttons just won't reflect existing watchlist
-      // membership. Surface as a soft warning.
-      setError(`Couldn't load existing saved listings: ${e}`);
+      // membership. Passed through unwrapped: interpolating it into a
+      // sentence hid the `AppError` prefix, so `describeError` couldn't
+      // recognize it and fell back to "Something went wrong."
+      setError(String(e));
     }
   }
 
@@ -369,7 +373,7 @@ export function Browse() {
         <div className="flex items-center justify-between text-xs text-fg-subtle">
           <div>
             {page.total > 0
-              ? `Showing ${showingFrom}–${showingTo} of ${page.total.toLocaleString()} results`
+              ? `Showing ${showingFrom}–${showingTo} of ${formatCount(page.total)} results`
               : "No results."}
           </div>
           <div className="flex items-center gap-2">
@@ -505,7 +509,7 @@ function SearchCard({
               </div>
               {item.end_time && item.listing_type === "auction" && (
                 <div className="text-xs text-fg-subtle mt-0.5">
-                  ends {new Date(item.end_time * 1000).toLocaleString()}
+                  ends {formatDateTime(item.end_time)}
                 </div>
               )}
             </>
