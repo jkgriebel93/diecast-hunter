@@ -30,6 +30,13 @@
     --color-danger: 185 28 28;
     --color-danger-hover: 153 27 27;
     --color-danger-fg: 185 28 28;
+    /* Partial success — the action worked but something was skipped
+       (DCH-36). A third channel, because such a message is neither an error
+       nor a plain success and reads wrong as either. amber-700 here: the
+       codebase's existing amber is chosen for the dark background and has no
+       light-mode override, so it washes out on white. */
+    --color-warning-fg: 180 83 9;
+    --color-warning-border: 217 119 6;
     color-scheme: light;
   }
 
@@ -56,6 +63,8 @@
     --color-danger: 239 68 68;
     --color-danger-hover: 220 38 38;
     --color-danger-fg: 248 113 113;
+    --color-warning-fg: 251 191 36;
+    --color-warning-border: 217 119 6;
     color-scheme: dark;
   }
 

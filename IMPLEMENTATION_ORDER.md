@@ -1,7 +1,7 @@
 # Implementation order for open DCH tickets
 
 As of 2026-08-07 (rev 15: the whole UI track merged (DCH-20, 21, 32, 33, 34, 35), DCH-36 filed, DCH-16 parked, DCH-30
-deployed pending its console verification). Seventeen tickets are merged — DCH-8, DCH-9,
+DCH-30 verified and closed). Seventeen tickets are merged — DCH-8, DCH-9,
 DCH-10, DCH-11, DCH-12, DCH-14, DCH-15, DCH-17, DCH-18, DCH-22, DCH-28, DCH-29, DCH-30,
 DCH-31, DCH-32, DCH-33, DCH-34, DCH-35 — and DCH-19 spawned five follow-ups, of which only
 DCH-36 is open. The list is seven substantive items plus the roadmap buckets.
@@ -175,9 +175,13 @@ technical context are on the ticket.
 
 DCH-30 turned out **not** to be dashboard config: Cloudflare has no way to alert on a
 discrete log event — Workers Logs can't alert at all, and Notifications alert types are
-threshold-shaped. The Worker now reports `deletion_insert_failed` to Sentry itself, and is
-deployed. What remains is running `POST /api/test-alert` against it and confirming the mail
-arrives — the "observed firing" criterion.
+threshold-shaped. The Worker reports `deletion_insert_failed` to Sentry itself. Verified end
+to end on 2026-08-07 via `POST /api/test-alert`; evidence is on the ticket.
+
+One thing that ticket could not prove: the **fingerprint is untested**. That was the first
+occurrence, so grouping was never exercised. Every event shares the fixed fingerprint
+`deletion-insert-failed` and should land in one issue rather than one per distinct D1 error
+string — if two separate `DeletionInsertFailed` issues ever appear, that is the bug.
 
 `registry_entries.source` is new as of DCH-12, and it is now the guard every DCR-facing
 registry flow relies on. Anything added later that walks `registry_entries` and then talks to

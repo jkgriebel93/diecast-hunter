@@ -30,6 +30,10 @@ export default {
           hover: "rgb(var(--color-danger-hover) / <alpha-value>)",
           fg: "rgb(var(--color-danger-fg) / <alpha-value>)",
         },
+        warning: {
+          DEFAULT: "rgb(var(--color-warning-border) / <alpha-value>)",
+          fg: "rgb(var(--color-warning-fg) / <alpha-value>)",
+        },
         fg: {
           DEFAULT: "rgb(var(--color-fg) / <alpha-value>)",
           muted: "rgb(var(--color-fg-muted) / <alpha-value>)",

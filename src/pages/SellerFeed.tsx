@@ -6,6 +6,7 @@ import {
   formatCents,
   formatCount,
   formatDateTime,
+  formatUntil,
   type EbaySearchFilters,
   type EbaySearchItem,
   type EbaySearchPage,
@@ -17,6 +18,7 @@ import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { NoticeBanner } from "@/components/NoticeBanner";
 import { Modal } from "@/components/Modal";
 
 const IMG_CLASS: Record<ImageSize, string> = {
@@ -59,6 +61,10 @@ export function SellerFeed() {
     new Map(),
   );
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  /** Authored partial-success text — the action worked, something was
+   *  skipped. Its own state so it is never confused with a backend
+   *  failure, which is what `error` carries. */
+  const [notice, setNotice] = useState<string | null>(null);
   const [imgSize, setImgSize] = useImageSize("sellerFeed");
 
   const [query, setQuery] = useState("");
@@ -223,13 +229,17 @@ export function SellerFeed() {
   async function onWatch(item: EbaySearchItem) {
     setBusyItemId(item.item_id);
     setActionMessage(null);
+    setNotice(null);
     setError(null);
     try {
       const result = await api.watchEbayListing(
         item.legacy_item_id ?? item.web_url,
       );
       if (result.filtered_reason) {
-        setError(
+        // Partial success, not failure: the eBay-side AddToWatchList already
+        // went through. Routing it to `error` put it in a red box titled
+        // "Something went wrong." with the truth collapsed underneath.
+        setNotice(
           `Added to eBay watchlist, but local save was filtered: ${result.filtered_reason}.`,
         );
       } else if (result.listing_id !== null) {
@@ -254,6 +264,7 @@ export function SellerFeed() {
     if (listingId === undefined) return;
     setBusyItemId(item.item_id);
     setActionMessage(null);
+    setNotice(null);
     setError(null);
     try {
       await api.unwatchEbayListing(listingId);
@@ -534,8 +545,9 @@ export function SellerFeed() {
       />
 
       {error && <ErrorBanner error={error} />}
+      <NoticeBanner message={notice} tone="warning" />
       {actionMessage && (
-        <div className="text-xs text-emerald-400">{actionMessage}</div>
+        <NoticeBanner message={actionMessage} variant="inline" />
       )}
 
       {sellers !== null && sellers.length === 0 ? (
@@ -864,7 +876,7 @@ function FeedCard({
               </div>
               {item.end_time && item.listing_type === "auction" && (
                 <div className="text-xs text-fg-subtle mt-0.5">
-                  ends {formatDateTime(item.end_time)}
+                  ends {formatUntil(item.end_time)}
                 </div>
               )}
             </>
