@@ -77,6 +77,16 @@ Before changing anything under `src/pages/` or `src/components/`, read the [UI A
 
 **Never format a number or a date inline** (DCH-34). `formatCount` for quantities, `formatCents` for money, `formatDateTime` / `formatDate` / `formatTime` for stored Unix timestamps — all from `@/lib/format`, re-exported by `@/lib/tauri`. Each renders an em dash for null; the inline forms don't, and they fail in ways that read as real data rather than as missing data: `new Date(undefined * 1000).toLocaleString()` renders the string "Invalid Date", and a null timestamp coerces to 0 and renders the Unix epoch as if it were a genuine sync time.
 
+**Three message channels, chosen by where the words came from — not by how bad the news is** (DCH-36):
+
+| The message is | Use | Why |
+| --- | --- | --- |
+| a value thrown by the backend | `ErrorBanner` | needs translating; its raw form belongs behind the disclosure |
+| a sentence we wrote, action worked | `NoticeBanner` (`tone="success"`) | already written for a person |
+| a sentence we wrote, action worked but something was skipped | `NoticeBanner` `tone="warning"` | nothing failed; red would tell the user to undo something that went through |
+
+Authored text is never re-titled and never collapsed. Give partial-success its **own state** (`notice`), separate from `error` — overloading `error` with authored prose is what made two watch actions report "Something went wrong." when the eBay side had succeeded. A `set*Error` call with an interpolated string is the signature of that mistake and is blocked by a convention test.
+
 **Never hand-roll an error box** (DCH-18, DCH-34). Every backend failure renders through `<ErrorBanner error={…} />` (`variant="inline"` in dialogs and side panels), which supplies the plain-language title and the "Technical details" disclosure. Pass the caught value, not a sentence built around it — interpolating an error into `` `Couldn't load X: ${e}` `` hides the `AppError` prefix, so `describeError` can't classify it and falls back to "Something went wrong." Client-side validation text is *not* an error in this sense: it's already written for a person, and routing it through `ErrorBanner` would retitle it and bury it.
 
 **Never hand-build a dialog** (DCH-32). Every modal is `<Modal title=… onClose=…>` from `@/components/Modal`, which owns the backdrop, centring, stacking, Escape, backdrop-click dismissal, `role="dialog"`, `aria-modal` and the accessible name. Callers supply title, body and footer actions. Useful props: `onSubmit` renders the panel as a `<form>`; `busy` makes Escape and backdrop click inert and hides the × while a save is in flight; `scroll="none"` hands height control to `panelClassName` for dialogs that scroll an inner region so their header and footer stay put; `header` replaces the default title block when a dialog needs richer chrome.

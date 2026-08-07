@@ -252,3 +252,32 @@ describe("sort dropdowns share one vocabulary", () => {
     expect(violations(/\([A-Za-z]+\s*→\s*[A-Za-z]+\)/)).toEqual([]);
   });
 });
+
+describe("authored messages don't go through ErrorBanner", () => {
+  /** `ErrorBanner` runs its input through `describeError`, which classifies
+   *  Rust `AppError` strings. Hand it a sentence we wrote and nothing
+   *  matches, so it renders "Something went wrong." with the real text
+   *  collapsed into a disclosure (DCH-36). Two watch actions hit that and
+   *  told the user the opposite of what happened — the eBay side had
+   *  succeeded.
+   *
+   *  A template literal passed to a `set*Error` setter is the precise
+   *  signature: interpolation means a sentence was composed here rather than
+   *  thrown by the backend. Every other error setter in the app passes
+   *  `String(e)` or a caught value, so this rule currently has no
+   *  exemptions — authored text goes to `NoticeBanner` instead. */
+  it("has no set*Error called with a composed string", () => {
+    const hits: string[] = [];
+    for (const file of sourceFiles()) {
+      const src = readFileSync(file, "utf8");
+      for (const m of src.matchAll(/set[A-Za-z]*Error\(\s*\n?\s*`([^`]*)`/g)) {
+        // Only flag interpolated prose. A bare backtick string with no
+        // substitution is just a quoted constant.
+        if (!m[1].includes("${")) continue;
+        const line = src.slice(0, m.index).split("\n").length;
+        hits.push(`${file}:${line} — ${m[0].slice(0, 60)}…`);
+      }
+    }
+    expect(hits).toEqual([]);
+  });
+});
