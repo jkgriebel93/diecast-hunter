@@ -170,7 +170,19 @@ export function SellerFeed() {
     await loadFeed(0, q);
   }
 
-  function onResetFilters() {
+  /** True when anything is narrowing the feed. `sort` is deliberately not
+   *  counted — an ordering isn't a filter, and treating it as one would
+   *  leave the clear control permanently visible. */
+  const filtersActive =
+    activeQuery !== "" ||
+    query !== "" ||
+    conditions.length > 0 ||
+    buyingOptions.length > 0 ||
+    priceMin !== "" ||
+    priceMax !== "" ||
+    sellerSubset.size > 0;
+
+  async function onResetFilters() {
     setQuery("");
     setActiveQuery("");
     setConditions([]);
@@ -179,6 +191,33 @@ export function SellerFeed() {
     setPriceMax("");
     setSellerSubset(new Set());
     setSort("newlyListed");
+    // The feed is a live eBay query, so clearing the inputs isn't enough:
+    // without this the user sees cleared filters above stale, still-filtered
+    // results. Defaults are passed explicitly because the state setters
+    // above haven't been applied yet at this point.
+    setLoading(true);
+    setError(null);
+    try {
+      const p = await api.savedSellersFeed(
+        "",
+        {
+          conditions: [],
+          buying_options: [],
+          sellers: [],
+          price_min_cents: null,
+          price_max_cents: null,
+          sort: "newlyListed",
+        },
+        PAGE_SIZE,
+        0,
+      );
+      setPage(p);
+      setOffset(0);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function onWatch(item: EbaySearchItem) {
@@ -462,13 +501,15 @@ export function SellerFeed() {
         <div className="flex items-center justify-between text-xs text-fg-subtle">
           <span>{filterSummary}</span>
           <div className="flex gap-2">
-            <button
-              type="button"
-              className="btn-secondary text-xs"
-              onClick={onResetFilters}
-            >
-              Reset
-            </button>
+            {filtersActive && (
+              <button
+                type="button"
+                className="btn-secondary text-xs"
+                onClick={() => void onResetFilters()}
+              >
+                Clear filters
+              </button>
+            )}
             <button
               type="submit"
               className="btn-primary text-xs"

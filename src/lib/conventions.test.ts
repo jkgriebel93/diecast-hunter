@@ -16,6 +16,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { isConventionalSortValue } from "./sortOptions";
 
 const ROOTS = ["src/pages", "src/components"];
 
@@ -205,5 +206,49 @@ describe("destructive controls use the shared danger classes", () => {
     expect(css).toMatch(/\.btn-danger\s*\{/);
     expect(css).toMatch(/\.link-danger\s*\{/);
     expect(css).toMatch(/--color-danger:/);
+  });
+});
+
+describe("sort dropdowns share one vocabulary", () => {
+  /** DCH-35. The same concept was spelled three ways: driver A–Z was
+   *  `driver-asc`, a bare `driver`, and `name`. A value with no direction in
+   *  it is the specific defect — two screens can't agree on which way
+   *  `driver` sorts, and the label is the only clue.
+   *
+   *  `isConventionalSortValue` lives in `lib/sortOptions.ts` so the rule and
+   *  the vocabulary can't drift apart, and so its exemptions (eBay's wire
+   *  values, orderings with no axis) are stated once. */
+  it("uses field-asc / field-desc for every option value", () => {
+    const bad: string[] = [];
+    for (const file of sourceFiles()) {
+      readFileSync(file, "utf8")
+        .split("\n")
+        .forEach((line, i) => {
+          if (COMMENT_LINE.test(line)) return;
+          for (const m of line.matchAll(/<option value="([^"]*)"/g)) {
+            const v = m[1];
+            // Option values are also used for non-sort selects (a group
+            // picker, a condition list). Only flag ones that look like an
+            // ordering: a known sort field, or something already carrying a
+            // direction suffix.
+            if (
+              !/^(driver|year|name|title|price|total|deal|retail|qty|count|value|seen|ending|production)/.test(
+                v,
+              )
+            ) {
+              continue;
+            }
+            if (!isConventionalSortValue(v)) {
+              bad.push(`${file}:${i + 1} — value="${v}"`);
+            }
+          }
+        });
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it("has no parenthesised arrow labels", () => {
+    // Listings had "Name (A→Z)" against everyone else's "Driver A → Z".
+    expect(violations(/\([A-Za-z]+\s*→\s*[A-Za-z]+\)/)).toEqual([]);
   });
 });

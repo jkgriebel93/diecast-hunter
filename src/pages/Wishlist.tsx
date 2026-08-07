@@ -16,6 +16,7 @@ import { ViewLink } from "@/components/ViewLink";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { Modal } from "@/components/Modal";
+import { FilterCard, FilteredEmpty } from "@/components/FilterCard";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-24 h-24",
@@ -68,8 +69,40 @@ export function Wishlist() {
     "create" | "rename" | "delete" | null
   >(null);
   const [nameDraft, setNameDraft] = useState("");
+  /** Free-text filter over the fields a card already shows. DCH-35: this
+   *  screen had none, so a long wishlist could only be scanned by eye. */
+  const [searchText, setSearchText] = useState("");
 
   const activeList = lists?.find((l) => l.wishlist_id === activeId) ?? null;
+
+  const filtersActive = searchText.trim() !== "";
+
+  /** Entries carry their unfiltered rank, because the number shown on a card
+   *  is its stack-rank in the list — not its position in whatever subset a
+   *  search happens to show. */
+  const ranked = useMemo(
+    () => (entries ?? []).map((entry, i) => ({ entry, rank: i + 1 })),
+    [entries],
+  );
+
+  const visible = useMemo(() => {
+    const q = searchText.trim().toLowerCase();
+    if (!q) return ranked;
+    return ranked.filter(({ entry }) =>
+      [
+        entry.driver_name,
+        entry.scheme_text,
+        entry.oem,
+        entry.brand,
+        entry.scale,
+        entry.make,
+        entry.notes,
+        entry.year === null ? null : String(entry.year),
+      ]
+        .filter(Boolean)
+        .some((f) => (f as string).toLowerCase().includes(q)),
+    );
+  }, [ranked, searchText]);
 
   // Auto-scroll the pane while a drag hovers near its top or bottom edge.
   // dragover only fires over our own elements, so track the cursor with a
@@ -476,40 +509,64 @@ export function Wishlist() {
         </div>
       ) : (
         <>
+          <FilterCard active={filtersActive} onClear={() => setSearchText("")}>
+            <input
+              type="text"
+              className="input"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              placeholder="Search driver, scheme, year, OEM, brand, scale, notes…"
+            />
+          </FilterCard>
+
           <div className="text-xs text-fg-subtle">
-            {entries.length} entr{entries.length === 1 ? "y" : "ies"}.
-            {entries.length > 1 && (
+            {filtersActive
+              ? `${formatCount(visible.length)} of ${formatCount(entries.length)} entr${entries.length === 1 ? "y" : "ies"}.`
+              : `${formatCount(entries.length)} entr${entries.length === 1 ? "y" : "ies"}.`}
+            {entries.length > 1 && !filtersActive && (
               <span className="ml-2 text-fg-faint">
                 Drag the ⠿ handle to stack-rank by priority.
               </span>
             )}
+            {filtersActive && (
+              <span className="ml-2 text-fg-faint">
+                Reordering is off while a search is active — a drag would
+                rewrite the order using only the entries you can see.
+              </span>
+            )}
           </div>
-          <ul className="space-y-2" ref={listRef}>
-            {entries.map((entry, i) => (
-              <WishlistCard
-                key={entry.entry_id}
-                entry={entry}
-                rank={i + 1}
-                total={entries.length}
-                otherLists={(lists ?? []).filter(
-                  (l) => l.wishlist_id !== activeId,
-                )}
-                onMove={(targetListId) => void onMove(entry, targetListId)}
-                dragging={draggingId === entry.entry_id}
-                onDragStart={() => setDraggingId(entry.entry_id)}
-                onDragOverCard={() => onDragOverEntry(entry.entry_id)}
-                onDragEnd={onDragEnd}
-                onSendTop={() => onSendTo(entry, "top")}
-                onSendBottom={() => onSendTo(entry, "bottom")}
-                imgSize={imgSize}
-                onRemove={() => onRemove(entry)}
-                onLink={() => setLinkTarget(entry)}
-                onUnlink={(listingId) => onUnlink(entry, listingId)}
-                onNotesSaved={reload}
-                onError={setError}
-              />
-            ))}
-          </ul>
+
+          {visible.length === 0 ? (
+            <FilteredEmpty onClear={() => setSearchText("")} noun="entries" />
+          ) : (
+            <ul className="space-y-2" ref={listRef}>
+              {visible.map(({ entry, rank }) => (
+                <WishlistCard
+                  key={entry.entry_id}
+                  entry={entry}
+                  rank={rank}
+                  reorderable={!filtersActive}
+                  total={entries.length}
+                  otherLists={(lists ?? []).filter(
+                    (l) => l.wishlist_id !== activeId,
+                  )}
+                  onMove={(targetListId) => void onMove(entry, targetListId)}
+                  dragging={draggingId === entry.entry_id}
+                  onDragStart={() => setDraggingId(entry.entry_id)}
+                  onDragOverCard={() => onDragOverEntry(entry.entry_id)}
+                  onDragEnd={onDragEnd}
+                  onSendTop={() => onSendTo(entry, "top")}
+                  onSendBottom={() => onSendTo(entry, "bottom")}
+                  imgSize={imgSize}
+                  onRemove={() => onRemove(entry)}
+                  onLink={() => setLinkTarget(entry)}
+                  onUnlink={(listingId) => onUnlink(entry, listingId)}
+                  onNotesSaved={reload}
+                  onError={setError}
+                />
+              ))}
+            </ul>
+          )}
         </>
       )}
 
@@ -530,6 +587,7 @@ export function Wishlist() {
 function WishlistCard({
   entry,
   rank,
+  reorderable,
   total,
   otherLists,
   onMove,
@@ -549,6 +607,9 @@ function WishlistCard({
   entry: WishlistEntry;
   /** 1-based display position = stack-rank priority. */
   rank: number;
+  /** Off while a search is active: dragging would reorder using only the
+   *  visible subset and write that partial order back. */
+  reorderable: boolean;
   /** Total entries — for disabling the top/bottom jumps at the ends. */
   total: number;
   /** The other wishlists this entry could move to. */
@@ -622,8 +683,9 @@ function WishlistCard({
             <ToLineIcon direction="up" />
           </button>
           <div
-            draggable
+            draggable={reorderable}
             onDragStart={(e) => {
+              if (!reorderable) return;
               e.dataTransfer.effectAllowed = "move";
               e.dataTransfer.setData("text/plain", String(entry.entry_id));
               // Show the whole card as the drag ghost, not just the grip.
@@ -634,8 +696,16 @@ function WishlistCard({
               setTimeout(onDragStart, 0);
             }}
             onDragEnd={onDragEnd}
-            className="cursor-grab active:cursor-grabbing text-fg-faint hover:text-fg-muted px-1"
-            title="Drag to change priority"
+            className={`px-1 text-fg-faint ${
+              reorderable
+                ? "cursor-grab active:cursor-grabbing hover:text-fg-muted"
+                : "opacity-30 cursor-default"
+            }`}
+            title={
+              reorderable
+                ? "Drag to change priority"
+                : "Clear the search to reorder"
+            }
             aria-label="Drag to change priority"
           >
             <GripIcon />
