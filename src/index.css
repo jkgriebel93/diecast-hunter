@@ -15,6 +15,21 @@
     --color-fg-muted: 71 85 105;
     --color-fg-subtle: 100 116 139;
     --color-fg-faint: 148 163 184;
+    /* One red ramp for destructive actions (DCH-33). `danger` is the solid
+       fill behind white text; `danger-fg` is the same intent as *text* on
+       the page background, which needs a different value per theme to stay
+       legible. Before this there were three competing reds chosen ad hoc at
+       call sites.
+
+       The shade is picked so the fill separates from the page at least as
+       much as `.btn-primary` does — a destructive button must never read as
+       lighter than the harmless one beside it. Measured as WCAG contrast
+       against the page background: red-700 is 6.18 here against accent's
+       4.94. red-600 came in at 4.62, i.e. fractionally *fainter* than
+       primary, which is the defect this ticket exists to remove. */
+    --color-danger: 185 28 28;
+    --color-danger-hover: 153 27 27;
+    --color-danger-fg: 185 28 28;
     color-scheme: light;
   }
 
@@ -29,6 +44,18 @@
     --color-fg-muted: 148 163 184;
     --color-fg-subtle: 100 116 139;
     --color-fg-faint: 71 85 105;
+    /* Lighter here than in light mode, for the same reason and by the same
+       measure: against the near-black page, red-500 separates by 5.17 —
+       level with accent's 5.29 — while red-600 managed only 4.03 and read
+       as the dimmer of the two buttons. White on red-500 is 3.76, above the
+       3.0 UI-component threshold and slightly better than the existing
+       `.btn-primary` in this theme (3.68), so it is not a step down.
+
+       `danger-fg` lightens further still: a solid fill can afford a mid
+       red, but the same red as *text* on this background can't. */
+    --color-danger: 239 68 68;
+    --color-danger-hover: 220 38 38;
+    --color-danger-fg: 248 113 113;
     color-scheme: dark;
   }
 
@@ -97,6 +124,21 @@
   }
   .btn-secondary {
     @apply btn bg-bg-elevated hover:bg-border text-fg border border-border;
+  }
+  /* Destructive action rendered as a button, i.e. in a row or footer of
+     other buttons (DCH-33). Solid, so it is never visually lighter than the
+     `.btn-secondary` sitting next to it — the audit found several places
+     where the irreversible control was the faintest thing in its row. */
+  .btn-danger {
+    @apply btn bg-danger hover:bg-danger-hover text-white;
+  }
+  /* Destructive action rendered as inline text or a bare icon, inside a
+     list row or a chip, where a solid button would be absurd next to a
+     plain-text "Edit". Red at rest rather than on hover only: at rest these
+     were `text-fg-subtle`, which made them fainter than their harmless
+     neighbours. */
+  .link-danger {
+    @apply text-danger-fg hover:text-danger-hover hover:underline underline-offset-2 transition-colors disabled:opacity-50 disabled:no-underline disabled:cursor-not-allowed;
   }
   .input {
     @apply w-full rounded-md bg-bg-elevated border border-border px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:outline-none focus:ring-2 focus:ring-accent;

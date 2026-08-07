@@ -72,10 +72,10 @@ Separate pnpm project — its own `package.json`, `wrangler.toml`, and `tsconfig
 Before changing anything under `src/pages/` or `src/components/`, read the [UI Audit and Standardization Guidelines](https://thistlegrow.atlassian.net/wiki/spaces/DCH/pages/51183617) (DCH-19). Its checklist is the agreed convention set; the short version of what it found:
 
 - **Already consistent — don't churn it:** `p-6 space-y-4` page container, `<header>` + `h2.text-2xl.font-semibold`, `.card` / `.input` / `.btn-primary` / `.btn-secondary`, `formatCents` for all money, `ImageSizeToggle` + `useMinimized` on every list screen.
-- **Known divergences with tickets:** no `.btn-danger` (DCH-33), filter-row parity and sort vocabulary (DCH-35). Don't add to any of these piles — use the shared helper even where neighbouring code doesn't.
+- **Known divergences with tickets:** filter-row parity and sort vocabulary (DCH-35). Don't add to that pile — use the shared helper even where neighbouring code doesn't.
 - Collection is the reference implementation for filter rows; the Wishlist dialog is the reference for modal behaviour.
 
-**Never format a number or a date inline** (DCH-34). `formatCount` for quantities, `formatCents` for money, `formatDateTime` for stored Unix timestamps — all from `@/lib/format`, re-exported by `@/lib/tauri`. Each renders an em dash for null; the inline forms don't, and they fail in ways that read as real data rather than as missing data: `new Date(undefined * 1000).toLocaleString()` renders the string "Invalid Date", and a null timestamp coerces to 0 and renders the Unix epoch as if it were a genuine sync time.
+**Never format a number or a date inline** (DCH-34). `formatCount` for quantities, `formatCents` for money, `formatDateTime` / `formatDate` / `formatTime` for stored Unix timestamps — all from `@/lib/format`, re-exported by `@/lib/tauri`. Each renders an em dash for null; the inline forms don't, and they fail in ways that read as real data rather than as missing data: `new Date(undefined * 1000).toLocaleString()` renders the string "Invalid Date", and a null timestamp coerces to 0 and renders the Unix epoch as if it were a genuine sync time.
 
 **Never hand-roll an error box** (DCH-18, DCH-34). Every backend failure renders through `<ErrorBanner error={…} />` (`variant="inline"` in dialogs and side panels), which supplies the plain-language title and the "Technical details" disclosure. Pass the caught value, not a sentence built around it — interpolating an error into `` `Couldn't load X: ${e}` `` hides the `AppError` prefix, so `describeError` can't classify it and falls back to "Something went wrong." Client-side validation text is *not* an error in this sense: it's already written for a person, and routing it through `ErrorBanner` would retitle it and bury it.
 
@@ -84,6 +84,15 @@ Before changing anything under `src/pages/` or `src/components/`, read the [UI A
 Do **not** pass a stacking layer. `Modal` derives its own from `src/lib/modalStack.ts`, because `GroupEditorDialog` is opened both on its own and from inside `ManageGroupsDialog` — a `layer` prop would need a different value per call site. The same stack is what makes Escape close only the topmost dialog; every open modal has a `window` keydown listener, so without it one Escape collapses the whole stack.
 
 **The z-scale is four named layers**, and nothing else: `z-30` dropdown scrim and sticky page furniture · `z-40` dropdown menus and app-level banners · `z-50` a modal · `z-60` a modal opened from inside a modal. `z-60` is a real class because `tailwind.config.js` extends Tailwind's scale (which stops at 50) — don't reach for an arbitrary `z-[70]`. Anything at `z-50` or above that isn't a dialog will paint over one.
+
+**Destructive actions get one of two shared classes** (DCH-33), never inline reds. The two questions are independent:
+
+- *How is it rendered?* In a row or footer of buttons → `.btn-danger` (solid). Inline text or a bare icon inside a list row or chip → `.link-danger`. Both are red **at rest**, not just on hover — the audit's real finding was that destructive controls sat at `text-fg-subtle`, fainter than the harmless "Edit" beside them.
+- *Is it reversible?* Irreversible → `window.confirm` naming what will be destroyed and what survives ("Disconnect your eBay account? … Listings already saved locally are not touched"). Reversible → no confirmation; an unwatch or an unlink is one click to undo.
+
+Severity picks the confirmation, form picks the class. Don't couple them — a solid button on Collection's Remove would look absurd next to a plain-text "Edit", and a text link in Settings' button row would be the faintest thing there.
+
+Colours come from `--color-danger` / `--color-danger-hover` / `--color-danger-fg` in `index.css`, which is the one red ramp; `danger` is wired into `tailwind.config.js` like `accent`. `danger-fg` differs per theme because red-600 is unreadable on the dark page background.
 
 All of these are enforced mechanically by `src/lib/conventions.test.ts`, which scans `src/pages/` and `src/components/` and names the offending file and line. Exemptions live in an allowlist there and are themselves tested for staleness — if you need one, add it with the reason, don't loosen the pattern. Whole-line comments are skipped, so prose explaining a rule can name the thing it forbids.
 

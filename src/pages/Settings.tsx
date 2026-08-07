@@ -4,7 +4,9 @@ import { ErrorBanner } from "@/components/ErrorBanner";
 import {
   api,
   driverListingCounts,
+  formatDate,
   formatDateTime,
+  formatTime,
   sortDriverOptions,
   type AutoSyncSettings,
   type BackgroundSettings,
@@ -299,6 +301,18 @@ export function Settings() {
   }
 
   async function onEbayClear() {
+    // Named, because the App ID and Cert ID live in the OS keychain and are
+    // not recoverable from the app — clearing them means a trip back to the
+    // eBay developer console.
+    if (
+      !window.confirm(
+        "Clear your saved eBay App ID and Cert ID?\n\n" +
+          "They're deleted from the system keychain. eBay search, watchlist " +
+          "sync and the Browse pages stop working until you enter them again.",
+      )
+    ) {
+      return;
+    }
     setEbayError(null);
     setEbayMessage(null);
     try {
@@ -377,6 +391,17 @@ export function Settings() {
   }
 
   async function onDisconnectEbay() {
+    if (
+      !window.confirm(
+        "Disconnect your eBay account?\n\n" +
+          "The saved access and refresh tokens are deleted. Watchlist sync " +
+          "and offers stop working until you reconnect, which needs another " +
+          "trip through eBay's sign-in. Listings already saved locally are " +
+          "not touched.",
+      )
+    ) {
+      return;
+    }
     setOauthBusy(true);
     setOauthError(null);
     setOauthMessage(null);
@@ -414,6 +439,16 @@ export function Settings() {
   }
 
   async function onClear() {
+    if (
+      !window.confirm(
+        "Clear your saved diecastregistry.com sign-in?\n\n" +
+          "The username and password are deleted from the system keychain. " +
+          "My Garage sync and registry lookups stop working until you enter " +
+          "them again. Your collection data stays.",
+      )
+    ) {
+      return;
+    }
     setError(null);
     setMessage(null);
     try {
@@ -670,7 +705,7 @@ export function Settings() {
               {saving ? "Saving…" : "Save"}
             </button>
             {creds?.diecastregistry_has_password && (
-              <button className="btn-secondary" type="button" onClick={onClear}>
+              <button className="btn-danger" type="button" onClick={onClear}>
                 Clear
               </button>
             )}
@@ -953,9 +988,7 @@ export function Settings() {
                             <span className="shrink-0 text-fg-subtle">
                               {d.entry_count} entr
                               {d.entry_count === 1 ? "y" : "ies"} ·{" "}
-                              {new Date(
-                                d.last_prewarmed_at * 1000,
-                              ).toLocaleDateString()}
+                              {formatDate(d.last_prewarmed_at)}
                             </span>
                           </li>
                         ))}
@@ -1104,7 +1137,7 @@ export function Settings() {
             </button>
             {(ebayCreds?.has_app_id || ebayCreds?.has_cert_id) && (
               <button
-                className="btn-secondary"
+                className="btn-danger"
                 type="button"
                 onClick={onEbayClear}
               >
@@ -1167,14 +1200,12 @@ export function Settings() {
                 {oauthStatus.access_token_expires_at && (
                   <span className="text-fg-subtle ml-2">
                     token expires{" "}
-                    {new Date(
-                      oauthStatus.access_token_expires_at * 1000,
-                    ).toLocaleTimeString()}
+                    {formatTime(oauthStatus.access_token_expires_at)}
                   </span>
                 )}
               </div>
               <button
-                className="btn-secondary"
+                className="btn-danger"
                 type="button"
                 onClick={onDisconnectEbay}
                 disabled={oauthBusy}

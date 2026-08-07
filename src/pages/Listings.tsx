@@ -1856,7 +1856,7 @@ function ListingCard({
                         Confirm
                       </button>
                       <button
-                        className="text-fg-subtle hover:text-red-300"
+                        className="link-danger"
                         type="button"
                         onClick={onRejectMatch}
                         title="Wrong entry — drop it and stop auto-matching this listing"
@@ -1927,7 +1927,7 @@ function ListingCard({
               </button>
               {row.seller_code === "ebay" && (
                 <button
-                  className="text-xs text-fg-subtle hover:text-red-300"
+                  className="link-danger text-xs"
                   type="button"
                   onClick={onUnwatch}
                   disabled={unwatching}
@@ -3277,7 +3277,7 @@ function GroupChipRow({
             {g.name}
             <button
               type="button"
-              className="text-fg-subtle hover:text-red-300 leading-none"
+              className="link-danger leading-none"
               onClick={(e) => {
                 e.stopPropagation();
                 onRemoveFromGroup(g.id);
@@ -3794,7 +3794,7 @@ function GroupSection({
                 </button>
                 <button
                   type="button"
-                  className="text-xs text-fg-subtle hover:text-red-300"
+                  className="link-danger text-xs"
                   onClick={() => onDelete(g)}
                   disabled={busy}
                 >
@@ -3887,7 +3887,7 @@ function DriverMultiSelect({
               {d.name}
               <button
                 type="button"
-                className="text-fg-subtle hover:text-red-300 leading-none"
+                className="link-danger leading-none"
                 onClick={() =>
                   onChange(
                     selected.filter(
@@ -4493,7 +4493,7 @@ function GroupMigrationWizard({
                   </div>
                   <button
                     type="button"
-                    className="text-fg-subtle hover:text-red-300 px-1"
+                    className="link-danger px-1"
                     onClick={() => removeRule(i)}
                     title="Remove handle"
                   >

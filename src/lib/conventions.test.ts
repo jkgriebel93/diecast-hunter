@@ -1,13 +1,16 @@
-/** Mechanical enforcement of the two UI conventions in DCH-34.
+/** Mechanical enforcement of the UI conventions in CLAUDE.md — number and
+ *  date formatting (DCH-34), `ErrorBanner` (DCH-18/34), `Modal` and the
+ *  z-scale (DCH-32), and the danger classes (DCH-33).
  *
- *  DCH-17 shipped `formatCount` and DCH-18 shipped `ErrorBanner`, and both
- *  were then bypassed at call sites that already existed — DCH-19's audit
- *  found nineteen raw `toLocaleString()` calls and a hand-rolled error box
- *  months after the helpers landed. Fixing those once only holds until the
- *  next page is written.
+ *  These are tests rather than checklist lines because the checklist has
+ *  been tried. DCH-17 shipped `formatCount` and DCH-18 shipped `ErrorBanner`,
+ *  and
+ *  both were bypassed at call sites for months afterwards — DCH-19's audit
+ *  found nineteen raw `toLocaleString()` calls and counting. Fixing those
+ *  once only holds until the next page is written.
  *
- *  So these are tests rather than a checklist line. A reviewer will not
- *  reliably notice a twentieth `toLocaleString()`; `pnpm test` will.
+ *  A reviewer will not reliably notice the twentieth violation. `pnpm test`
+ *  will, and it names the file and line.
  */
 
 import { readFileSync, readdirSync } from "node:fs";
@@ -64,15 +67,22 @@ describe("number formatting goes through the shared helpers", () => {
     //
     // The one legitimate call lives inside `formatDateTime` in format.ts,
     // which is outside the scanned roots.
-    expect(violations(/\.toLocaleString\(/)).toEqual([]);
+    //
+    // `toLocaleTimeString` and `toLocaleDateString` are matched too. The
+    // original DCH-34 rule only caught `toLocaleString` exactly, and a
+    // `toLocaleTimeString` in Settings sat under it untouched — same
+    // defect, different method name.
+    expect(violations(/\.toLocale(String|TimeString|DateString)\(/)).toEqual(
+      [],
+    );
   });
 });
 
 describe("errors go through ErrorBanner", () => {
   /** The error-box look DCH-18 replaced: a tinted red container holding a
-   *  message. Hover states on destructive buttons (`hover:text-red-400`)
-   *  and status glyphs are a different thing and deliberately not matched —
-   *  the button-styling question is DCH-33's. */
+   *  message. Status glyphs and destructive-control styling are different
+   *  things and deliberately not matched here — the latter is DCH-33's, and
+   *  has its own rule below. */
   const ERROR_BOX = /border-red-500\/40[^"'`]*bg-red-500\/10/;
 
   /** Two exemptions, both checked by eye:
@@ -167,5 +177,33 @@ describe("the z-scale stays documented", () => {
       (h) => !h.startsWith("src/components/Modal.tsx"),
     );
     expect(hits).toEqual([]);
+  });
+});
+
+describe("destructive controls use the shared danger classes", () => {
+  /** `.link-danger` and `.btn-danger` (DCH-33) are the only two treatments
+   *  for a Remove / Delete / Disconnect / Unwatch. Before them, sixteen
+   *  controls were styled inline across three different reds, and most sat
+   *  at `text-fg-subtle` at rest — fainter than the harmless "Edit" beside
+   *  them, which is backwards.
+   *
+   *  A red *hover* is the giveaway: it only ever appears on something
+   *  interactive, so it is a precise proxy for "someone hand-styled a
+   *  destructive control" without needing to parse JSX to find out whether
+   *  a given `text-red-*` sits on a button or on a status glyph. Static
+   *  reds are left alone deliberately — error text, validation lists,
+   *  the deal-score badge and the sync-failure ✗ are not controls. */
+  it("has no hand-styled destructive hover states", () => {
+    expect(violations(/hover:(text|bg|border)-red-/)).toEqual([]);
+  });
+
+  it("keeps the danger ramp in the stylesheet, not at call sites", () => {
+    // `.btn-danger`/`.link-danger` resolve `--color-danger*`, so a red that
+    // needs to differ per theme is defined once. A raw palette red on an
+    // interactive element bypasses the light-mode contrast handling too.
+    const css = readFileSync("src/index.css", "utf8");
+    expect(css).toMatch(/\.btn-danger\s*\{/);
+    expect(css).toMatch(/\.link-danger\s*\{/);
+    expect(css).toMatch(/--color-danger:/);
   });
 });
