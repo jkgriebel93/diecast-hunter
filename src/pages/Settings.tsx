@@ -25,6 +25,82 @@ import {
   type TrainOutcome,
 } from "@/lib/tauri";
 
+/** Settings groups (DCH-21).
+ *
+ *  The screen was five cards in one column, in the order features happened to
+ *  be built — "each setting simply tacked on at the end". Two of those cards
+ *  were also doing more than one job: the diecastregistry.com card held the
+ *  sign-in *and* four registry maintenance tools, and the eBay card held API
+ *  keys *and* two search preferences.
+ *
+ *  So the grouping isn't only a nav change: every sub-block is now its own
+ *  card, filed by what it is rather than by which integration it happened to
+ *  arrive with. Credentials for both services sit together under Accounts;
+ *  the registry tools moved to Sync; the search preferences to Search.
+ */
+export const SETTINGS_TABS = [
+  { id: "accounts", label: "Accounts" },
+  { id: "sync", label: "Sync" },
+  { id: "search", label: "Search & matching" },
+  { id: "extension", label: "Extension" },
+] as const;
+
+export type SettingsTab = (typeof SETTINGS_TABS)[number]["id"];
+
+const TAB_KEY = "settings.tab";
+
+export function isSettingsTab(value: unknown): value is SettingsTab {
+  return SETTINGS_TABS.some((t) => t.id === value);
+}
+
+/** Reopen on the group you were last in. Settings is a place you return to
+ *  mid-task — usually to the same corner of it. */
+function loadTab(): SettingsTab {
+  try {
+    const raw = localStorage.getItem(TAB_KEY);
+    if (isSettingsTab(raw)) return raw;
+  } catch {
+    // localStorage can throw in private modes.
+  }
+  return "accounts";
+}
+
+function SettingsTabs({
+  tab,
+  onChange,
+}: {
+  tab: SettingsTab;
+  onChange: (t: SettingsTab) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1 border-b border-border" role="tablist">
+      {SETTINGS_TABS.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          role="tab"
+          aria-selected={tab === t.id}
+          className={`px-3 py-1.5 text-sm rounded-t border-b-2 -mb-px transition-colors ${
+            tab === t.id
+              ? "border-accent text-fg"
+              : "border-transparent text-fg-muted hover:text-fg"
+          }`}
+          onClick={() => {
+            onChange(t.id);
+            try {
+              localStorage.setItem(TAB_KEY, t.id);
+            } catch {
+              // ignore
+            }
+          }}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function Settings() {
   const [creds, setCreds] = useState<CredentialState | null>(null);
   const [username, setUsername] = useState("");
@@ -109,6 +185,7 @@ export function Settings() {
   const [oauthBusy, setOauthBusy] = useState(false);
   const [oauthMessage, setOauthMessage] = useState<string | null>(null);
   const [oauthError, setOauthError] = useState<string | null>(null);
+  const [tab, setTab] = useState<SettingsTab>(loadTab);
 
   async function refresh() {
     try {
@@ -549,803 +626,868 @@ export function Settings() {
       <header>
         <h2 className="text-2xl font-semibold">Settings</h2>
         <p className="text-sm text-fg-subtle">
-          Account credentials and sync sources.
+          Accounts, syncing, search behaviour and the browser extension.
         </p>
       </header>
 
-      <section className="card space-y-4">
-        <div>
-          <h3 className="text-base font-medium">Automatic background sync</h3>
-          <p className="text-xs text-fg-subtle mt-1">
-            Registers a Windows scheduled task that syncs your collection (My
-            Garage) and eBay (watchlist + saved searches/sellers) on a timer —
-            even when this app is closed, as long as you're signed in to
-            Windows. Whichever source isn't configured — diecastregistry.com
-            credentials or a connected eBay account — is skipped. Interval is in
-            hours (1–23).
-          </p>
-        </div>
+      <SettingsTabs tab={tab} onChange={setTab} />
 
-        <form onSubmit={onSaveAutoSync} className="space-y-3">
-          <label className="flex items-center gap-2 text-sm cursor-pointer">
-            <input
-              type="checkbox"
-              checked={autoSyncEnabled}
-              onChange={(e) => setAutoSyncEnabled(e.target.checked)}
-            />
-            <span>Enable automatic sync</span>
-          </label>
-
-          <div className="flex items-end gap-2">
+      {tab === "accounts" && (
+        <>
+          <section className="card space-y-4">
             <div>
-              <label className="label">Interval (hours)</label>
-              <input
-                className="input w-32"
-                type="number"
-                min={1}
-                max={23}
-                step={1}
-                value={autoSyncInterval}
-                disabled={!autoSyncEnabled}
-                onChange={(e) => setAutoSyncInterval(e.target.value)}
-              />
+              <h3 className="text-base font-medium">diecastregistry.com</h3>
+              <p className="text-xs text-fg-subtle mt-1">
+                Used to import your collection and the master registry.
+                Credentials are stored in the Windows Credential Manager.
+              </p>
             </div>
-            <div>
-              <label className="label">Max registry entries per refresh</label>
-              <input
-                className="input w-32"
-                type="number"
-                min={0}
-                step={500}
-                value={autoSyncPrewarmMax}
-                disabled={!autoSyncEnabled}
-                onChange={(e) => setAutoSyncPrewarmMax(e.target.value)}
-              />
-            </div>
-            <button
-              className="btn-primary"
-              type="submit"
-              disabled={autoSyncSaving}
-            >
-              {autoSyncSaving ? "Saving…" : "Save"}
-            </button>
-          </div>
-          <p className="text-xs text-fg-subtle">
-            Each sync also re-walks stale pre-warmed registry drivers (older
-            than 30 days), up to this many entries per run so a single sync
-            never tries the whole registry at once. Drivers that don't fit are
-            picked up on later runs, oldest first. Set to 0 to skip the registry
-            refresh entirely.
-          </p>
-        </form>
 
-        <div className="space-y-1">
-          <div className="text-xs">
-            {autoSyncEnabled && autoSyncScheduled && (
-              <span className="text-emerald-400">
-                ✓ Scheduled task registered
-              </span>
-            )}
-            {autoSyncEnabled && !autoSyncScheduled && (
-              <span className="text-amber-400">
-                ⚠ Enabled, but no scheduled task is registered — click Save to
-                (re)create it.
-              </span>
-            )}
-            {!autoSyncEnabled && autoSyncScheduled && (
-              <span className="text-amber-400">
-                ⚠ A scheduled task still exists — click Save to remove it.
-              </span>
-            )}
-            {!autoSyncEnabled && !autoSyncScheduled && (
-              <span className="text-fg-subtle">Not scheduled.</span>
-            )}
-          </div>
-          <div className="text-xs text-fg-subtle">
-            {autoSyncLastRun
-              ? `Last background sync ${formatDateTime(autoSyncLastRun)}`
-              : "Background sync hasn't run yet."}
-          </div>
-        </div>
-
-        {autoSyncMessage && (
-          <div className="text-xs text-emerald-400">{autoSyncMessage}</div>
-        )}
-        {autoSyncError && (
-          <ErrorBanner error={autoSyncError} variant="inline" />
-        )}
-      </section>
-
-      <section className="card space-y-4">
-        <div>
-          <h3 className="text-base font-medium">diecastregistry.com</h3>
-          <p className="text-xs text-fg-subtle mt-1">
-            Used to import your collection and the master registry. Credentials
-            are stored in the Windows Credential Manager.
-          </p>
-        </div>
-
-        <form onSubmit={onSave} className="space-y-3">
-          <div>
-            <label className="label">Email</label>
-            <input
-              className="input"
-              type="email"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoComplete="off"
-            />
-          </div>
-          <div>
-            <label className="label">
-              Password{" "}
-              {creds?.diecastregistry_has_password && (
-                <span className="text-fg-subtle normal-case">
-                  (saved — leave blank to keep)
-                </span>
-              )}
-            </label>
-            <input
-              className="input"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="new-password"
-              placeholder={
-                creds?.diecastregistry_has_password ? "••••••••" : ""
-              }
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              className="btn-primary"
-              type="submit"
-              disabled={saving || !username || !password}
-            >
-              {saving ? "Saving…" : "Save"}
-            </button>
-            {creds?.diecastregistry_has_password && (
-              <button className="btn-danger" type="button" onClick={onClear}>
-                Clear
-              </button>
-            )}
-          </div>
-        </form>
-
-        <div className="border-t border-border pt-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm font-medium">Sync My Garage</div>
-              <div className="text-xs text-fg-subtle">
-                {lastSync
-                  ? `Last synced ${formatDateTime(Number(lastSync))}`
-                  : "Never synced"}
-              </div>
-            </div>
-            <button
-              className="btn-primary"
-              type="button"
-              disabled={syncing || !creds?.diecastregistry_has_password}
-              onClick={onSync}
-            >
-              {syncing ? "Syncing…" : "Sync now"}
-            </button>
-          </div>
-          <label className="flex items-center gap-2 text-xs text-fg-subtle">
-            <input
-              type="checkbox"
-              checked={syncEnrich}
-              disabled={syncing}
-              onChange={(e) => setSyncEnrich(e.target.checked)}
-            />
-            Refresh registry details after sync (slower)
-          </label>
-          {syncSummary && (
-            <div className="text-xs text-emerald-400 space-y-1">
+            <form onSubmit={onSave} className="space-y-3">
               <div>
-                Pulled {syncSummary.items_seen} items across{" "}
-                {syncSummary.pages_fetched} page
-                {syncSummary.pages_fetched === 1 ? "" : "s"}.
-              </div>
-              {syncSummary.collection_rows_removed > 0 && (
-                <div>
-                  Removed {syncSummary.collection_rows_removed} local entr
-                  {syncSummary.collection_rows_removed === 1 ? "y" : "ies"} no
-                  longer in your garage.
-                </div>
-              )}
-              {syncSummary.enrichment && (
-                <div>
-                  Enriched {syncSummary.enrichment.enriched} of{" "}
-                  {syncSummary.enrichment.considered} registry entries (
-                  {syncSummary.enrichment.failed} failed,{" "}
-                  {syncSummary.enrichment.skipped} skipped).
-                </div>
-              )}
-            </div>
-          )}
-          {syncError && <ErrorBanner error={syncError} variant="inline" />}
-        </div>
-
-        <div className="border-t border-border pt-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm font-medium">Registry details</div>
-              <div className="text-xs text-fg-subtle">
-                Re-fetch detail pages for cars in your collection. Stale entries
-                (older than 30 days) refresh automatically.
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <button
-                className="btn-secondary"
-                type="button"
-                disabled={refreshing || !creds?.diecastregistry_has_password}
-                onClick={() => onRefresh(false)}
-              >
-                {refreshing ? "Refreshing…" : "Refresh stale"}
-              </button>
-              <button
-                className="btn-secondary"
-                type="button"
-                disabled={refreshing || !creds?.diecastregistry_has_password}
-                onClick={() => onRefresh(true)}
-              >
-                Force refresh all
-              </button>
-            </div>
-          </div>
-          {refreshSummary && (
-            <div className="text-xs text-emerald-400">
-              Refreshed {refreshSummary.enriched} of {refreshSummary.considered}{" "}
-              ({refreshSummary.failed} failed, {refreshSummary.skipped}{" "}
-              skipped).
-            </div>
-          )}
-          {refreshError && (
-            <ErrorBanner error={refreshError} variant="inline" />
-          )}
-        </div>
-
-        <div className="border-t border-border pt-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm font-medium">Registry search options</div>
-              <div className="text-xs text-fg-subtle">
-                Cache driver / OEM / brand / scale / finish dropdown choices
-                from diecastregistry.com. Used by the "Search registry…" dialog
-                on saved listings. Refresh occasionally to pick up new drivers /
-                brands.
-              </div>
-            </div>
-            <button
-              className="btn-secondary"
-              type="button"
-              disabled={
-                optionsRefreshing || !creds?.diecastregistry_has_password
-              }
-              onClick={onRefreshFormOptions}
-            >
-              {optionsRefreshing ? "Fetching…" : "Refresh options"}
-            </button>
-          </div>
-          {optionsMessage && (
-            <div className="text-xs text-emerald-400">{optionsMessage}</div>
-          )}
-          {optionsError && (
-            <ErrorBanner error={optionsError} variant="inline" />
-          )}
-        </div>
-
-        <div className="border-t border-border pt-4 space-y-3">
-          <div>
-            <div className="text-sm font-medium">
-              Pre-warm registry by driver
-            </div>
-            <div className="text-xs text-fg-subtle mt-1">
-              Pull every registry entry for one driver and store them locally so
-              the registry-search dialog can surface candidates without hitting
-              diecastregistry.com on every keystroke. Takes a minute or two for
-              a prolific driver — pages are paced to be polite. Repeat for every
-              driver you watch.
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <input
-              list="prewarm-drivers-list"
-              type="text"
-              className="input flex-1"
-              value={prewarmInput}
-              onChange={(e) => {
-                setPrewarmInput(e.target.value);
-                const m = drivers.find((d) => d.display === e.target.value);
-                setPrewarmDriverGuid(m?.value ?? "");
-              }}
-              placeholder={
-                drivers.length === 0
-                  ? "Refresh registry options first…"
-                  : "Type a driver name…"
-              }
-              autoComplete="off"
-              disabled={drivers.length === 0}
-            />
-            <datalist id="prewarm-drivers-list">
-              {drivers.map((d) => (
-                <option key={d.value} value={d.display} />
-              ))}
-            </datalist>
-            <button
-              className="btn-primary shrink-0"
-              type="button"
-              onClick={onPrewarm}
-              disabled={prewarming || !prewarmDriverGuid}
-            >
-              {prewarming ? "Fetching…" : "Pre-warm"}
-            </button>
-          </div>
-
-          {prewarmSummary && (
-            <div className="text-xs text-emerald-400">
-              {prewarmSummary.driver_name}: pulled {prewarmSummary.results_seen}{" "}
-              entries across {prewarmSummary.pages_fetched} page
-              {prewarmSummary.pages_fetched === 1 ? "" : "s"} (
-              {prewarmSummary.registry_entries_upserted} upserted).
-            </div>
-          )}
-          {prewarmError && (
-            <ErrorBanner error={prewarmError} variant="inline" />
-          )}
-
-          <div className="pt-1 space-y-1.5">
-            <div className="text-sm font-medium">Registry search mode</div>
-            {(
-              [
-                {
-                  mode: "remote",
-                  label: "Live",
-                  hint: "Always search diecastregistry.com (slowest, always complete).",
-                },
-                {
-                  mode: "hybrid",
-                  label: "Hybrid — recommended",
-                  hint: "Answer instantly from pre-warmed data when it fully covers the query; otherwise search the site.",
-                },
-                {
-                  mode: "local",
-                  label: "Local only",
-                  hint: "Never hit the network. Drivers you haven't pre-warmed return no results, and autographed / race-win filters are ignored.",
-                },
-              ] as { mode: RegistrySearchMode; label: string; hint: string }[]
-            ).map((opt) => (
-              <label
-                key={opt.mode}
-                className="flex items-start gap-2 text-sm cursor-pointer"
-              >
+                <label className="label">Email</label>
                 <input
-                  type="radio"
-                  name="registry-search-mode"
-                  className="mt-0.5"
-                  checked={searchMode === opt.mode}
-                  disabled={searchModeSaving}
-                  onChange={() => onChangeSearchMode(opt.mode)}
+                  className="input"
+                  type="email"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  autoComplete="off"
                 />
-                <span>
-                  <span>{opt.label}</span>
-                  <span className="block text-xs text-fg-subtle">
-                    {opt.hint}
-                  </span>
-                </span>
-              </label>
-            ))}
-            {searchModeError && (
-              <ErrorBanner
-                error={searchModeError}
-                variant="inline"
-                className="mt-1"
-              />
-            )}
-          </div>
-
-          <div className="pt-1">
-            <div className="text-xs font-medium text-fg-subtle">
-              Pre-warmed drivers ({prewarmedDrivers.length})
-            </div>
-            {prewarmedDrivers.length === 0 ? (
-              <div className="text-xs text-fg-subtle mt-1">
-                No drivers pre-warmed yet.
               </div>
-            ) : (
-              (() => {
-                const q = prewarmedSearch.trim().toLowerCase();
-                const filtered = q
-                  ? prewarmedDrivers.filter((d) =>
-                      d.driver_name.toLowerCase().includes(q),
-                    )
-                  : prewarmedDrivers;
-                return (
-                  <>
-                    <input
-                      type="text"
-                      className="input mt-2 w-full"
-                      value={prewarmedSearch}
-                      onChange={(e) => setPrewarmedSearch(e.target.value)}
-                      placeholder="Filter pre-warmed drivers…"
-                      autoComplete="off"
-                    />
-                    {filtered.length === 0 ? (
-                      <div className="text-xs text-fg-subtle mt-2">
-                        No drivers match “{prewarmedSearch}”.
-                      </div>
-                    ) : (
-                      <ul className="mt-2 max-h-64 overflow-y-auto divide-y divide-border rounded-md border border-border">
-                        {filtered.map((d) => (
-                          <li
-                            key={d.driver_guid}
-                            className="flex items-center justify-between gap-3 px-3 py-1.5 text-xs"
-                          >
-                            <span className="truncate">{d.driver_name}</span>
-                            <span className="shrink-0 text-fg-subtle">
-                              {d.entry_count} entr
-                              {d.entry_count === 1 ? "y" : "ies"} ·{" "}
-                              {formatDate(d.last_prewarmed_at)}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </>
-                );
-              })()
-            )}
-          </div>
-        </div>
-
-        <div className="border-t border-border pt-4 space-y-3">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <div className="text-sm font-medium">
-                Repair diecastregistry.com links
-              </div>
-              <div className="text-xs text-fg-subtle mt-1">
-                Some registry entries saved by older versions lost the URL of
-                their diecastregistry.com page, so matched listings show no
-                "View on diecastregistry.com" link. This re-walks the registry
-                search for the affected drivers and restores the links. Safe to
-                re-run; does nothing when no links are missing.
-              </div>
-            </div>
-            <button
-              className="btn-secondary shrink-0"
-              type="button"
-              disabled={
-                linkRepairRunning || !creds?.diecastregistry_has_password
-              }
-              onClick={onRepairRegistryLinks}
-            >
-              {linkRepairRunning ? "Repairing…" : "Repair links"}
-            </button>
-          </div>
-          {linkRepairSummary && (
-            <div className="text-xs text-emerald-400">
-              {linkRepairSummary.missing_before === 0
-                ? "All registry entries already have links."
-                : `Restored links for ${linkRepairSummary.entries_patched} of ` +
-                  `${linkRepairSummary.missing_before} entries across ` +
-                  `${linkRepairSummary.drivers_processed} driver` +
-                  `${linkRepairSummary.drivers_processed === 1 ? "" : "s"}` +
-                  (linkRepairSummary.still_missing > 0
-                    ? ` (${linkRepairSummary.still_missing} still missing).`
-                    : ".")}
-            </div>
-          )}
-          {linkRepairError && (
-            <ErrorBanner error={linkRepairError} variant="inline" />
-          )}
-        </div>
-      </section>
-
-      <section className="card space-y-4">
-        <div>
-          <h3 className="text-base font-medium">eBay Developers</h3>
-          <p className="text-xs text-fg-subtle mt-1">
-            App ID and Cert ID from your eBay developer keyset. Used for looking
-            up item details via the Browse API. Stored in the Windows Credential
-            Manager. User OAuth (for watchlist sync) comes later.
-          </p>
-        </div>
-
-        <form onSubmit={onEbaySave} className="space-y-3">
-          <div>
-            <label className="label">Environment</label>
-            <div className="flex gap-4 text-sm">
-              <label className="flex items-center gap-2 cursor-pointer">
+              <div>
+                <label className="label">
+                  Password{" "}
+                  {creds?.diecastregistry_has_password && (
+                    <span className="text-fg-subtle normal-case">
+                      (saved — leave blank to keep)
+                    </span>
+                  )}
+                </label>
                 <input
-                  type="radio"
-                  name="ebay-env"
-                  value="sandbox"
-                  checked={ebayEnv === "sandbox"}
-                  onChange={() => setEbayEnv("sandbox")}
+                  className="input"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="new-password"
+                  placeholder={
+                    creds?.diecastregistry_has_password ? "••••••••" : ""
+                  }
                 />
-                Sandbox
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="ebay-env"
-                  value="production"
-                  checked={ebayEnv === "production"}
-                  onChange={() => setEbayEnv("production")}
-                />
-                Production
-              </label>
-            </div>
-          </div>
-          <div>
-            <label className="label">
-              App ID (Client ID){" "}
-              {ebayCreds?.has_app_id && (
-                <span className="text-fg-subtle normal-case">
-                  (saved — leave blank to keep)
-                </span>
-              )}
-            </label>
-            <input
-              className="input"
-              type="text"
-              value={ebayAppId}
-              onChange={(e) => setEbayAppId(e.target.value)}
-              autoComplete="off"
-              placeholder={ebayCreds?.has_app_id ? "••••••••" : ""}
-            />
-          </div>
-          <div>
-            <label className="label">
-              Cert ID (Client Secret){" "}
-              {ebayCreds?.has_cert_id && (
-                <span className="text-fg-subtle normal-case">
-                  (saved — leave blank to keep)
-                </span>
-              )}
-            </label>
-            <input
-              className="input"
-              type="password"
-              value={ebayCertId}
-              onChange={(e) => setEbayCertId(e.target.value)}
-              autoComplete="new-password"
-              placeholder={ebayCreds?.has_cert_id ? "••••••••" : ""}
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              className="btn-primary"
-              type="submit"
-              disabled={ebaySaving || !ebayAppId || !ebayCertId}
-            >
-              {ebaySaving ? "Saving…" : "Save"}
-            </button>
-            <button
-              className="btn-secondary"
-              type="button"
-              disabled={
-                ebayTesting || !ebayCreds?.has_app_id || !ebayCreds?.has_cert_id
-              }
-              onClick={onEbayTest}
-            >
-              {ebayTesting ? "Testing…" : "Test connection"}
-            </button>
-            {(ebayCreds?.has_app_id || ebayCreds?.has_cert_id) && (
-              <button
-                className="btn-danger"
-                type="button"
-                onClick={onEbayClear}
-              >
-                Clear
-              </button>
-            )}
-          </div>
-        </form>
-        {ebayMessage && (
-          <div className="text-xs text-emerald-400">{ebayMessage}</div>
-        )}
-        {ebayError && <ErrorBanner error={ebayError} variant="inline" />}
-
-        <div className="border-t border-border pt-4 space-y-3">
-          <div>
-            <h4 className="text-sm font-medium">Watchlist sync (user OAuth)</h4>
-            <p className="text-xs text-fg-subtle mt-1">
-              Connect your eBay account so the app can read your watchlist.
-              Configure a RuName on developer.ebay.com pointing to{" "}
-              <code className="text-fg-muted">
-                https://&lt;your-worker&gt;/ebay-oauth-callback
-              </code>{" "}
-              and paste the resulting RuName below.
-            </p>
-          </div>
-
-          <div>
-            <label className="label">RuName</label>
-            <div className="flex gap-2">
-              <input
-                className="input flex-1 font-mono text-xs"
-                type="text"
-                value={ebayRuName}
-                onChange={(e) => setEbayRuName(e.target.value)}
-                placeholder="MyApp-Account-PRD-xxxxxxxx-xxxxxxxx"
-                autoComplete="off"
-              />
-              <button
-                className="btn-secondary shrink-0"
-                type="button"
-                onClick={onSaveRuName}
-                disabled={
-                  savingRuName ||
-                  !ebayRuName.trim() ||
-                  ebayRuName.trim() === (ebayRuNameSaved ?? "")
-                }
-              >
-                {savingRuName ? "Saving…" : "Save"}
-              </button>
-            </div>
-          </div>
-
-          {oauthStatus?.connected ? (
-            <div className="flex items-center justify-between rounded-md bg-bg-elevated border border-border px-3 py-2">
-              <div className="text-xs">
-                <span className="text-emerald-400">✓ Connected</span>
-                <span className="text-fg-subtle ml-2">
-                  ({oauthStatus.environment})
-                </span>
-                {oauthStatus.access_token_expires_at && (
-                  <span className="text-fg-subtle ml-2">
-                    token expires{" "}
-                    {formatTime(oauthStatus.access_token_expires_at)}
-                  </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="btn-primary"
+                  type="submit"
+                  disabled={saving || !username || !password}
+                >
+                  {saving ? "Saving…" : "Save"}
+                </button>
+                {creds?.diecastregistry_has_password && (
+                  <button
+                    className="btn-danger"
+                    type="button"
+                    onClick={onClear}
+                  >
+                    Clear
+                  </button>
                 )}
               </div>
-              <button
-                className="btn-danger"
-                type="button"
-                onClick={onDisconnectEbay}
-                disabled={oauthBusy}
-              >
-                {oauthBusy ? "…" : "Disconnect"}
-              </button>
+            </form>
+          </section>
+          <section className="card space-y-4">
+            <div>
+              <h3 className="text-base font-medium">eBay Developers</h3>
+              <p className="text-xs text-fg-subtle mt-1">
+                App ID and Cert ID from your eBay developer keyset. Used for
+                looking up item details via the Browse API. Stored in the
+                Windows Credential Manager. Watchlist sync needs the user OAuth
+                connection below as well.
+              </p>
             </div>
-          ) : (
-            <div className="space-y-2">
-              <button
-                className="btn-primary"
-                type="button"
-                onClick={onConnectEbay}
-                disabled={
-                  oauthBusy ||
-                  !ebayCreds?.has_app_id ||
-                  !ebayCreds?.has_cert_id ||
-                  !oauthStatus?.has_ru_name
-                }
-              >
-                {oauthBusy && !awaitingPaste
-                  ? "Opening…"
-                  : "Connect eBay account"}
-              </button>
-              {awaitingPaste && (
-                <div className="space-y-2">
-                  <label className="label">Paste auth code</label>
-                  <div className="flex gap-2">
+
+            <form onSubmit={onEbaySave} className="space-y-3">
+              <div>
+                <label className="label">Environment</label>
+                <div className="flex gap-4 text-sm">
+                  <label className="flex items-center gap-2 cursor-pointer">
                     <input
-                      className="input flex-1 font-mono text-xs"
-                      type="text"
-                      value={oauthCode}
-                      onChange={(e) => setOauthCode(e.target.value)}
-                      placeholder="v^1.1#i^1#..."
-                      autoComplete="off"
+                      type="radio"
+                      name="ebay-env"
+                      value="sandbox"
+                      checked={ebayEnv === "sandbox"}
+                      onChange={() => setEbayEnv("sandbox")}
                     />
-                    <button
-                      className="btn-primary shrink-0"
-                      type="button"
-                      onClick={onSubmitCode}
-                      disabled={oauthBusy || !oauthCode.trim()}
-                    >
-                      {oauthBusy ? "Exchanging…" : "Submit"}
-                    </button>
+                    Sandbox
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="ebay-env"
+                      value="production"
+                      checked={ebayEnv === "production"}
+                      onChange={() => setEbayEnv("production")}
+                    />
+                    Production
+                  </label>
+                </div>
+              </div>
+              <div>
+                <label className="label">
+                  App ID (Client ID){" "}
+                  {ebayCreds?.has_app_id && (
+                    <span className="text-fg-subtle normal-case">
+                      (saved — leave blank to keep)
+                    </span>
+                  )}
+                </label>
+                <input
+                  className="input"
+                  type="text"
+                  value={ebayAppId}
+                  onChange={(e) => setEbayAppId(e.target.value)}
+                  autoComplete="off"
+                  placeholder={ebayCreds?.has_app_id ? "••••••••" : ""}
+                />
+              </div>
+              <div>
+                <label className="label">
+                  Cert ID (Client Secret){" "}
+                  {ebayCreds?.has_cert_id && (
+                    <span className="text-fg-subtle normal-case">
+                      (saved — leave blank to keep)
+                    </span>
+                  )}
+                </label>
+                <input
+                  className="input"
+                  type="password"
+                  value={ebayCertId}
+                  onChange={(e) => setEbayCertId(e.target.value)}
+                  autoComplete="new-password"
+                  placeholder={ebayCreds?.has_cert_id ? "••••••••" : ""}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="btn-primary"
+                  type="submit"
+                  disabled={ebaySaving || !ebayAppId || !ebayCertId}
+                >
+                  {ebaySaving ? "Saving…" : "Save"}
+                </button>
+                <button
+                  className="btn-secondary"
+                  type="button"
+                  disabled={
+                    ebayTesting ||
+                    !ebayCreds?.has_app_id ||
+                    !ebayCreds?.has_cert_id
+                  }
+                  onClick={onEbayTest}
+                >
+                  {ebayTesting ? "Testing…" : "Test connection"}
+                </button>
+                {(ebayCreds?.has_app_id || ebayCreds?.has_cert_id) && (
+                  <button
+                    className="btn-danger"
+                    type="button"
+                    onClick={onEbayClear}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </form>
+            {ebayMessage && (
+              <div className="text-xs text-emerald-400">{ebayMessage}</div>
+            )}
+            {ebayError && <ErrorBanner error={ebayError} variant="inline" />}
+          </section>
+          <section className="card space-y-4">
+            <div className="space-y-3">
+              <div>
+                <h4 className="text-sm font-medium">
+                  Watchlist sync (user OAuth)
+                </h4>
+                <p className="text-xs text-fg-subtle mt-1">
+                  Connect your eBay account so the app can read your watchlist.
+                  Configure a RuName on developer.ebay.com pointing to{" "}
+                  <code className="text-fg-muted">
+                    https://&lt;your-worker&gt;/ebay-oauth-callback
+                  </code>{" "}
+                  and paste the resulting RuName below.
+                </p>
+              </div>
+
+              <div>
+                <label className="label">RuName</label>
+                <div className="flex gap-2">
+                  <input
+                    className="input flex-1 font-mono text-xs"
+                    type="text"
+                    value={ebayRuName}
+                    onChange={(e) => setEbayRuName(e.target.value)}
+                    placeholder="MyApp-Account-PRD-xxxxxxxx-xxxxxxxx"
+                    autoComplete="off"
+                  />
+                  <button
+                    className="btn-secondary shrink-0"
+                    type="button"
+                    onClick={onSaveRuName}
+                    disabled={
+                      savingRuName ||
+                      !ebayRuName.trim() ||
+                      ebayRuName.trim() === (ebayRuNameSaved ?? "")
+                    }
+                  >
+                    {savingRuName ? "Saving…" : "Save"}
+                  </button>
+                </div>
+              </div>
+
+              {oauthStatus?.connected ? (
+                <div className="flex items-center justify-between rounded-md bg-bg-elevated border border-border px-3 py-2">
+                  <div className="text-xs">
+                    <span className="text-emerald-400">✓ Connected</span>
+                    <span className="text-fg-subtle ml-2">
+                      ({oauthStatus.environment})
+                    </span>
+                    {oauthStatus.access_token_expires_at && (
+                      <span className="text-fg-subtle ml-2">
+                        token expires{" "}
+                        {formatTime(oauthStatus.access_token_expires_at)}
+                      </span>
+                    )}
                   </div>
+                  <button
+                    className="btn-danger"
+                    type="button"
+                    onClick={onDisconnectEbay}
+                    disabled={oauthBusy}
+                  >
+                    {oauthBusy ? "…" : "Disconnect"}
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <button
+                    className="btn-primary"
+                    type="button"
+                    onClick={onConnectEbay}
+                    disabled={
+                      oauthBusy ||
+                      !ebayCreds?.has_app_id ||
+                      !ebayCreds?.has_cert_id ||
+                      !oauthStatus?.has_ru_name
+                    }
+                  >
+                    {oauthBusy && !awaitingPaste
+                      ? "Opening…"
+                      : "Connect eBay account"}
+                  </button>
+                  {awaitingPaste && (
+                    <div className="space-y-2">
+                      <label className="label">Paste auth code</label>
+                      <div className="flex gap-2">
+                        <input
+                          className="input flex-1 font-mono text-xs"
+                          type="text"
+                          value={oauthCode}
+                          onChange={(e) => setOauthCode(e.target.value)}
+                          placeholder="v^1.1#i^1#..."
+                          autoComplete="off"
+                        />
+                        <button
+                          className="btn-primary shrink-0"
+                          type="button"
+                          onClick={onSubmitCode}
+                          disabled={oauthBusy || !oauthCode.trim()}
+                        >
+                          {oauthBusy ? "Exchanging…" : "Submit"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
+
+              {oauthMessage && (
+                <div className="text-xs text-emerald-400">{oauthMessage}</div>
+              )}
+              {oauthError && (
+                <ErrorBanner error={oauthError} variant="inline" />
+              )}
             </div>
-          )}
+          </section>
+        </>
+      )}
 
-          {oauthMessage && (
-            <div className="text-xs text-emerald-400">{oauthMessage}</div>
-          )}
-          {oauthError && <ErrorBanner error={oauthError} variant="inline" />}
-        </div>
+      {tab === "sync" && (
+        <>
+          <section className="card space-y-4">
+            <div>
+              <h3 className="text-base font-medium">
+                Automatic background sync
+              </h3>
+              <p className="text-xs text-fg-subtle mt-1">
+                Registers a Windows scheduled task that syncs your collection
+                (My Garage) and eBay (watchlist + saved searches/sellers) on a
+                timer — even when this app is closed, as long as you're signed
+                in to Windows. Whichever source isn't configured —
+                diecastregistry.com credentials or a connected eBay account — is
+                skipped. Interval is in hours (1–23).
+              </p>
+            </div>
 
-        <div className="border-t border-border pt-4 space-y-3">
-          <div>
-            <h4 className="text-sm font-medium">Diecast filter</h4>
-            <p className="text-xs text-fg-subtle mt-1">
-              Reject non-diecast eBay listings on save. Watchlist sync still
-              sees them but doesn't store them; manual URL adds error out with a
-              helpful message. Heuristic is a substring check on eBay's category
-              path — turn it off if you want to track an accessory or
-              transporter that lives in a different category.
-            </p>
-          </div>
+            <form onSubmit={onSaveAutoSync} className="space-y-3">
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoSyncEnabled}
+                  onChange={(e) => setAutoSyncEnabled(e.target.checked)}
+                />
+                <span>Enable automatic sync</span>
+              </label>
 
-          <label className="flex items-center gap-2 text-sm cursor-pointer">
-            <input
-              type="checkbox"
-              checked={filterDiecasts}
-              disabled={filterSaving}
-              onChange={(e) => onToggleFilter(e.target.checked)}
-            />
-            <span>Filter non-diecast eBay listings</span>
-          </label>
+              <div className="flex items-end gap-2">
+                <div>
+                  <label className="label">Interval (hours)</label>
+                  <input
+                    className="input w-32"
+                    type="number"
+                    min={1}
+                    max={23}
+                    step={1}
+                    value={autoSyncInterval}
+                    disabled={!autoSyncEnabled}
+                    onChange={(e) => setAutoSyncInterval(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="label">
+                    Max registry entries per refresh
+                  </label>
+                  <input
+                    className="input w-32"
+                    type="number"
+                    min={0}
+                    step={500}
+                    value={autoSyncPrewarmMax}
+                    disabled={!autoSyncEnabled}
+                    onChange={(e) => setAutoSyncPrewarmMax(e.target.value)}
+                  />
+                </div>
+                <button
+                  className="btn-primary"
+                  type="submit"
+                  disabled={autoSyncSaving}
+                >
+                  {autoSyncSaving ? "Saving…" : "Save"}
+                </button>
+              </div>
+              <p className="text-xs text-fg-subtle">
+                Each sync also re-walks stale pre-warmed registry drivers (older
+                than 30 days), up to this many entries per run so a single sync
+                never tries the whole registry at once. Drivers that don't fit
+                are picked up on later runs, oldest first. Set to 0 to skip the
+                registry refresh entirely.
+              </p>
+            </form>
 
-          <div>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={onCleanupNonDiecasts}
-              disabled={cleanupRunning}
-              title="Walk every saved eBay listing and delete any whose category isn't a diecast. Listings without category data (saved before this feature) are skipped — refresh those first."
-            >
-              {cleanupRunning
-                ? "Cleaning…"
-                : "Remove existing non-diecast listings"}
-            </button>
-          </div>
+            <div className="space-y-1">
+              <div className="text-xs">
+                {autoSyncEnabled && autoSyncScheduled && (
+                  <span className="text-emerald-400">
+                    ✓ Scheduled task registered
+                  </span>
+                )}
+                {autoSyncEnabled && !autoSyncScheduled && (
+                  <span className="text-amber-400">
+                    ⚠ Enabled, but no scheduled task is registered — click Save
+                    to (re)create it.
+                  </span>
+                )}
+                {!autoSyncEnabled && autoSyncScheduled && (
+                  <span className="text-amber-400">
+                    ⚠ A scheduled task still exists — click Save to remove it.
+                  </span>
+                )}
+                {!autoSyncEnabled && !autoSyncScheduled && (
+                  <span className="text-fg-subtle">Not scheduled.</span>
+                )}
+              </div>
+              <div className="text-xs text-fg-subtle">
+                {autoSyncLastRun
+                  ? `Last background sync ${formatDateTime(autoSyncLastRun)}`
+                  : "Background sync hasn't run yet."}
+              </div>
+            </div>
 
-          {filterMessage && (
-            <div className="text-xs text-emerald-400">{filterMessage}</div>
-          )}
-          {filterError && <ErrorBanner error={filterError} variant="inline" />}
-        </div>
+            {autoSyncMessage && (
+              <div className="text-xs text-emerald-400">{autoSyncMessage}</div>
+            )}
+            {autoSyncError && (
+              <ErrorBanner error={autoSyncError} variant="inline" />
+            )}
+          </section>
+          <section className="card space-y-4">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium">Sync My Garage</div>
+                  <div className="text-xs text-fg-subtle">
+                    {lastSync
+                      ? `Last synced ${formatDateTime(Number(lastSync))}`
+                      : "Never synced"}
+                  </div>
+                </div>
+                <button
+                  className="btn-primary"
+                  type="button"
+                  disabled={syncing || !creds?.diecastregistry_has_password}
+                  onClick={onSync}
+                >
+                  {syncing ? "Syncing…" : "Sync now"}
+                </button>
+              </div>
+              <label className="flex items-center gap-2 text-xs text-fg-subtle">
+                <input
+                  type="checkbox"
+                  checked={syncEnrich}
+                  disabled={syncing}
+                  onChange={(e) => setSyncEnrich(e.target.checked)}
+                />
+                Refresh registry details after sync (slower)
+              </label>
+              {syncSummary && (
+                <div className="text-xs text-emerald-400 space-y-1">
+                  <div>
+                    Pulled {syncSummary.items_seen} items across{" "}
+                    {syncSummary.pages_fetched} page
+                    {syncSummary.pages_fetched === 1 ? "" : "s"}.
+                  </div>
+                  {syncSummary.collection_rows_removed > 0 && (
+                    <div>
+                      Removed {syncSummary.collection_rows_removed} local entr
+                      {syncSummary.collection_rows_removed === 1
+                        ? "y"
+                        : "ies"}{" "}
+                      no longer in your garage.
+                    </div>
+                  )}
+                  {syncSummary.enrichment && (
+                    <div>
+                      Enriched {syncSummary.enrichment.enriched} of{" "}
+                      {syncSummary.enrichment.considered} registry entries (
+                      {syncSummary.enrichment.failed} failed,{" "}
+                      {syncSummary.enrichment.skipped} skipped).
+                    </div>
+                  )}
+                </div>
+              )}
+              {syncError && <ErrorBanner error={syncError} variant="inline" />}
+            </div>
+          </section>
+          <section className="card space-y-4">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium">Registry details</div>
+                  <div className="text-xs text-fg-subtle">
+                    Re-fetch detail pages for cars in your collection. Stale
+                    entries (older than 30 days) refresh automatically.
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  {/* nowrap on both: this block is its own card since
+                      DCH-21, narrower than the combined one it came from,
+                      and each label was wrapping to three lines. */}
+                  <button
+                    className="btn-secondary whitespace-nowrap"
+                    type="button"
+                    disabled={
+                      refreshing || !creds?.diecastregistry_has_password
+                    }
+                    onClick={() => onRefresh(false)}
+                  >
+                    {refreshing ? "Refreshing…" : "Refresh stale"}
+                  </button>
+                  <button
+                    className="btn-secondary whitespace-nowrap"
+                    type="button"
+                    disabled={
+                      refreshing || !creds?.diecastregistry_has_password
+                    }
+                    onClick={() => onRefresh(true)}
+                  >
+                    Force refresh all
+                  </button>
+                </div>
+              </div>
+              {refreshSummary && (
+                <div className="text-xs text-emerald-400">
+                  Refreshed {refreshSummary.enriched} of{" "}
+                  {refreshSummary.considered} ({refreshSummary.failed} failed,{" "}
+                  {refreshSummary.skipped} skipped).
+                </div>
+              )}
+              {refreshError && (
+                <ErrorBanner error={refreshError} variant="inline" />
+              )}
+            </div>
+          </section>
+          <section className="card space-y-4">
+            <div className="space-y-3">
+              <div>
+                <div className="text-sm font-medium">
+                  Pre-warm registry by driver
+                </div>
+                <div className="text-xs text-fg-subtle mt-1">
+                  Pull every registry entry for one driver and store them
+                  locally so the registry-search dialog can surface candidates
+                  without hitting diecastregistry.com on every keystroke. Takes
+                  a minute or two for a prolific driver — pages are paced to be
+                  polite. Repeat for every driver you watch.
+                </div>
+              </div>
 
-        <div className="border-t border-border pt-4 space-y-3">
-          <div>
-            <h4 className="text-sm font-medium">Shipping quote location</h4>
-            <p className="text-xs text-fg-subtle mt-1">
-              Your US zip code, sent to eBay so it can price shipping for
-              listings that calculate it from the buyer's location. Without it,
-              those listings come back with no shipping cost at all and show
-              price-only totals. After saving, run “Refresh all” on the Listings
-              page to backfill.
-            </p>
-          </div>
+              <div className="flex items-center gap-2">
+                <input
+                  list="prewarm-drivers-list"
+                  type="text"
+                  className="input flex-1"
+                  value={prewarmInput}
+                  onChange={(e) => {
+                    setPrewarmInput(e.target.value);
+                    const m = drivers.find((d) => d.display === e.target.value);
+                    setPrewarmDriverGuid(m?.value ?? "");
+                  }}
+                  placeholder={
+                    drivers.length === 0
+                      ? "Refresh registry options first…"
+                      : "Type a driver name…"
+                  }
+                  autoComplete="off"
+                  disabled={drivers.length === 0}
+                />
+                <datalist id="prewarm-drivers-list">
+                  {drivers.map((d) => (
+                    <option key={d.value} value={d.display} />
+                  ))}
+                </datalist>
+                <button
+                  className="btn-primary shrink-0"
+                  type="button"
+                  onClick={onPrewarm}
+                  disabled={prewarming || !prewarmDriverGuid}
+                >
+                  {prewarming ? "Fetching…" : "Pre-warm"}
+                </button>
+              </div>
 
-          <form onSubmit={onSaveBuyerZip} className="flex items-center gap-2">
-            <input
-              className="input w-32"
-              type="text"
-              value={buyerZip}
-              onChange={(e) => setBuyerZip(e.target.value)}
-              placeholder="e.g. 28117"
-              autoComplete="postal-code"
-            />
-            <button
-              className="btn-secondary"
-              type="submit"
-              disabled={buyerZipSaving}
-            >
-              {buyerZipSaving ? "Saving…" : "Save"}
-            </button>
-          </form>
+              {prewarmSummary && (
+                <div className="text-xs text-emerald-400">
+                  {prewarmSummary.driver_name}: pulled{" "}
+                  {prewarmSummary.results_seen} entries across{" "}
+                  {prewarmSummary.pages_fetched} page
+                  {prewarmSummary.pages_fetched === 1 ? "" : "s"} (
+                  {prewarmSummary.registry_entries_upserted} upserted).
+                </div>
+              )}
+              {prewarmError && (
+                <ErrorBanner error={prewarmError} variant="inline" />
+              )}
+            </div>
+          </section>
+          <section className="card space-y-4">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-sm font-medium">
+                    Repair diecastregistry.com links
+                  </div>
+                  <div className="text-xs text-fg-subtle mt-1">
+                    Some registry entries saved by older versions lost the URL
+                    of their diecastregistry.com page, so matched listings show
+                    no "View on diecastregistry.com" link. This re-walks the
+                    registry search for the affected drivers and restores the
+                    links. Safe to re-run; does nothing when no links are
+                    missing.
+                  </div>
+                </div>
+                <button
+                  className="btn-secondary shrink-0"
+                  type="button"
+                  disabled={
+                    linkRepairRunning || !creds?.diecastregistry_has_password
+                  }
+                  onClick={onRepairRegistryLinks}
+                >
+                  {linkRepairRunning ? "Repairing…" : "Repair links"}
+                </button>
+              </div>
+              {linkRepairSummary && (
+                <div className="text-xs text-emerald-400">
+                  {linkRepairSummary.missing_before === 0
+                    ? "All registry entries already have links."
+                    : `Restored links for ${linkRepairSummary.entries_patched} of ` +
+                      `${linkRepairSummary.missing_before} entries across ` +
+                      `${linkRepairSummary.drivers_processed} driver` +
+                      `${linkRepairSummary.drivers_processed === 1 ? "" : "s"}` +
+                      (linkRepairSummary.still_missing > 0
+                        ? ` (${linkRepairSummary.still_missing} still missing).`
+                        : ".")}
+                </div>
+              )}
+              {linkRepairError && (
+                <ErrorBanner error={linkRepairError} variant="inline" />
+              )}
+            </div>
+          </section>
+        </>
+      )}
 
-          {buyerZipMessage && (
-            <div className="text-xs text-emerald-400">{buyerZipMessage}</div>
-          )}
-          {buyerZipError && (
-            <ErrorBanner error={buyerZipError} variant="inline" />
-          )}
-        </div>
-      </section>
+      {tab === "search" && (
+        <>
+          <section className="card space-y-4">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium">
+                    Registry search options
+                  </div>
+                  <div className="text-xs text-fg-subtle">
+                    Cache driver / OEM / brand / scale / finish dropdown choices
+                    from diecastregistry.com. Used by the "Search registry…"
+                    dialog on saved listings. Refresh occasionally to pick up
+                    new drivers / brands.
+                  </div>
+                </div>
+                <button
+                  className="btn-secondary"
+                  type="button"
+                  disabled={
+                    optionsRefreshing || !creds?.diecastregistry_has_password
+                  }
+                  onClick={onRefreshFormOptions}
+                >
+                  {optionsRefreshing ? "Fetching…" : "Refresh options"}
+                </button>
+              </div>
+              {optionsMessage && (
+                <div className="text-xs text-emerald-400">{optionsMessage}</div>
+              )}
+              {optionsError && (
+                <ErrorBanner error={optionsError} variant="inline" />
+              )}
+            </div>
+          </section>
+          <section className="card space-y-4">
+            <div className="space-y-3">
+              <div className="pt-1 space-y-1.5">
+                <div className="text-sm font-medium">Registry search mode</div>
+                {(
+                  [
+                    {
+                      mode: "remote",
+                      label: "Live",
+                      hint: "Always search diecastregistry.com (slowest, always complete).",
+                    },
+                    {
+                      mode: "hybrid",
+                      label: "Hybrid — recommended",
+                      hint: "Answer instantly from pre-warmed data when it fully covers the query; otherwise search the site.",
+                    },
+                    {
+                      mode: "local",
+                      label: "Local only",
+                      hint: "Never hit the network. Drivers you haven't pre-warmed return no results, and autographed / race-win filters are ignored.",
+                    },
+                  ] as {
+                    mode: RegistrySearchMode;
+                    label: string;
+                    hint: string;
+                  }[]
+                ).map((opt) => (
+                  <label
+                    key={opt.mode}
+                    className="flex items-start gap-2 text-sm cursor-pointer"
+                  >
+                    <input
+                      type="radio"
+                      name="registry-search-mode"
+                      className="mt-0.5"
+                      checked={searchMode === opt.mode}
+                      disabled={searchModeSaving}
+                      onChange={() => onChangeSearchMode(opt.mode)}
+                    />
+                    <span>
+                      <span>{opt.label}</span>
+                      <span className="block text-xs text-fg-subtle">
+                        {opt.hint}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+                {searchModeError && (
+                  <ErrorBanner
+                    error={searchModeError}
+                    variant="inline"
+                    className="mt-1"
+                  />
+                )}
+              </div>
 
-      <MatcherLearningSection />
+              <div className="pt-1">
+                <div className="text-xs font-medium text-fg-subtle">
+                  Pre-warmed drivers ({prewarmedDrivers.length})
+                </div>
+                {prewarmedDrivers.length === 0 ? (
+                  <div className="text-xs text-fg-subtle mt-1">
+                    No drivers pre-warmed yet.
+                  </div>
+                ) : (
+                  (() => {
+                    const q = prewarmedSearch.trim().toLowerCase();
+                    const filtered = q
+                      ? prewarmedDrivers.filter((d) =>
+                          d.driver_name.toLowerCase().includes(q),
+                        )
+                      : prewarmedDrivers;
+                    return (
+                      <>
+                        <input
+                          type="text"
+                          className="input mt-2 w-full"
+                          value={prewarmedSearch}
+                          onChange={(e) => setPrewarmedSearch(e.target.value)}
+                          placeholder="Filter pre-warmed drivers…"
+                          autoComplete="off"
+                        />
+                        {filtered.length === 0 ? (
+                          <div className="text-xs text-fg-subtle mt-2">
+                            No drivers match “{prewarmedSearch}”.
+                          </div>
+                        ) : (
+                          <ul className="mt-2 max-h-64 overflow-y-auto divide-y divide-border rounded-md border border-border">
+                            {filtered.map((d) => (
+                              <li
+                                key={d.driver_guid}
+                                className="flex items-center justify-between gap-3 px-3 py-1.5 text-xs"
+                              >
+                                <span className="truncate">
+                                  {d.driver_name}
+                                </span>
+                                <span className="shrink-0 text-fg-subtle">
+                                  {d.entry_count} entr
+                                  {d.entry_count === 1 ? "y" : "ies"} ·{" "}
+                                  {formatDate(d.last_prewarmed_at)}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </>
+                    );
+                  })()
+                )}
+              </div>
+            </div>
+          </section>
+          <section className="card space-y-4">
+            <div className="space-y-3">
+              <div>
+                <h4 className="text-sm font-medium">Diecast filter</h4>
+                <p className="text-xs text-fg-subtle mt-1">
+                  Reject non-diecast eBay listings on save. Watchlist sync still
+                  sees them but doesn't store them; manual URL adds error out
+                  with a helpful message. Heuristic is a substring check on
+                  eBay's category path — turn it off if you want to track an
+                  accessory or transporter that lives in a different category.
+                </p>
+              </div>
 
-      <ExtensionSection />
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={filterDiecasts}
+                  disabled={filterSaving}
+                  onChange={(e) => onToggleFilter(e.target.checked)}
+                />
+                <span>Filter non-diecast eBay listings</span>
+              </label>
+
+              <div>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={onCleanupNonDiecasts}
+                  disabled={cleanupRunning}
+                  title="Walk every saved eBay listing and delete any whose category isn't a diecast. Listings without category data (saved before this feature) are skipped — refresh those first."
+                >
+                  {cleanupRunning
+                    ? "Cleaning…"
+                    : "Remove existing non-diecast listings"}
+                </button>
+              </div>
+
+              {filterMessage && (
+                <div className="text-xs text-emerald-400">{filterMessage}</div>
+              )}
+              {filterError && (
+                <ErrorBanner error={filterError} variant="inline" />
+              )}
+            </div>
+          </section>
+          <section className="card space-y-4">
+            <div className="space-y-3">
+              <div>
+                <h4 className="text-sm font-medium">Shipping quote location</h4>
+                <p className="text-xs text-fg-subtle mt-1">
+                  Your US zip code, sent to eBay so it can price shipping for
+                  listings that calculate it from the buyer's location. Without
+                  it, those listings come back with no shipping cost at all and
+                  show price-only totals. After saving, run “Refresh all” on the
+                  Listings page to backfill.
+                </p>
+              </div>
+
+              <form
+                onSubmit={onSaveBuyerZip}
+                className="flex items-center gap-2"
+              >
+                <input
+                  className="input w-32"
+                  type="text"
+                  value={buyerZip}
+                  onChange={(e) => setBuyerZip(e.target.value)}
+                  placeholder="e.g. 28117"
+                  autoComplete="postal-code"
+                />
+                <button
+                  className="btn-secondary"
+                  type="submit"
+                  disabled={buyerZipSaving}
+                >
+                  {buyerZipSaving ? "Saving…" : "Save"}
+                </button>
+              </form>
+
+              {buyerZipMessage && (
+                <div className="text-xs text-emerald-400">
+                  {buyerZipMessage}
+                </div>
+              )}
+              {buyerZipError && (
+                <ErrorBanner error={buyerZipError} variant="inline" />
+              )}
+            </div>
+          </section>
+          <MatcherLearningSection />
+        </>
+      )}
+
+      {tab === "extension" && <ExtensionSection />}
 
       {message && <div className="text-sm text-emerald-400">{message}</div>}
       {error && <ErrorBanner error={error} variant="inline" />}
