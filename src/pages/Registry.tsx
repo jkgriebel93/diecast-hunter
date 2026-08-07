@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { describeError } from "@/lib/errors";
+import { Modal } from "@/components/Modal";
 import {
   api,
   formatAgo,
@@ -851,59 +852,54 @@ export function Registry() {
       )}
 
       {wishPicker && (
-        <div
-          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setWishPicker(null);
-          }}
-        >
-          <div
-            className="card w-full max-w-sm space-y-3"
-            role="dialog"
-            aria-modal="true"
-          >
-            <header>
-              <h3 className="text-lg font-semibold">Add to which wishlist?</h3>
-              <div className="text-xs text-fg-muted mt-0.5 truncate">
+        <Modal
+          title="Add to which wishlist?"
+          description={
+            <>
+              <span className="truncate block">
                 {wishPicker.result.driver_name}
                 {wishPicker.result.year !== null && (
                   <span className="ml-2 text-fg-subtle">
                     {wishPicker.result.year}
                   </span>
                 )}
-              </div>
+              </span>
               {wishPicker.result.scheme_text && (
-                <div className="text-xs text-fg-subtle truncate">
+                <span className="truncate block">
                   {wishPicker.result.scheme_text}
-                </div>
+                </span>
               )}
-            </header>
-            <div className="space-y-1.5">
-              {wishPicker.lists.map((l) => (
-                <button
-                  key={l.wishlist_id}
-                  type="button"
-                  className="btn-secondary w-full !justify-between flex items-center"
-                  onClick={() => void onPickWishlist(l.wishlist_id)}
-                >
-                  <span className="truncate">{l.name}</span>
-                  <span className="text-xs text-fg-subtle tabular-nums shrink-0 ml-2">
-                    {l.entry_count} entr{l.entry_count === 1 ? "y" : "ies"}
-                  </span>
-                </button>
-              ))}
-            </div>
-            <div className="flex justify-end">
+            </>
+          }
+          onClose={() => setWishPicker(null)}
+          size="max-w-sm"
+          panelClassName="space-y-3"
+          footer={
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setWishPicker(null)}
+            >
+              Cancel
+            </button>
+          }
+        >
+          <div className="space-y-1.5">
+            {wishPicker.lists.map((l) => (
               <button
+                key={l.wishlist_id}
                 type="button"
-                className="btn-secondary"
-                onClick={() => setWishPicker(null)}
+                className="btn-secondary w-full !justify-between flex items-center"
+                onClick={() => void onPickWishlist(l.wishlist_id)}
               >
-                Cancel
+                <span className="truncate">{l.name}</span>
+                <span className="text-xs text-fg-subtle tabular-nums shrink-0 ml-2">
+                  {l.entry_count} entr{l.entry_count === 1 ? "y" : "ies"}
+                </span>
               </button>
-            </div>
+            ))}
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );
@@ -1131,142 +1127,137 @@ function AddToGarageModal({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget && !submitting) onClose();
-      }}
-    >
-      <div
-        className="card w-full max-w-md space-y-3"
-        role="dialog"
-        aria-modal="true"
-      >
-        <header>
-          <h3 className="text-lg font-semibold">Add to My Garage</h3>
-          <div className="text-xs text-fg-muted mt-0.5">
+    <Modal
+      title="Add to My Garage"
+      description={
+        <>
+          <span className="block">
             {target.driver_name}
             {target.year !== null && (
               <span className="ml-2 text-fg-subtle">{target.year}</span>
             )}
-          </div>
+          </span>
           {target.scheme_text && (
-            <div className="text-xs text-fg-subtle truncate">
-              {target.scheme_text}
-            </div>
+            <span className="truncate block">{target.scheme_text}</span>
           )}
-        </header>
-
-        {success ? (
-          <div className="space-y-3">
-            <div className="text-sm text-emerald-400">
-              ✓ Added to your garage.
-            </div>
-            <div className="text-sm">
-              DCR registration number:{" "}
-              <span className="font-mono tabular-nums">
-                {success.registration_number}
-              </span>
-            </div>
-            <div className="flex justify-end">
-              <button type="button" className="btn-primary" onClick={onClose}>
-                Close
-              </button>
-            </div>
-          </div>
+        </>
+      }
+      onClose={onClose}
+      busy={submitting}
+      size="max-w-md"
+      panelClassName="space-y-3"
+      footer={
+        success ? (
+          <button type="button" className="btn-primary" onClick={onClose}>
+            Close
+          </button>
         ) : (
           <>
-            <div>
-              <label className="label">Condition</label>
-              <select
-                className="input"
-                value={condition}
-                onChange={(e) => setCondition(e.target.value as Condition)}
-                disabled={submitting}
-              >
-                {CONDITION_OPTIONS.map((c) => (
-                  <option key={c.value} value={c.value}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={onClose}
+              disabled={submitting}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={onSubmit}
+              disabled={submitting}
+            >
+              {submitting ? "Adding…" : "Add to garage"}
+            </button>
+          </>
+        )
+      }
+    >
+      {success ? (
+        <div className="space-y-3">
+          <div className="text-sm text-emerald-400">
+            ✓ Added to your garage.
+          </div>
+          <div className="text-sm">
+            DCR registration number:{" "}
+            <span className="font-mono tabular-nums">
+              {success.registration_number}
+            </span>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div>
+            <label className="label">Condition</label>
+            <select
+              className="input"
+              value={condition}
+              onChange={(e) => setCondition(e.target.value as Condition)}
+              disabled={submitting}
+            >
+              {CONDITION_OPTIONS.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <label className="inline-flex items-center gap-2 text-xs text-fg-muted">
-                <input
-                  type="checkbox"
-                  checked={autographed}
-                  onChange={(e) => setAutographed(e.target.checked)}
-                  disabled={submitting}
-                />
-                Autographed
-              </label>
-              <label className="inline-flex items-center gap-2 text-xs text-fg-muted">
-                <input
-                  type="checkbox"
-                  checked={prototype}
-                  onChange={(e) => setPrototype(e.target.checked)}
-                  disabled={submitting}
-                />
-                Prototype
-              </label>
-            </div>
-
-            {isProduced && !prototype && (
-              <div>
-                <label className="label">DIN / Chassis number</label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  className="input"
-                  value={chassisNumber}
-                  onChange={(e) => setChassisNumber(e.target.value)}
-                  placeholder={`1 of ${target.seq_produced_total ?? "—"}`}
-                  disabled={submitting}
-                />
-                <div className="text-xs text-fg-subtle mt-0.5">
-                  Required for sequentially-numbered diecasts. Leave blank if
-                  this isn't sequentially numbered — the registry will tell us.
-                </div>
-              </div>
-            )}
-
-            <div>
-              <label className="label">Comments (optional)</label>
-              <textarea
-                className="input"
-                rows={2}
-                maxLength={4000}
-                value={comments}
-                onChange={(e) => setComments(e.target.value)}
+          <div className="grid grid-cols-2 gap-3">
+            <label className="inline-flex items-center gap-2 text-xs text-fg-muted">
+              <input
+                type="checkbox"
+                checked={autographed}
+                onChange={(e) => setAutographed(e.target.checked)}
                 disabled={submitting}
               />
-            </div>
-
-            {error && <ErrorBanner error={error} variant="inline" />}
-
-            <div className="flex items-center justify-end gap-2 pt-1">
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={onClose}
+              Autographed
+            </label>
+            <label className="inline-flex items-center gap-2 text-xs text-fg-muted">
+              <input
+                type="checkbox"
+                checked={prototype}
+                onChange={(e) => setPrototype(e.target.checked)}
                 disabled={submitting}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn-primary"
-                onClick={onSubmit}
+              />
+              Prototype
+            </label>
+          </div>
+
+          {isProduced && !prototype && (
+            <div>
+              <label className="label">DIN / Chassis number</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                className="input"
+                value={chassisNumber}
+                onChange={(e) => setChassisNumber(e.target.value)}
+                placeholder={`1 of ${target.seq_produced_total ?? "—"}`}
                 disabled={submitting}
-              >
-                {submitting ? "Adding…" : "Add to garage"}
-              </button>
+              />
+              <div className="text-xs text-fg-subtle mt-0.5">
+                Required for sequentially-numbered diecasts. Leave blank if this
+                isn't sequentially numbered — the registry will tell us.
+              </div>
             </div>
-          </>
-        )}
-      </div>
-    </div>
+          )}
+
+          <div>
+            <label className="label">Comments (optional)</label>
+            <textarea
+              className="input"
+              rows={2}
+              maxLength={4000}
+              value={comments}
+              onChange={(e) => setComments(e.target.value)}
+              disabled={submitting}
+            />
+          </div>
+
+          {error && <ErrorBanner error={error} variant="inline" />}
+        </>
+      )}
+    </Modal>
   );
 }

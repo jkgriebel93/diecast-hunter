@@ -1,6 +1,7 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { api, ALLOWED_SCALES, type CollectionRow } from "@/lib/tauri";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { Modal } from "@/components/Modal";
 import {
   EMPTY_MANUAL_ENTRY_FORM,
   formFromRow,
@@ -49,15 +50,6 @@ export function ManualEntryDialog({
 
   const errors = useMemo(() => validateManualEntry(form), [form]);
 
-  // Escape closes, matching every other dismissible surface in the app.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !saving) onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, saving]);
-
   function set<K extends keyof ManualEntryForm>(
     key: K,
     value: ManualEntryForm[K],
@@ -92,30 +84,35 @@ export function ManualEntryDialog({
   const showErrors = submitted && errors.length > 0;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-6"
-      role="dialog"
-      aria-modal="true"
-      aria-label={editing ? "Edit manual entry" : "Add a car manually"}
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget && !saving) onClose();
-      }}
+    <Modal
+      title={editing ? "Edit entry" : "Add a car manually"}
+      description="For cars diecastregistry.com doesn't list. This stays local — nothing is added to your DCR garage."
+      onClose={onClose}
+      onSubmit={onSubmit}
+      busy={saving}
+      size="max-w-2xl"
+      panelClassName="space-y-4"
+      footer={
+        <>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={onClose}
+            disabled={saving}
+          >
+            Cancel
+          </button>
+          <button type="submit" className="btn-primary" disabled={saving}>
+            {saving
+              ? "Saving…"
+              : editing
+                ? "Save changes"
+                : "Add to collection"}
+          </button>
+        </>
+      }
     >
-      <form
-        className="card w-full max-w-2xl space-y-4"
-        onSubmit={onSubmit}
-        data-testid="manual-entry-dialog"
-      >
-        <div>
-          <h3 className="text-lg font-semibold">
-            {editing ? "Edit entry" : "Add a car manually"}
-          </h3>
-          <p className="text-sm text-fg-subtle">
-            For cars diecastregistry.com doesn&apos;t list. This stays local —
-            nothing is added to your DCR garage.
-          </p>
-        </div>
-
+      <div data-testid="manual-entry-dialog" className="space-y-4">
         {/* Validation messages are ours and already written for a person, so
             they stay a plain list — running them through `describeError`
             would only retitle them "Something went wrong." The save failure
@@ -292,26 +289,8 @@ export function ManualEntryDialog({
             />
           </Field>
         </div>
-
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={onClose}
-            disabled={saving}
-          >
-            Cancel
-          </button>
-          <button type="submit" className="btn-primary" disabled={saving}>
-            {saving
-              ? "Saving…"
-              : editing
-                ? "Save changes"
-                : "Add to collection"}
-          </button>
-        </div>
-      </form>
-    </div>
+      </div>
+    </Modal>
   );
 }
 

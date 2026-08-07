@@ -15,6 +15,7 @@ import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { ViewLink } from "@/components/ViewLink";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { Modal } from "@/components/Modal";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-24 h-24",
@@ -1035,113 +1036,104 @@ function LinkListingModal({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget && linking === null) onClose();
-      }}
-    >
-      <div
-        className="card w-full max-w-2xl max-h-[80vh] flex flex-col space-y-3"
-        role="dialog"
-        aria-modal="true"
-      >
-        <header>
-          <h3 className="text-lg font-semibold">Link a saved listing</h3>
-          <div className="text-xs text-fg-muted mt-0.5 truncate">
-            {entry.driver_name ?? "(unknown driver)"}
-            {entry.year && (
-              <span className="ml-2 text-fg-subtle">{entry.year}</span>
-            )}
-            {entry.scheme_text && (
-              <span className="ml-2 text-fg-subtle">{entry.scheme_text}</span>
-            )}
-          </div>
-        </header>
-
-        <input
-          type="text"
-          className="input"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Filter saved listings by title…"
-          autoFocus
-        />
-
-        {error && <ErrorBanner error={error} variant="inline" />}
-
-        <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5">
-          {filtered === null ? (
-            <div className="text-sm text-fg-muted">Loading listings…</div>
-          ) : filtered.length === 0 ? (
-            <div className="text-sm text-fg-muted">
-              No saved listings match.
-            </div>
-          ) : (
-            filtered.map((l) => {
-              const linked = alreadyLinked.has(l.listing_id);
-              const total =
-                l.price_cents !== null
-                  ? l.price_cents + (l.shipping_cents ?? 0)
-                  : null;
-              return (
-                <div
-                  key={l.listing_id}
-                  className="flex items-center gap-3 text-xs border border-border rounded p-2"
-                >
-                  {l.image_url ? (
-                    <img
-                      src={l.image_url}
-                      alt=""
-                      loading="lazy"
-                      className="w-12 h-12 object-cover rounded border border-border shrink-0"
-                    />
-                  ) : (
-                    <div className="w-12 h-12 rounded border border-border bg-bg shrink-0" />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="truncate" title={l.title}>
-                      {l.title}
-                    </div>
-                    <div className="text-fg-subtle">
-                      {l.seller_code === "ebay" ? "eBay" : l.seller_code}
-                      {l.status !== "active" && (
-                        <span className="ml-2">({l.status})</span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="tabular-nums shrink-0">
-                    {formatCents(total)}
-                  </div>
-                  <button
-                    type="button"
-                    className="btn-secondary !py-1 !text-xs shrink-0"
-                    onClick={() => onPick(l)}
-                    disabled={linked || linking !== null}
-                  >
-                    {linked
-                      ? "Linked"
-                      : linking === l.listing_id
-                        ? "Linking…"
-                        : "Link"}
-                  </button>
-                </div>
-              );
-            })
+    <Modal
+      title="Link a saved listing"
+      description={
+        <span className="truncate block">
+          {entry.driver_name ?? "(unknown driver)"}
+          {entry.year && (
+            <span className="ml-2 text-fg-subtle">{entry.year}</span>
           )}
-        </div>
+          {entry.scheme_text && (
+            <span className="ml-2 text-fg-subtle">{entry.scheme_text}</span>
+          )}
+        </span>
+      }
+      onClose={onClose}
+      busy={linking !== null}
+      size="max-w-2xl"
+      scroll="none"
+      panelClassName="max-h-[80vh] flex flex-col space-y-3"
+      footer={
+        <button
+          type="button"
+          className="btn-secondary"
+          onClick={onClose}
+          disabled={linking !== null}
+        >
+          Close
+        </button>
+      }
+    >
+      <input
+        type="text"
+        className="input"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Filter saved listings by title…"
+        autoFocus
+      />
 
-        <div className="flex justify-end pt-1">
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={onClose}
-            disabled={linking !== null}
-          >
-            Close
-          </button>
-        </div>
+      {error && <ErrorBanner error={error} variant="inline" />}
+
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5">
+        {filtered === null ? (
+          <div className="text-sm text-fg-muted">Loading listings…</div>
+        ) : filtered.length === 0 ? (
+          <div className="text-sm text-fg-muted">No saved listings match.</div>
+        ) : (
+          filtered.map((l) => {
+            const linked = alreadyLinked.has(l.listing_id);
+            const total =
+              l.price_cents !== null
+                ? l.price_cents + (l.shipping_cents ?? 0)
+                : null;
+            return (
+              <div
+                key={l.listing_id}
+                className="flex items-center gap-3 text-xs border border-border rounded p-2"
+              >
+                {l.image_url ? (
+                  <img
+                    src={l.image_url}
+                    alt=""
+                    loading="lazy"
+                    className="w-12 h-12 object-cover rounded border border-border shrink-0"
+                  />
+                ) : (
+                  <div className="w-12 h-12 rounded border border-border bg-bg shrink-0" />
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="truncate" title={l.title}>
+                    {l.title}
+                  </div>
+                  <div className="text-fg-subtle">
+                    {l.seller_code === "ebay" ? "eBay" : l.seller_code}
+                    {l.status !== "active" && (
+                      <span className="ml-2">({l.status})</span>
+                    )}
+                  </div>
+                </div>
+                <div className="tabular-nums shrink-0">
+                  {formatCents(total)}
+                </div>
+                <button
+                  type="button"
+                  className="btn-secondary !py-1 !text-xs shrink-0"
+                  onClick={() => onPick(l)}
+                  disabled={linked || linking !== null}
+                >
+                  {linked
+                    ? "Linked"
+                    : linking === l.listing_id
+                      ? "Linking…"
+                      : "Link"}
+                </button>
+              </div>
+            );
+          })
+        )}
       </div>
-    </div>
+    </Modal>
   );
 }

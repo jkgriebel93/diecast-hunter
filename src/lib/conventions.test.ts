@@ -34,12 +34,21 @@ function sourceFiles(): string[] {
 
 /** Every `file:line` whose text matches, as "path:N — <line>" for readable
  *  failure output. A bare count would tell you a rule broke but not where. */
+/** A line that is entirely a comment. These rules are about what the code
+ *  does, and prose explaining *why* a rule exists routinely has to name the
+ *  thing it forbids — the comment above `ActivityBar`'s z-index says "it was
+ *  z-50", and that must not read as a violation. Only whole-line comments
+ *  are skipped; a trailing `// z-50` after real code still counts, because
+ *  the code on that line is what matters. */
+const COMMENT_LINE = /^\s*(\/\/|\/?\*|\{\/\*)/;
+
 function violations(pattern: RegExp): string[] {
   const hits: string[] = [];
   for (const file of sourceFiles()) {
     readFileSync(file, "utf8")
       .split("\n")
       .forEach((line, i) => {
+        if (COMMENT_LINE.test(line)) return;
         if (pattern.test(line)) hits.push(`${file}:${i + 1} — ${line.trim()}`);
       });
   }
@@ -96,5 +105,67 @@ describe("errors go through ErrorBanner", () => {
         `${allowed} is on the allowlist but has no error box — drop it`,
       ).toBe(true);
     }
+  });
+});
+
+describe("dialogs go through the shared Modal", () => {
+  /** The hand-rolled dialog shape DCH-32 replaced: a full-viewport backdrop
+   *  with a tint. Ten of these disagreed on z-layer, vertical placement,
+   *  Escape handling and whether a screen reader was told a dialog had
+   *  opened. `Modal` owns all of it now.
+   *
+   *  Deliberately narrower than `fixed inset-0` on its own — that also
+   *  matches the invisible click-catching scrims under dropdown menus, which
+   *  are not dialogs and must stay. The `bg-black/` tint is what makes it a
+   *  modal backdrop. */
+  const BACKDROP = /fixed inset-0[^"'`]*bg-black\//;
+
+  it("has no hand-rolled modal backdrops outside Modal.tsx", () => {
+    const hits = violations(BACKDROP).filter(
+      (h) => !h.startsWith("src/components/Modal.tsx"),
+    );
+    expect(hits).toEqual([]);
+  });
+
+  it("keeps every dialog's ARIA contract in one place", () => {
+    // A second `role="dialog"` in the tree means someone rebuilt the
+    // wrapper rather than using Modal, and with it the odds that Escape,
+    // aria-modal or the accessible name were forgotten.
+    const hits = violations(/role="dialog"/).filter(
+      (h) => !h.startsWith("src/components/Modal.tsx"),
+    );
+    expect(hits).toEqual([]);
+  });
+});
+
+describe("the z-scale stays documented", () => {
+  /** 30 dropdown scrim and sticky page furniture · 40 dropdown menus and
+   *  app banners · 50 modal · 60 modal-over-modal. See CLAUDE.md.
+   *
+   *  Arbitrary bracket values are what the scale is meant to replace: they
+   *  read as one-off decisions and can't be grepped as a set. `z-60` is a
+   *  real class because tailwind.config.js extends Tailwind's scale, which
+   *  stops at 50.
+   *
+   *  Note the wording avoids spelling out a bracketed z-class literally.
+   *  Tailwind scans this file — `src/**` is its content glob, comments
+   *  included — so naming one here would emit a real, unused utility. */
+  const ALLOWED = new Set(["z-30", "z-40", "z-50", "z-60"]);
+
+  it("uses only the four named layers", () => {
+    const bad = violations(/\bz-\[?\d+\]?/).filter((hit) => {
+      const cls = hit.match(/\bz-\[?\d+\]?/)?.[0] ?? "";
+      return !ALLOWED.has(cls);
+    });
+    expect(bad).toEqual([]);
+  });
+
+  it("reserves z-50 and above for dialogs", () => {
+    // A banner or dropdown that reaches the modal layer paints over an open
+    // dialog, which is the bug that put ActivityBar at z-50 before DCH-32.
+    const hits = violations(/\bz-(50|60)\b/).filter(
+      (h) => !h.startsWith("src/components/Modal.tsx"),
+    );
+    expect(hits).toEqual([]);
   });
 });

@@ -15,6 +15,7 @@ import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { Modal } from "@/components/Modal";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-12 h-12",
@@ -482,168 +483,150 @@ function SearchEditor({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-12 px-4 bg-black/60"
-      onClick={onClose}
-    >
-      <form
-        onSubmit={handleSubmit}
-        onClick={(e) => e.stopPropagation()}
-        className="card w-full max-w-2xl max-h-[85vh] overflow-y-auto"
-      >
-        <div className="flex items-start justify-between mb-3">
-          <h3 className="text-base font-medium">
-            {existing ? "Edit saved search" : "New saved search"}
-          </h3>
-          <button
-            type="button"
-            className="text-fg-muted hover:text-fg text-xl leading-none px-2"
-            onClick={onClose}
-          >
-            ×
-          </button>
-        </div>
-
-        <div className="space-y-3">
-          <div>
-            <label className="label">Name</label>
-            <input
-              className="input"
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              autoFocus
-              placeholder="e.g. ‘Gordon DuPont 1:24 under $50’"
-            />
-          </div>
-          <div>
-            <label className="label">Query</label>
-            <input
-              className="input"
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search keywords (optional)"
-            />
-          </div>
-
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,16rem),1fr))] gap-3">
-            <div>
-              <label className="label">Conditions</label>
-              <div className="flex flex-wrap gap-1.5">
-                {CONDITION_OPTIONS.map((opt) => {
-                  const active = conditions.includes(opt.value);
-                  return (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      className={`px-2 py-1 rounded border text-xs ${
-                        active
-                          ? "border-accent text-accent bg-accent/10"
-                          : "border-border text-fg-muted hover:text-fg"
-                      }`}
-                      onClick={() =>
-                        toggle(conditions, setConditions, opt.value)
-                      }
-                    >
-                      {opt.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div>
-              <label className="label">Format</label>
-              <div className="flex flex-wrap gap-1.5">
-                {BUYING_OPTIONS.map((opt) => {
-                  const active = buyingOptions.includes(opt.value);
-                  return (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      className={`px-2 py-1 rounded border text-xs ${
-                        active
-                          ? "border-accent text-accent bg-accent/10"
-                          : "border-border text-fg-muted hover:text-fg"
-                      }`}
-                      onClick={() =>
-                        toggle(buyingOptions, setBuyingOptions, opt.value)
-                      }
-                    >
-                      {opt.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))] gap-3">
-            <div>
-              <label className="label">Min price (USD)</label>
-              <input
-                className="input"
-                type="number"
-                min="0"
-                step="0.01"
-                value={priceMin}
-                onChange={(e) => setPriceMin(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="label">Max price (USD)</label>
-              <input
-                className="input"
-                type="number"
-                min="0"
-                step="0.01"
-                value={priceMax}
-                onChange={(e) => setPriceMax(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="label">Sort</label>
-              <select
-                className="input"
-                value={sort}
-                onChange={(e) => setSort(e.target.value)}
-              >
-                {SORT_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className="label">Sellers (comma-separated, optional)</label>
-            <input
-              className="input"
-              type="text"
-              value={sellersText}
-              onChange={(e) => setSellersText(e.target.value)}
-              placeholder="e.g. diecast_seller_42, another_seller"
-            />
-            <p className="text-xs text-fg-subtle mt-1">
-              Restrict results to specific eBay sellers. Leave empty for any
-              seller.
-            </p>
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-border">
+    <Modal
+      title={existing ? "Edit saved search" : "New saved search"}
+      onClose={onClose}
+      onSubmit={handleSubmit}
+      size="max-w-2xl"
+      footer={
+        <>
           <button type="button" className="btn-secondary" onClick={onClose}>
             Cancel
           </button>
           <button type="submit" className="btn-primary">
             {existing ? "Save changes" : "Save search"}
           </button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <div>
+          <label className="label">Name</label>
+          <input
+            className="input"
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            autoFocus
+            placeholder="e.g. ‘Gordon DuPont 1:24 under $50’"
+          />
         </div>
-      </form>
-    </div>
+        <div>
+          <label className="label">Query</label>
+          <input
+            className="input"
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search keywords (optional)"
+          />
+        </div>
+
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,16rem),1fr))] gap-3">
+          <div>
+            <label className="label">Conditions</label>
+            <div className="flex flex-wrap gap-1.5">
+              {CONDITION_OPTIONS.map((opt) => {
+                const active = conditions.includes(opt.value);
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    className={`px-2 py-1 rounded border text-xs ${
+                      active
+                        ? "border-accent text-accent bg-accent/10"
+                        : "border-border text-fg-muted hover:text-fg"
+                    }`}
+                    onClick={() => toggle(conditions, setConditions, opt.value)}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <label className="label">Format</label>
+            <div className="flex flex-wrap gap-1.5">
+              {BUYING_OPTIONS.map((opt) => {
+                const active = buyingOptions.includes(opt.value);
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    className={`px-2 py-1 rounded border text-xs ${
+                      active
+                        ? "border-accent text-accent bg-accent/10"
+                        : "border-border text-fg-muted hover:text-fg"
+                    }`}
+                    onClick={() =>
+                      toggle(buyingOptions, setBuyingOptions, opt.value)
+                    }
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))] gap-3">
+          <div>
+            <label className="label">Min price (USD)</label>
+            <input
+              className="input"
+              type="number"
+              min="0"
+              step="0.01"
+              value={priceMin}
+              onChange={(e) => setPriceMin(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="label">Max price (USD)</label>
+            <input
+              className="input"
+              type="number"
+              min="0"
+              step="0.01"
+              value={priceMax}
+              onChange={(e) => setPriceMax(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="label">Sort</label>
+            <select
+              className="input"
+              value={sort}
+              onChange={(e) => setSort(e.target.value)}
+            >
+              {SORT_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label className="label">Sellers (comma-separated, optional)</label>
+          <input
+            className="input"
+            type="text"
+            value={sellersText}
+            onChange={(e) => setSellersText(e.target.value)}
+            placeholder="e.g. diecast_seller_42, another_seller"
+          />
+          <p className="text-xs text-fg-subtle mt-1">
+            Restrict results to specific eBay sellers. Leave empty for any
+            seller.
+          </p>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
