@@ -43,9 +43,20 @@ Two things worth carrying forward:
 
 | # | Ticket | What | Why here |
 | --- | --- | --- | --- |
-| 1 | DCH-20 | Redesign Saved Listing detail panel | 5,626 lines, the audit's worst offender. Both its prerequisites (`Modal`, danger classes) have landed. **Verify the 5,626 first** — see the note on audit numbers below. |
-| 2 | DCH-21 | Reorganize Settings screen | 21 buttons with no hierarchy between sections. |
+| 1 | DCH-21 | Reorganize Settings screen | 21 buttons with no hierarchy between sections. 1,698 lines. |
 | — | DCH-36 | `ErrorBanner` retitles authored prose | Filed from DCH-34. A presentation decision, not a mechanical fix. `Modal` now exists, so a notice variant has somewhere obvious to live. |
+
+**DCH-20 is done.** The Saved Listing card is collapsed by default and its expanded state
+is three labelled groups (match & valuation / details / actions) instead of seven flat rows.
+
+Two things worth knowing. The accordion was **mostly already built** — `useMinimized` and
+`MinimizeToggle` already existed and `ListingCard` already hid most of itself when minimized;
+what was missing was the default, a collapsed row worth scanning, and any grouping in the
+expanded state. And `lib/minimized.tsx` changed shape: it stores an explicit
+`key -> boolean` map (`minimized-items.v2`) rather than a set of collapsed keys, because
+"absent" and "expanded" are not the same thing once one page wants a different default from
+another. There's a v1 migration and tests for it — a bug there would silently spring every
+collapsed card open.
 
 **The whole DCH-19 follow-up set is now closed** (DCH-32/33/34/35). The UI has a shared
 `Modal`, danger classes, formatting helpers and a filter contract, all enforced by

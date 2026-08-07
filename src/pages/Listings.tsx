@@ -1,5 +1,6 @@
 import {
   Fragment,
+  type ReactNode,
   FormEvent,
   useEffect,
   useMemo,
@@ -12,7 +13,7 @@ import {
   formatAgo,
   formatCents,
   formatCount,
-  formatDateTime,
+  formatUntil,
   isPreferredOem,
   prepareBrandOptions,
   prepareMakeOptions,
@@ -1717,8 +1718,12 @@ function ListingCard({
       : null;
   const ended = row.status === "ended";
   const matched = row.registry_entry_id !== null;
+  // Collapsed by default (DCH-20). The list is a scan surface first: you
+  // sweep it for a price worth attention, then open the one card. Rendering
+  // every card fully expanded is what made the screen read as cluttered.
   const [minimized, toggleMinimized] = useMinimized(
     `listing:${row.listing_id}`,
+    true,
   );
   return (
     <li
@@ -1761,29 +1766,36 @@ function ListingCard({
           </div>
           {offer && <OfferBadge offer={offer} />}
         </div>
+        {/* Always visible, collapsed or not: this is the line that makes a
+            collapsed row scannable. Previously it was hidden when minimized,
+            which left a collapsed card as a bare title and a number. */}
+        <div className="text-xs text-fg-subtle mt-0.5">
+          {[
+            row.listing_type &&
+              (row.accepts_offers
+                ? `${row.listing_type} + offers`
+                : row.listing_type),
+            row.is_archived
+              ? row.end_reason
+                ? `archived · ${END_REASON_LABELS[row.end_reason] ?? row.end_reason}`
+                : "archived"
+              : ended
+                ? "ended"
+                : row.end_time
+                  ? `ends ${formatUntil(row.end_time)}`
+                  : null,
+            row.condition,
+            row.seller_username && `seller: ${row.seller_username}`,
+            row.seller_rating !== null &&
+              row.seller_rating !== undefined &&
+              `${row.seller_rating}%`,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </div>
+
         {minimized ? null : (
           <>
-            <div className="text-xs text-fg-subtle mt-0.5">
-              {[
-                row.seller_code,
-                row.condition,
-                row.listing_type &&
-                  (row.accepts_offers
-                    ? `${row.listing_type} + offers`
-                    : row.listing_type),
-                row.is_archived &&
-                  (row.end_reason
-                    ? `archived · ${END_REASON_LABELS[row.end_reason] ?? row.end_reason}`
-                    : "archived"),
-                row.seller_username && `seller: ${row.seller_username}`,
-                row.seller_rating !== null &&
-                  row.seller_rating !== undefined &&
-                  `${row.seller_rating}%`,
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </div>
-
             <GroupChipRow
               row={row}
               groups={groups}
@@ -1792,8 +1804,9 @@ function ListingCard({
               onRemoveFromGroup={onRemoveFromGroup}
             />
 
+            <SectionLabel>Match &amp; valuation</SectionLabel>
             {matched ? (
-              <div className="mt-2 rounded-md border border-border bg-bg-elevated px-2 py-1.5 text-xs">
+              <div className="rounded-md border border-border bg-bg-elevated px-2 py-1.5 text-xs">
                 <div className="flex items-center gap-2">
                   {row.match_user_confirmed ? (
                     <span className="text-emerald-400">✓ matched</span>
@@ -1868,15 +1881,89 @@ function ListingCard({
                       </button>
                     </>
                   )}
+                  {!row.match_user_confirmed && (
+                    <button
+                      className="text-fg-muted hover:text-fg"
+                      type="button"
+                      onClick={onAutoMatch}
+                      disabled={autoMatching}
+                      title="Re-run auto-matching — useful after correcting attributes; replaces or clears the current suggestion"
+                    >
+                      {autoMatching ? "Matching…" : "Re-match"}
+                    </button>
+                  )}
+                  <button
+                    className="text-fg-muted hover:text-fg"
+                    type="button"
+                    onClick={onChangeMatch}
+                    title="Search the diecastregistry.com catalog and link a result to this listing"
+                  >
+                    Change match…
+                  </button>
+                  <button
+                    className="text-fg-subtle hover:text-fg-muted"
+                    type="button"
+                    onClick={onClearMatch}
+                    title="Remove the link to the registry entry"
+                  >
+                    Clear
+                  </button>
                 </div>
               </div>
             ) : row.match_user_confirmed ? (
-              <div className="mt-2 text-xs text-fg-subtle">
-                Marked as no-match.
+              <div className="rounded-md border border-border bg-bg-elevated px-2 py-1.5 text-xs">
+                <div className="text-fg-subtle">Marked as no-match.</div>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
+                  <button
+                    className="text-fg-muted hover:text-fg"
+                    type="button"
+                    onClick={onChangeMatch}
+                    title="Search the diecastregistry.com catalog and link a result to this listing"
+                  >
+                    Match…
+                  </button>
+                  <button
+                    className="text-fg-subtle hover:text-fg-muted"
+                    type="button"
+                    onClick={onClearMatch}
+                    title="Clear the no-match flag"
+                  >
+                    Reset
+                  </button>
+                </div>
               </div>
             ) : (
-              <div className="mt-2 text-xs text-amber-400/80">
-                Unmatched — link a registry entry to enable retail comparison.
+              <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-2 py-1.5 text-xs">
+                <div className="text-amber-400/80">
+                  Unmatched — link a registry entry to enable retail comparison.
+                </div>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
+                  <button
+                    className="text-fg-muted hover:text-fg"
+                    type="button"
+                    onClick={onAutoMatch}
+                    disabled={autoMatching}
+                    title="Search the registry for a best-effort match (pulls the driver's entries from diecastregistry.com if needed)"
+                  >
+                    {autoMatching ? "Matching…" : "Auto-match"}
+                  </button>
+                  <button
+                    className="text-fg-muted hover:text-fg"
+                    type="button"
+                    onClick={onChangeMatch}
+                    title="Search the diecastregistry.com catalog and link a result to this listing"
+                  >
+                    Match…
+                  </button>
+                  <button
+                    className="text-fg-subtle hover:text-fg-muted"
+                    type="button"
+                    onClick={onRejectMatch}
+                    title="Mark as having no match in your registry"
+                  >
+                    Mark no-match
+                  </button>
+                </div>
               </div>
             )}
             {autoMatchNote && !matched && (
@@ -1885,6 +1972,7 @@ function ListingCard({
               </div>
             )}
 
+            <SectionLabel>Details</SectionLabel>
             <DriverTagSection
               row={row}
               localDrivers={localDrivers}
@@ -1902,14 +1990,12 @@ function ListingCard({
               onReset={onResetAttributes}
             />
 
-            <div className="text-xs text-fg-subtle mt-1">
-              {ended
-                ? "ended"
-                : row.end_time
-                  ? `ends ${formatDateTime(row.end_time)}`
-                  : ""}
-            </div>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
+            {/* Actions, separated from the match controls above. Only the
+                three that act on the *listing* live here; everything that
+                acts on the match now sits inside the match block, which is
+                where you were already looking. */}
+            <SectionLabel>Actions</SectionLabel>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <a
                 className="text-xs text-accent hover:underline"
                 href={row.url}
@@ -1939,63 +2025,6 @@ function ListingCard({
                   {unwatching ? "Removing…" : "Remove from watchlist"}
                 </button>
               )}
-              {!row.match_user_confirmed && (
-                <button
-                  className="text-xs text-fg-muted hover:text-fg"
-                  type="button"
-                  onClick={onAutoMatch}
-                  disabled={autoMatching}
-                  title={
-                    matched
-                      ? "Re-run auto-matching — useful after correcting attributes; replaces or clears the current suggestion"
-                      : "Search the registry for a best-effort match (pulls the driver's entries from diecastregistry.com if needed)"
-                  }
-                >
-                  {autoMatching
-                    ? "Matching…"
-                    : matched
-                      ? "Re-match"
-                      : "Auto-match"}
-                </button>
-              )}
-              <button
-                className="text-xs text-fg-muted hover:text-fg"
-                type="button"
-                onClick={onChangeMatch}
-                title="Search the diecastregistry.com catalog and link a result to this listing"
-              >
-                {matched ? "Change match…" : "Match…"}
-              </button>
-              {matched && (
-                <button
-                  className="text-xs text-fg-subtle hover:text-fg-muted"
-                  type="button"
-                  onClick={onClearMatch}
-                  title="Remove the link to the registry entry"
-                >
-                  Clear
-                </button>
-              )}
-              {!matched && !row.match_user_confirmed && (
-                <button
-                  className="text-xs text-fg-subtle hover:text-fg-muted"
-                  type="button"
-                  onClick={onRejectMatch}
-                  title="Mark as having no match in your registry"
-                >
-                  Mark no-match
-                </button>
-              )}
-              {row.match_user_confirmed && !matched && (
-                <button
-                  className="text-xs text-fg-subtle hover:text-fg-muted"
-                  type="button"
-                  onClick={onClearMatch}
-                  title="Clear the no-match flag"
-                >
-                  Reset
-                </button>
-              )}
             </div>
           </>
         )}
@@ -2012,12 +2041,22 @@ function ListingCard({
               <DealBadge score={row.deal_score} basis="retail" />
             )
           )}
-          <div className="text-base text-fg">{formatCents(total)}</div>
+          <div>
+            <div className="text-base text-fg leading-none">
+              {formatCents(total)}
+            </div>
+            {/* Labelled, because this is the number the whole screen turns
+                on and it was previously bare — a reader had to know that the
+                big figure meant price *plus shipping*. */}
+            <div className="text-[10px] text-fg-faint uppercase tracking-wide">
+              delivered
+            </div>
+          </div>
         </div>
         {!minimized &&
           row.shipping_cents !== null &&
           row.shipping_cents > 0 && (
-            <div className="text-fg-subtle">
+            <div className="text-fg-subtle mt-1">
               {formatCents(row.price_cents)} + {formatCents(row.shipping_cents)}{" "}
               ship
             </div>
@@ -2044,6 +2083,21 @@ function ListingCard({
         )}
       </div>
     </li>
+  );
+}
+
+/** The rule + caption that separates a card's groups (DCH-20). The expanded
+ *  card was seven flat rows of unrelated concerns; the labels are what turn
+ *  it into "facts, then match, then details, then actions". Deliberately
+ *  quiet — this is scaffolding, not content. */
+function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <div className="mt-3 mb-1 flex items-center gap-2">
+      <span className="text-[10px] uppercase tracking-wide text-fg-faint shrink-0">
+        {children}
+      </span>
+      <span className="h-px flex-1 bg-border" />
+    </div>
   );
 }
 
@@ -2121,8 +2175,10 @@ function DealBadge({
       className={`inline-flex flex-col items-end px-1.5 py-0.5 rounded border ${cls}`}
       title={tooltip}
     >
+      {/* "of sold" alone didn't say sold *what*; the median is the
+          reference the percentage is actually against. */}
       <span className="font-medium">
-        {score.toFixed(0)}% of {basis}
+        {score.toFixed(0)}% of {basis === "sold" ? "sold median" : "retail"}
       </span>
       <span className="text-[10px] uppercase tracking-wide opacity-80">
         {label}
@@ -2402,8 +2458,11 @@ function AttributesSection({
             ["Finish", row.finish],
           ] as const
         ).map(
+          // Loose `!=` on purpose: catches undefined as well as null. A row
+          // that reaches here missing the field entirely would otherwise
+          // render a chip with a label and no value.
           ([label, value]) =>
-            value !== null && (
+            value != null && (
               <span
                 key={label}
                 className="inline-flex items-center gap-1 rounded border border-border bg-bg-elevated px-1.5 py-0.5"

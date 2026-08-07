@@ -1167,4 +1167,5 @@ export {
   formatDate,
   formatDateTime,
   formatTime,
+  formatUntil,
 } from "./format";

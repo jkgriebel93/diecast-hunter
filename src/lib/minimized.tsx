@@ -1,36 +1,58 @@
 import { useCallback, useSyncExternalStore } from "react";
 
 /**
- * Global, persisted registry of minimized item cards, keyed by
+ * Global, persisted registry of card collapse state, keyed by
  * `"<kind>:<id>"` (e.g. `listing:123`, `registry:<guid>`). One shared store
- * so the same entity stays minimized everywhere it appears — across pages
+ * so the same entity stays collapsed everywhere it appears — across pages
  * and across side-by-side panes.
+ *
+ * Stored as an explicit `key -> boolean` map rather than a set of collapsed
+ * keys, because "absent" and "expanded" are not the same thing (DCH-20).
+ * Saved Listings wants cards collapsed *by default* so the list is a scan
+ * surface, while Collection and Registry want them open; with a bare set,
+ * absence had to mean expanded and no page could choose otherwise. Absence
+ * now means "no opinion — use the caller's default".
  */
-const STORAGE_KEY = "minimized-items.v1";
+const STORAGE_KEY = "minimized-items.v2";
+/** v1 was an array of collapsed keys. Read once and migrate so nobody's
+ *  collapsed cards spring open on upgrade. */
+const LEGACY_KEY = "minimized-items.v1";
 
-function load(): Set<string> {
+type State = Record<string, boolean>;
+
+function load(): State {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed: unknown = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        return new Set(
-          parsed.filter((k): k is string => typeof k === "string"),
-        );
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const out: State = {};
+        for (const [k, v] of Object.entries(parsed as object)) {
+          if (typeof v === "boolean") out[k] = v;
+        }
+        return out;
       }
+    }
+    const legacy: unknown = JSON.parse(
+      localStorage.getItem(LEGACY_KEY) ?? "null",
+    );
+    if (Array.isArray(legacy)) {
+      const out: State = {};
+      for (const k of legacy) if (typeof k === "string") out[k] = true;
+      return out;
     }
   } catch {
     // localStorage can throw in private modes; start empty.
   }
-  return new Set();
+  return {};
 }
 
-let minimized = load();
+let state = load();
 const listeners = new Set<() => void>();
 
 function persist() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(minimized)));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch {
     // ignore
   }
@@ -46,39 +68,44 @@ function subscribe(listener: () => void): () => void {
 }
 
 export function setMinimized(key: string, value: boolean) {
-  if (minimized.has(key) === value) return;
-  const next = new Set(minimized);
-  if (value) next.add(key);
-  else next.delete(key);
-  minimized = next;
+  if (state[key] === value) return;
+  state = { ...state, [key]: value };
   persist();
   emit();
 }
 
-/** Bulk form of {@link setMinimized} — used by "Minimize all" buttons. */
+/** Bulk form of {@link setMinimized} — used by "Collapse all" buttons. */
 export function setManyMinimized(keys: string[], value: boolean) {
-  const next = new Set(minimized);
-  for (const key of keys) {
-    if (value) next.add(key);
-    else next.delete(key);
-  }
-  if (
-    next.size === minimized.size &&
-    keys.every((k) => next.has(k) === minimized.has(k))
-  ) {
-    return;
-  }
-  minimized = next;
+  if (keys.every((k) => state[k] === value)) return;
+  const next = { ...state };
+  for (const key of keys) next[key] = value;
+  state = next;
   persist();
   emit();
+}
+
+/** Tests only — the store outlives any component. */
+export function resetMinimized() {
+  state = {};
+}
+
+/** Explicit state for a key, or null when the user hasn't expressed one. */
+export function minimizedState(key: string): boolean | null {
+  return key in state ? state[key] : null;
 }
 
 /** Whether one item is minimized, plus a toggle. */
-export function useMinimized(key: string): [boolean, () => void] {
-  const value = useSyncExternalStore(subscribe, () => minimized.has(key));
+export function useMinimized(
+  key: string,
+  defaultMinimized = false,
+): [boolean, () => void] {
+  const value = useSyncExternalStore(
+    subscribe,
+    () => minimizedState(key) ?? defaultMinimized,
+  );
   const toggle = useCallback(
-    () => setMinimized(key, !minimized.has(key)),
-    [key],
+    () => setMinimized(key, !(minimizedState(key) ?? defaultMinimized)),
+    [key, defaultMinimized],
   );
   return [value, toggle];
 }
@@ -88,7 +115,23 @@ export function useMinimized(key: string): [boolean, () => void] {
  * pages that need aggregate state, e.g. an "all expanded?" toolbar button.
  */
 export function useMinimizedSet(): ReadonlySet<string> {
-  return useSyncExternalStore(subscribe, () => minimized);
+  return useSyncExternalStore(subscribe, () => collapsedKeys());
+}
+
+/** Memoized so `useSyncExternalStore` sees a stable reference between
+ *  changes — recomputing would loop. */
+let cachedKeys: ReadonlySet<string> = new Set();
+let cachedFrom: State | null = null;
+function collapsedKeys(): ReadonlySet<string> {
+  if (cachedFrom !== state) {
+    cachedFrom = state;
+    cachedKeys = new Set(
+      Object.entries(state)
+        .filter(([, v]) => v)
+        .map(([k]) => k),
+    );
+  }
+  return cachedKeys;
 }
 
 /**

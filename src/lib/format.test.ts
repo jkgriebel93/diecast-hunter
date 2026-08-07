@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { formatAgo, formatCents, formatCount, formatDateTime } from "./format";
+import {
+  formatAgo,
+  formatCents,
+  formatCount,
+  formatDateTime,
+  formatUntil,
+} from "./format";
 
 describe("formatCents", () => {
   it("adds thousands separators", () => {
@@ -102,5 +108,34 @@ describe("formatDateTime", () => {
 
   it("still formats the epoch, which is a real timestamp and not missing", () => {
     expect(formatDateTime(0)).toBe(new Date(0).toLocaleString());
+  });
+});
+
+describe("formatUntil", () => {
+  const NOW = 1769202300;
+  const at = (secs: number) => formatUntil(NOW + secs, NOW);
+
+  it("gets coarser the further out the end time is", () => {
+    expect(at(30)).toBe("in under a minute");
+    expect(at(60 * 20)).toBe("in 20 min");
+    expect(at(3600 * 5)).toBe("in 5 hours");
+    expect(at(3600)).toBe("in 1 hour");
+    expect(at(86400 * 2)).toBe("in 2 days");
+    expect(at(86400)).toBe("in 1 day");
+    expect(at(86400 * 30)).toBe("in 4 weeks");
+  });
+
+  it("says ended rather than counting backwards", () => {
+    // An auction can close while the page is open, so callers shouldn't
+    // need a separate branch for it.
+    expect(at(-1)).toBe("ended");
+    expect(at(-86400 * 3)).toBe("ended");
+    expect(at(0)).toBe("ended");
+  });
+
+  it("renders a missing end time as an em dash", () => {
+    // Fixed-price listings have no end time at all.
+    expect(formatUntil(null, NOW)).toBe("—");
+    expect(formatUntil(undefined, NOW)).toBe("—");
   });
 });

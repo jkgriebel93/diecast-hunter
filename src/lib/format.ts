@@ -61,6 +61,37 @@ export function formatTime(unixSeconds: number | null | undefined): string {
   return d === null ? "—" : d.toLocaleTimeString();
 }
 
+/** Coarse time until a future event, e.g. "in 2 days", for auction end
+ *  times (DCH-20). The card previously rendered a full
+ *  `formatDateTime` timestamp — "ends 8/9/2026, 1:39:14 PM" — which is the
+ *  wrong shape for scanning a list: what matters is whether it ends soon,
+ *  and the exact second only matters in the last hour, when this switches to
+ *  minutes anyway.
+ *
+ *  Returns "ended" for anything in the past, so callers don't need a
+ *  separate branch for a listing that closed while the page was open.
+ *
+ *  `now` is injectable so tests don't depend on the wall clock. */
+export function formatUntil(
+  unixSeconds: number | null | undefined,
+  now: number = Date.now() / 1000,
+): string {
+  if (unixSeconds === null || unixSeconds === undefined) return "—";
+  if (!Number.isFinite(unixSeconds)) return "—";
+  const secs = unixSeconds - now;
+  if (secs <= 0) return "ended";
+  const mins = secs / 60;
+  if (mins < 1) return "in under a minute";
+  if (mins < 60) return `in ${Math.round(mins)} min`;
+  const hours = mins / 60;
+  if (hours < 24)
+    return `in ${Math.round(hours)} hour${Math.round(hours) === 1 ? "" : "s"}`;
+  const days = hours / 24;
+  if (days < 14)
+    return `in ${Math.round(days)} day${Math.round(days) === 1 ? "" : "s"}`;
+  return `in ${Math.round(days / 7)} weeks`;
+}
+
 /** Coarse age of a past event, e.g. "3 weeks ago", for sold-comp recency.
  *  Deliberately imprecise: the question a comp answers is "is this still the
  *  current market?", not "what date exactly?". Future timestamps clamp to
