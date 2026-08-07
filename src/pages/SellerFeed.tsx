@@ -17,6 +17,7 @@ import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { Modal } from "@/components/Modal";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-24 h-24",
@@ -911,73 +912,57 @@ function SellerEditor({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-12 px-4 bg-black/60"
-      onClick={onClose}
-    >
-      <form
-        onSubmit={handleSubmit}
-        onClick={(e) => e.stopPropagation()}
-        className="card w-full max-w-md"
-      >
-        <div className="flex items-start justify-between mb-3">
-          <h3 className="text-base font-medium">
-            {existing ? "Edit seller" : "Add seller"}
-          </h3>
-          <button
-            type="button"
-            className="text-fg-muted hover:text-fg text-xl leading-none px-2"
-            onClick={onClose}
-          >
-            ×
-          </button>
-        </div>
-
-        <div className="space-y-3">
-          <div>
-            <label className="label">eBay username</label>
-            <input
-              className="input"
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-              autoFocus
-              autoComplete="off"
-              placeholder="diecast_seller_42"
-            />
-          </div>
-          <div>
-            <label className="label">Display name (optional)</label>
-            <input
-              className="input"
-              type="text"
-              value={displayName ?? ""}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="Friendlier label shown in the UI"
-            />
-          </div>
-          <div>
-            <label className="label">Notes (optional)</label>
-            <textarea
-              className="input min-h-[80px]"
-              value={notes ?? ""}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. ships fast, specializes in 1:24"
-            />
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-border">
+    <Modal
+      title={existing ? "Edit seller" : "Add seller"}
+      onClose={onClose}
+      onSubmit={handleSubmit}
+      size="max-w-md"
+      footer={
+        <>
           <button type="button" className="btn-secondary" onClick={onClose}>
             Cancel
           </button>
           <button type="submit" className="btn-primary">
             {existing ? "Save changes" : "Add seller"}
           </button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <div>
+          <label className="label">eBay username</label>
+          <input
+            className="input"
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            required
+            autoFocus
+            autoComplete="off"
+            placeholder="diecast_seller_42"
+          />
         </div>
-      </form>
-    </div>
+        <div>
+          <label className="label">Display name (optional)</label>
+          <input
+            className="input"
+            type="text"
+            value={displayName ?? ""}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder="Friendlier label shown in the UI"
+          />
+        </div>
+        <div>
+          <label className="label">Notes (optional)</label>
+          <textarea
+            className="input min-h-[80px]"
+            value={notes ?? ""}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="e.g. ships fast, specializes in 1:24"
+          />
+        </div>
+      </div>
+    </Modal>
   );
 }
 

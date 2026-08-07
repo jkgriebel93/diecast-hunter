@@ -1,9 +1,10 @@
 # Implementation order for open DCH tickets
 
-As of 2026-08-06 (rev 11: DCH-19's audit done, DCH-16 parked, DCH-30 deployed pending its
-console verification). Fourteen tickets are merged — DCH-8, DCH-9, DCH-10, DCH-11, DCH-12,
-DCH-14, DCH-15, DCH-17, DCH-18, DCH-22, DCH-28, DCH-29, DCH-30, DCH-31 — and DCH-19 spawned
-four follow-ups, so the open list is eleven substantive items plus the roadmap buckets.
+As of 2026-08-07 (rev 12: DCH-34 and DCH-32 merged, DCH-36 filed, DCH-16 parked, DCH-30
+deployed pending its console verification). Sixteen tickets are merged — DCH-8, DCH-9,
+DCH-10, DCH-11, DCH-12, DCH-14, DCH-15, DCH-17, DCH-18, DCH-22, DCH-28, DCH-29, DCH-30,
+DCH-31, DCH-32, DCH-34 — and DCH-19 spawned five follow-ups, so the open list is nine
+substantive items plus the roadmap buckets.
 
 The ordering principle has not changed: compounding work (training data, CI safety, anything
 that makes later tickets cheaper or safer) goes before features that only pay off once.
@@ -42,10 +43,32 @@ Two things worth carrying forward:
 
 | # | Ticket | What | Why here |
 | --- | --- | --- | --- |
-| 1 | DCH-32 | Shared `Modal` component | The audit's biggest finding. Eleven hand-built dialogs, four z-layers, Escape on only two. Do it before DCH-20/21, which both add dialogs. |
-| 2 | DCH-33 | `.btn-danger` / `.link-danger` | Small, and DCH-20 needs it — the listing panel is full of destructive actions with no shared treatment. |
-| 3 | DCH-35 | Filter-row parity | "Clear filters" exists on one screen of seven. |
-| — | DCH-36 | `ErrorBanner` retitles authored prose | Filed from DCH-34. Order it with DCH-32/33 if a shared notice variant falls out of that work; it's a presentation decision, not a mechanical fix. |
+| 1 | DCH-33 | `.btn-danger` / `.link-danger` | Small, and DCH-20 needs it — the listing panel is full of destructive actions with no shared treatment. **Check its numbers first:** the audit's count for this one comes from the same raw `text-red-*` grep that overstated DCH-34, and those hits are mostly the destructive-button hovers this ticket is about — so the scope is probably real here, but confirm before planning. |
+| 2 | DCH-35 | Filter-row parity | "Clear filters" exists on one screen of seven. |
+| — | DCH-36 | `ErrorBanner` retitles authored prose | Filed from DCH-34. A presentation decision, not a mechanical fix. `Modal` now exists, so a notice variant has somewhere obvious to live. |
+
+**DCH-32 is done.** `src/components/Modal.tsx` owns every dialog; ten call sites across six
+files migrated. Two things about it are worth knowing before touching dialogs again:
+
+*The stacking layer is derived, not declared.* `GroupEditorDialog` is opened both from the
+Listings toolbar and from inside `ManageGroupsDialog`, so a `layer` prop would have to differ
+per call site and would be wrong the first time a third site appeared. `src/lib/modalStack.ts`
+tracks which dialogs are open; `Modal` reads its own depth from it. That same stack is what
+makes Escape close only the topmost dialog — every open modal has a `window` keydown
+listener, so without it one Escape collapses the whole stack. Keeping the stack a plain module
+of pure functions is what let the tricky part be unit-tested at all.
+
+*Top-aligned dialogs were converted deliberately.* Seven of the ten were `items-start` with
+four different `pt-` values; three were centred. Everything is centred now. The tall ones
+(`max-h-[85vh]`, `h-[92vh]`) look identical either way; the short ones genuinely moved, and
+that was the call rather than an accident — the ticket's last criterion asked for it to be one
+or the other on purpose.
+
+The audit was accurate here, unlike DCH-34's half — with two small exceptions recorded on the
+ticket: backdrop-click was already present on SavedSearches and SellerFeed (via
+`stopPropagation`, not absent as reported), and Wishlist's "Escape" was an input-level
+`onKeyDown` on a rename field, not dialog dismissal. So Escape genuinely worked in **one** of
+ten dialogs before this, not two.
 
 **DCH-34 is done**, and half of it was a false alarm worth recording, because the same
 mistake is easy to repeat when reading the audit's other findings.
@@ -89,9 +112,10 @@ DCH-19 is done. Its output is the [UI Audit and Standardization
 Guidelines](https://thistlegrow.atlassian.net/wiki/spaces/DCH/pages/51183617) page, whose
 conventions checklist is what the two redesigns execute against.
 
-Do DCH-32/33 (shared `Modal`, danger classes) **before** these two: both redesigns add
-dialogs and destructive actions, and building them against the hand-rolled patterns would
-mean redoing the work.
+DCH-32 has landed, so the dialog half of that dependency is satisfied — both redesigns can now
+build against `Modal` instead of hand-rolling. **DCH-33 (danger classes) is still outstanding
+and still comes first**, for the same reason: DCH-20's listing panel is full of destructive
+actions, and giving them a shared treatment after the redesign means doing the work twice.
 
 | # | Ticket | What |
 | --- | --- | --- |
@@ -102,12 +126,12 @@ mean redoing the work.
 
 | # | Ticket | What | Notes |
 | --- | --- | --- | --- |
-| 6 | DCH-25 | "Production ready" definition spike | Spawns the real production work items — goes before them. |
-| 7 | DCH-24 | User documentation | After UI standardization so screenshots don't go stale. |
-| 8 | DCH-23 | Performance profiling pass | When something is actually slow, or pre-production. |
-| 9 | DCH-13 | Photo-tagging feasibility spike | Flagged likely-expensive; confirm or kill cheaply. |
-| 10 | DCH-26 | Lionel website integration | Expansion waits for solid core; needs use-case decision. |
-| 11 | DCH-27 | Revive Facebook Marketplace integration | Plugs back into the listing-receiver architecture. |
+| 5 | DCH-25 | "Production ready" definition spike | Spawns the real production work items — goes before them. |
+| 6 | DCH-24 | User documentation | After UI standardization so screenshots don't go stale. |
+| 7 | DCH-23 | Performance profiling pass | When something is actually slow, or pre-production. |
+| 8 | DCH-13 | Photo-tagging feasibility spike | Flagged likely-expensive; confirm or kill cheaply. |
+| 9 | DCH-26 | Lionel website integration | Expansion waits for solid core; needs use-case decision. |
+| 10 | DCH-27 | Revive Facebook Marketplace integration | Plugs back into the listing-receiver architecture. |
 
 ## Open items that aren't tickets
 

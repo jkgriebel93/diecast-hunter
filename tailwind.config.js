@@ -4,6 +4,14 @@ export default {
   darkMode: "class",
   theme: {
     extend: {
+      // Tailwind's default z scale stops at 50, which is why the pre-DCH-32
+      // nested dialogs reached for the arbitrary `z-[60]`. Naming it makes
+      // the documented stacking order (30 scrim / 40 menu / 50 modal /
+      // 60 modal-over-modal, see CLAUDE.md) expressible as real classes, so
+      // the convention test can grep for it.
+      zIndex: {
+        60: "60",
+      },
       colors: {
         bg: {
           DEFAULT: "rgb(var(--color-bg) / <alpha-value>)",

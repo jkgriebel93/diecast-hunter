@@ -85,7 +85,11 @@ export function ActivityBar() {
 
   return (
     <div
-      className={`fixed top-0 inset-x-0 z-50 border-b ${tone} backdrop-blur`}
+      // z-40, the app-banner layer: this sits above the page and above
+      // dropdown scrims, but below a modal (z-50). It was z-50 and therefore
+      // tied with dialogs, leaving DOM order to decide whether a sync
+      // notification painted over an open dialog's backdrop.
+      className={`fixed top-0 inset-x-0 z-40 border-b ${tone} backdrop-blur`}
       role="status"
       aria-live="polite"
     >

@@ -36,6 +36,7 @@ import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { Modal } from "@/components/Modal";
 import { YearRangeFilter } from "@/components/YearRangeFilter";
 import {
   EMPTY_YEAR_RANGE,
@@ -3606,77 +3607,18 @@ function ManageGroupsDialog({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-12 px-4 bg-black/60"
-      onClick={onClose}
-    >
-      <div
-        className="card w-full max-w-2xl max-h-[85vh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between mb-3">
-          <div>
-            <h3 className="text-base font-medium">Manage groups</h3>
-            <p className="text-xs text-fg-subtle mt-0.5">
-              Create named buckets for paint schemes or hunts. A listing can
-              belong to any number of groups.
-            </p>
-          </div>
-          <button
-            type="button"
-            className="text-fg-muted hover:text-fg text-xl leading-none px-2"
-            onClick={onClose}
-          >
-            ×
-          </button>
-        </div>
-
-        {error && (
-          <ErrorBanner error={error} variant="inline" className="mb-2" />
-        )}
-
-        <div className="flex-1 overflow-y-auto -mx-1 px-1 space-y-4 min-h-[6rem]">
-          {groups.length === 0 ? (
-            <div className="text-sm text-fg-subtle">No groups yet.</div>
-          ) : (
-            <>
-              {clustered.drivers.map((d) => (
-                <GroupSection
-                  key={`d-${d.id}`}
-                  label={d.name}
-                  groups={d.groups}
-                  busy={busy}
-                  onEdit={setEditing}
-                  onToggleArchive={onToggleArchive}
-                  onDelete={onDelete}
-                />
-              ))}
-              {clustered.noDriver.length > 0 && (
-                <GroupSection
-                  label="No driver"
-                  groups={clustered.noDriver}
-                  busy={busy}
-                  onEdit={setEditing}
-                  onToggleArchive={onToggleArchive}
-                  onDelete={onDelete}
-                />
-              )}
-              {clustered.archived.length > 0 && (
-                <GroupSection
-                  label="Archived"
-                  groups={clustered.archived}
-                  busy={busy}
-                  onEdit={setEditing}
-                  onToggleArchive={onToggleArchive}
-                  onDelete={onDelete}
-                />
-              )}
-            </>
-          )}
-        </div>
-
-        <div className="flex items-center justify-between mt-3 pt-3 border-t border-border">
-          <div className="flex items-center gap-2">
+    <Modal
+      title="Manage groups"
+      description="Create named buckets for paint schemes or hunts. A listing can belong to any number of groups."
+      onClose={onClose}
+      size="max-w-2xl"
+      scroll="none"
+      panelClassName="max-h-[85vh] flex flex-col"
+      footer={
+        <>
+          {/* flex-1 pushes Close to the right, giving this dialog the
+              justify-between footer it had before the shared Modal. */}
+          <div className="flex-1 flex items-center gap-2">
             <button
               type="button"
               className="btn-secondary"
@@ -3700,31 +3642,73 @@ function ManageGroupsDialog({
           <button type="button" className="btn-secondary" onClick={onClose}>
             Close
           </button>
-        </div>
+        </>
+      }
+    >
+      {error && <ErrorBanner error={error} variant="inline" className="mb-2" />}
 
-        {editing !== null && (
-          <GroupEditorDialog
-            initial={editing === "new" ? null : editing}
-            onCancel={() => setEditing(null)}
-            onSaved={async () => {
-              setEditing(null);
-              await onChanged();
-            }}
-          />
-        )}
-
-        {wizardOpen && (
-          <GroupMigrationWizard
-            groups={groups}
-            onClose={() => setWizardOpen(false)}
-            onApplied={async () => {
-              setWizardOpen(false);
-              await onChanged();
-            }}
-          />
+      <div className="flex-1 overflow-y-auto -mx-1 px-1 space-y-4 min-h-[6rem]">
+        {groups.length === 0 ? (
+          <div className="text-sm text-fg-subtle">No groups yet.</div>
+        ) : (
+          <>
+            {clustered.drivers.map((d) => (
+              <GroupSection
+                key={`d-${d.id}`}
+                label={d.name}
+                groups={d.groups}
+                busy={busy}
+                onEdit={setEditing}
+                onToggleArchive={onToggleArchive}
+                onDelete={onDelete}
+              />
+            ))}
+            {clustered.noDriver.length > 0 && (
+              <GroupSection
+                label="No driver"
+                groups={clustered.noDriver}
+                busy={busy}
+                onEdit={setEditing}
+                onToggleArchive={onToggleArchive}
+                onDelete={onDelete}
+              />
+            )}
+            {clustered.archived.length > 0 && (
+              <GroupSection
+                label="Archived"
+                groups={clustered.archived}
+                busy={busy}
+                onEdit={setEditing}
+                onToggleArchive={onToggleArchive}
+                onDelete={onDelete}
+              />
+            )}
+          </>
         )}
       </div>
-    </div>
+
+      {editing !== null && (
+        <GroupEditorDialog
+          initial={editing === "new" ? null : editing}
+          onCancel={() => setEditing(null)}
+          onSaved={async () => {
+            setEditing(null);
+            await onChanged();
+          }}
+        />
+      )}
+
+      {wizardOpen && (
+        <GroupMigrationWizard
+          groups={groups}
+          onClose={() => setWizardOpen(false)}
+          onApplied={async () => {
+            setWizardOpen(false);
+            await onChanged();
+          }}
+        />
+      )}
+    </Modal>
   );
 }
 
@@ -4079,77 +4063,17 @@ function GroupEditorDialog({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-start justify-center pt-16 px-4 bg-black/60"
-      onClick={onCancel}
-    >
-      <form
-        className="card w-full max-w-md"
-        onClick={(e) => e.stopPropagation()}
-        onSubmit={onSubmit}
-      >
-        <h4 className="text-base font-medium mb-3">
-          {initial === null ? "New group" : "Edit group"}
-        </h4>
-        <div className="space-y-3">
-          <div>
-            <label className="label">Name</label>
-            <input
-              className="input"
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Mountain Dew throwback"
-              autoFocus
-              required
-            />
-            {dupWarning && (
-              <p className="text-[11px] text-amber-400 mt-1">{dupWarning}</p>
-            )}
-          </div>
-          <div>
-            <label className="label">Drivers (optional)</label>
-            <DriverMultiSelect
-              selected={selectedDrivers}
-              onChange={setSelectedDrivers}
-              draft={driverDraft}
-              onDraftChange={setDriverDraft}
-            />
-            <p className="text-[11px] text-fg-subtle mt-1">
-              Groups the listing under these drivers in the filter and by-group
-              view. Leave empty for a driverless group (e.g. a lot).
-            </p>
-          </div>
-          <div>
-            <label className="label">Notes (optional)</label>
-            <textarea
-              className="input min-h-[4rem]"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="What are you looking for? Any constraints?"
-            />
-          </div>
-          <div>
-            <label className="label">Target max price (optional)</label>
-            <input
-              className="input"
-              type="number"
-              inputMode="decimal"
-              min="0"
-              step="0.01"
-              value={targetDollars}
-              onChange={(e) => setTargetDollars(e.target.value)}
-              placeholder="e.g. 75.00"
-            />
-            <p className="text-[11px] text-fg-subtle mt-1">
-              Listings over this price get a yellow flag in the group view.
-            </p>
-          </div>
-        </div>
-        {error && (
-          <ErrorBanner error={error} variant="inline" className="mt-2" />
-        )}
-        <div className="flex items-center justify-end gap-2 mt-4 pt-3 border-t border-border">
+    // No `layer` prop: this dialog is opened both from the Listings toolbar
+    // (base layer) and from inside GroupsModal (nested), and Modal works its
+    // own depth out from the open-modal stack.
+    <Modal
+      title={initial === null ? "New group" : "Edit group"}
+      onClose={onCancel}
+      onSubmit={onSubmit}
+      busy={busy}
+      size="max-w-md"
+      footer={
+        <>
           <button
             type="button"
             className="btn-secondary"
@@ -4165,9 +4089,66 @@ function GroupEditorDialog({
           >
             {busy ? "Saving…" : "Save"}
           </button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <div>
+          <label className="label">Name</label>
+          <input
+            className="input"
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Mountain Dew throwback"
+            autoFocus
+            required
+          />
+          {dupWarning && (
+            <p className="text-[11px] text-amber-400 mt-1">{dupWarning}</p>
+          )}
         </div>
-      </form>
-    </div>
+        <div>
+          <label className="label">Drivers (optional)</label>
+          <DriverMultiSelect
+            selected={selectedDrivers}
+            onChange={setSelectedDrivers}
+            draft={driverDraft}
+            onDraftChange={setDriverDraft}
+          />
+          <p className="text-[11px] text-fg-subtle mt-1">
+            Groups the listing under these drivers in the filter and by-group
+            view. Leave empty for a driverless group (e.g. a lot).
+          </p>
+        </div>
+        <div>
+          <label className="label">Notes (optional)</label>
+          <textarea
+            className="input min-h-[4rem]"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="What are you looking for? Any constraints?"
+          />
+        </div>
+        <div>
+          <label className="label">Target max price (optional)</label>
+          <input
+            className="input"
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="0.01"
+            value={targetDollars}
+            onChange={(e) => setTargetDollars(e.target.value)}
+            placeholder="e.g. 75.00"
+          />
+          <p className="text-[11px] text-fg-subtle mt-1">
+            Listings over this price get a yellow flag in the group view.
+          </p>
+        </div>
+      </div>
+      {error && <ErrorBanner error={error} variant="inline" className="mt-2" />}
+    </Modal>
   );
 }
 
@@ -4400,258 +4381,241 @@ function GroupMigrationWizard({
   const driverListId = "migration-driver-options";
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-start justify-center pt-10 px-4 bg-black/60"
-      onClick={onClose}
-    >
-      <div
-        className="card w-full max-w-3xl max-h-[88vh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between mb-3">
-          <div>
-            <h3 className="text-base font-medium">Clean up group names</h3>
-            <p className="text-xs text-fg-subtle mt-0.5 max-w-prose">
-              Map each driver-name prefix (a “handle”) to a driver. Preview
-              strips the handle from matching group names and links the driver.
-              Nothing is written until you click Apply.
-            </p>
-          </div>
-          <button
-            type="button"
-            className="text-fg-muted hover:text-fg text-xl leading-none px-2"
-            onClick={onClose}
-          >
-            ×
-          </button>
-        </div>
-
-        {error && (
-          <ErrorBanner error={error} variant="inline" className="mb-2" />
-        )}
-        {info && <div className="text-xs text-emerald-400 mb-2">{info}</div>}
-
-        <datalist id={driverListId}>
-          {drivers.map((d) => (
-            <option key={d.id} value={d.name} />
-          ))}
-        </datalist>
-
-        <div className="flex-1 overflow-y-auto -mx-1 px-1 space-y-4 min-h-[8rem]">
-          {/* Rules editor */}
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <h4 className="text-sm font-medium">
-                Handle → driver ({rules.length})
-              </h4>
-              <button
-                type="button"
-                className="text-xs text-accent hover:text-accent/80"
-                onClick={() => addRule()}
-              >
-                + Add handle
-              </button>
-            </div>
-            <div className="grid grid-cols-[1fr_1fr_auto_auto] gap-x-2 gap-y-1 items-center text-xs">
-              <div className="text-fg-subtle">Prefix</div>
-              <div className="text-fg-subtle">Driver</div>
-              <div className="text-fg-subtle text-right">Matches</div>
-              <div />
-              {rules.map((r, i) => {
-                const count = groups.filter((g) =>
-                  clientPrefixMatches(g.name, r.handle),
-                ).length;
-                const needsDriver = r.handle.trim() && !r.driverName.trim();
-                return (
-                  <Fragment key={i}>
-                    <input
-                      type="text"
-                      className="input !py-1 !text-xs"
-                      value={r.handle}
-                      onChange={(e) =>
-                        updateRule(i, { handle: e.target.value })
-                      }
-                      placeholder="e.g. Zilisch"
-                    />
-                    <input
-                      type="text"
-                      list={driverListId}
-                      className={`input !py-1 !text-xs ${needsDriver ? "border-amber-500/50" : ""}`}
-                      value={r.driverName}
-                      onChange={(e) => setRuleDriver(i, e.target.value)}
-                      placeholder="driver name"
-                    />
-                    <div className="text-right tabular-nums text-fg-muted">
-                      {count}
-                    </div>
-                    <button
-                      type="button"
-                      className="text-fg-subtle hover:text-red-300 px-1"
-                      onClick={() => removeRule(i)}
-                      title="Remove handle"
-                    >
-                      ×
-                    </button>
-                  </Fragment>
-                );
-              })}
-            </div>
-            {rules.length === 0 && (
-              <div className="text-xs text-fg-subtle">
-                No handles yet. Add one above, or check the unmatched list.
-              </div>
-            )}
-          </div>
-
-          {/* Unmatched groups */}
-          {unmatchedNames.length > 0 && (
-            <div className="space-y-1">
-              <h4 className="text-sm font-medium">
-                Not matched by any handle ({unmatchedNames.length})
-              </h4>
-              <p className="text-[11px] text-fg-subtle">
-                These groups won’t change. Click one to seed a handle from its
-                first word, then assign a driver.
-              </p>
-              <div className="flex flex-wrap gap-1">
-                {unmatchedNames.slice(0, 60).map((nm, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    className="text-[11px] rounded border border-border px-1.5 py-0.5 text-fg-muted hover:text-fg hover:border-fg-muted"
-                    onClick={() => addRule(firstToken(nm))}
-                    title={`Add handle "${firstToken(nm)}"`}
-                  >
-                    {nm}
-                  </button>
-                ))}
-                {unmatchedNames.length > 60 && (
-                  <span className="text-[11px] text-fg-subtle self-center">
-                    +{unmatchedNames.length - 60} more
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Preview */}
-          {proposals && (
-            <div className="space-y-1">
-              <h4 className="text-sm font-medium">
-                Preview — {matchedCount} of {proposals.length} groups change
-              </h4>
-              <div className="rounded border border-border divide-y divide-border">
-                {proposals
-                  .filter((p) => p.matched_handle !== null)
-                  .map((p) => {
-                    const rule = activeRules.find(
-                      (r) =>
-                        r.handle.toLowerCase() ===
-                        (p.matched_handle ?? "").toLowerCase(),
-                    );
-                    const name = effectiveName(p);
-                    const dup = collides(p);
-                    const empty = name === "";
-                    return (
-                      <div
-                        key={p.group_id}
-                        className="px-2 py-1 text-xs flex items-center gap-2"
-                      >
-                        <span className="text-fg-subtle line-through truncate max-w-[12rem] shrink-0">
-                          {p.original_name}
-                        </span>
-                        <span className="text-fg-subtle">→</span>
-                        <input
-                          type="text"
-                          className={`input !py-0.5 !text-xs flex-1 ${
-                            empty
-                              ? "border-red-500/60"
-                              : dup
-                                ? "border-amber-500/50"
-                                : ""
-                          }`}
-                          value={editedNames[p.group_id] ?? p.new_name}
-                          onChange={(e) =>
-                            setEditedNames((prev) => ({
-                              ...prev,
-                              [p.group_id]: e.target.value,
-                            }))
-                          }
-                        />
-                        {rule && (
-                          <span className="text-[10px] rounded border border-border bg-bg-elevated px-1.5 py-0.5 text-fg-muted shrink-0">
-                            {rule.driverName}
-                          </span>
-                        )}
-                        {dup && !empty && (
-                          <span
-                            className="text-[10px] text-amber-400 shrink-0"
-                            title="Another group will have this exact name. That's allowed — they're told apart by driver."
-                          >
-                            duplicate name
-                          </span>
-                        )}
-                        {empty && (
-                          <span className="text-[10px] text-red-400 shrink-0">
-                            empty
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
-                {matchedCount === 0 && (
-                  <div className="px-2 py-2 text-xs text-fg-subtle">
-                    No groups matched the current handles.
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center justify-between mt-3 pt-3 border-t border-border">
-          <span className="text-xs text-fg-subtle">
+    <Modal
+      title="Clean up group names"
+      description={
+        <span className="max-w-prose block">
+          Map each driver-name prefix (a “handle”) to a driver. Preview strips
+          the handle from matching group names and links the driver. Nothing is
+          written until you click Apply.
+        </span>
+      }
+      onClose={onClose}
+      busy={busy}
+      size="max-w-3xl"
+      scroll="none"
+      panelClassName="max-h-[88vh] flex flex-col"
+      footer={
+        <>
+          <span className="flex-1 text-xs text-fg-subtle">
             {activeRules.length} active handle
             {activeRules.length === 1 ? "" : "s"}
           </span>
-          <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={onClose}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={onPreview}
+            disabled={busy || activeRules.length === 0}
+          >
+            {busy && !proposals ? "Previewing…" : "Preview changes"}
+          </button>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={onApply}
+            disabled={
+              busy || proposals === null || matchedCount === 0 || hasBlocker
+            }
+            title={
+              proposals === null
+                ? "Preview first"
+                : hasBlocker
+                  ? "Resolve duplicate or empty names first"
+                  : "Apply the renames and driver links"
+            }
+          >
+            {busy && proposals ? "Applying…" : "Apply"}
+          </button>
+        </>
+      }
+    >
+      {error && <ErrorBanner error={error} variant="inline" className="mb-2" />}
+      {info && <div className="text-xs text-emerald-400 mb-2">{info}</div>}
+
+      <datalist id={driverListId}>
+        {drivers.map((d) => (
+          <option key={d.id} value={d.name} />
+        ))}
+      </datalist>
+
+      <div className="flex-1 overflow-y-auto -mx-1 px-1 space-y-4 min-h-[8rem]">
+        {/* Rules editor */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-medium">
+              Handle → driver ({rules.length})
+            </h4>
             <button
               type="button"
-              className="btn-secondary"
-              onClick={onClose}
-              disabled={busy}
+              className="text-xs text-accent hover:text-accent/80"
+              onClick={() => addRule()}
             >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={onPreview}
-              disabled={busy || activeRules.length === 0}
-            >
-              {busy && !proposals ? "Previewing…" : "Preview changes"}
-            </button>
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={onApply}
-              disabled={
-                busy || proposals === null || matchedCount === 0 || hasBlocker
-              }
-              title={
-                proposals === null
-                  ? "Preview first"
-                  : hasBlocker
-                    ? "Resolve duplicate or empty names first"
-                    : "Apply the renames and driver links"
-              }
-            >
-              {busy && proposals ? "Applying…" : "Apply"}
+              + Add handle
             </button>
           </div>
+          <div className="grid grid-cols-[1fr_1fr_auto_auto] gap-x-2 gap-y-1 items-center text-xs">
+            <div className="text-fg-subtle">Prefix</div>
+            <div className="text-fg-subtle">Driver</div>
+            <div className="text-fg-subtle text-right">Matches</div>
+            <div />
+            {rules.map((r, i) => {
+              const count = groups.filter((g) =>
+                clientPrefixMatches(g.name, r.handle),
+              ).length;
+              const needsDriver = r.handle.trim() && !r.driverName.trim();
+              return (
+                <Fragment key={i}>
+                  <input
+                    type="text"
+                    className="input !py-1 !text-xs"
+                    value={r.handle}
+                    onChange={(e) => updateRule(i, { handle: e.target.value })}
+                    placeholder="e.g. Zilisch"
+                  />
+                  <input
+                    type="text"
+                    list={driverListId}
+                    className={`input !py-1 !text-xs ${needsDriver ? "border-amber-500/50" : ""}`}
+                    value={r.driverName}
+                    onChange={(e) => setRuleDriver(i, e.target.value)}
+                    placeholder="driver name"
+                  />
+                  <div className="text-right tabular-nums text-fg-muted">
+                    {count}
+                  </div>
+                  <button
+                    type="button"
+                    className="text-fg-subtle hover:text-red-300 px-1"
+                    onClick={() => removeRule(i)}
+                    title="Remove handle"
+                  >
+                    ×
+                  </button>
+                </Fragment>
+              );
+            })}
+          </div>
+          {rules.length === 0 && (
+            <div className="text-xs text-fg-subtle">
+              No handles yet. Add one above, or check the unmatched list.
+            </div>
+          )}
         </div>
+
+        {/* Unmatched groups */}
+        {unmatchedNames.length > 0 && (
+          <div className="space-y-1">
+            <h4 className="text-sm font-medium">
+              Not matched by any handle ({unmatchedNames.length})
+            </h4>
+            <p className="text-[11px] text-fg-subtle">
+              These groups won’t change. Click one to seed a handle from its
+              first word, then assign a driver.
+            </p>
+            <div className="flex flex-wrap gap-1">
+              {unmatchedNames.slice(0, 60).map((nm, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  className="text-[11px] rounded border border-border px-1.5 py-0.5 text-fg-muted hover:text-fg hover:border-fg-muted"
+                  onClick={() => addRule(firstToken(nm))}
+                  title={`Add handle "${firstToken(nm)}"`}
+                >
+                  {nm}
+                </button>
+              ))}
+              {unmatchedNames.length > 60 && (
+                <span className="text-[11px] text-fg-subtle self-center">
+                  +{unmatchedNames.length - 60} more
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Preview */}
+        {proposals && (
+          <div className="space-y-1">
+            <h4 className="text-sm font-medium">
+              Preview — {matchedCount} of {proposals.length} groups change
+            </h4>
+            <div className="rounded border border-border divide-y divide-border">
+              {proposals
+                .filter((p) => p.matched_handle !== null)
+                .map((p) => {
+                  const rule = activeRules.find(
+                    (r) =>
+                      r.handle.toLowerCase() ===
+                      (p.matched_handle ?? "").toLowerCase(),
+                  );
+                  const name = effectiveName(p);
+                  const dup = collides(p);
+                  const empty = name === "";
+                  return (
+                    <div
+                      key={p.group_id}
+                      className="px-2 py-1 text-xs flex items-center gap-2"
+                    >
+                      <span className="text-fg-subtle line-through truncate max-w-[12rem] shrink-0">
+                        {p.original_name}
+                      </span>
+                      <span className="text-fg-subtle">→</span>
+                      <input
+                        type="text"
+                        className={`input !py-0.5 !text-xs flex-1 ${
+                          empty
+                            ? "border-red-500/60"
+                            : dup
+                              ? "border-amber-500/50"
+                              : ""
+                        }`}
+                        value={editedNames[p.group_id] ?? p.new_name}
+                        onChange={(e) =>
+                          setEditedNames((prev) => ({
+                            ...prev,
+                            [p.group_id]: e.target.value,
+                          }))
+                        }
+                      />
+                      {rule && (
+                        <span className="text-[10px] rounded border border-border bg-bg-elevated px-1.5 py-0.5 text-fg-muted shrink-0">
+                          {rule.driverName}
+                        </span>
+                      )}
+                      {dup && !empty && (
+                        <span
+                          className="text-[10px] text-amber-400 shrink-0"
+                          title="Another group will have this exact name. That's allowed — they're told apart by driver."
+                        >
+                          duplicate name
+                        </span>
+                      )}
+                      {empty && (
+                        <span className="text-[10px] text-red-400 shrink-0">
+                          empty
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              {matchedCount === 0 && (
+                <div className="px-2 py-2 text-xs text-fg-subtle">
+                  No groups matched the current handles.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -4843,15 +4807,23 @@ function RegistrySearchDialog({
     optionsLoaded && drivers.length === 0 && oems.length === 0;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-6 px-4 bg-black/60"
-      onClick={onClose}
-    >
-      <div
-        className="card w-full max-w-6xl h-[92vh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start gap-3 mb-3">
+    // `header` rather than `title`/`description`: this dialog's chrome
+    // carries the listing thumbnail and an out-link, which the default
+    // heading block has no room for. `title` still names it for a screen
+    // reader.
+    <Modal
+      title="Search registry"
+      onClose={onClose}
+      size="max-w-6xl"
+      scroll="none"
+      panelClassName="h-[92vh] flex flex-col"
+      footer={
+        <button type="button" className="btn-secondary" onClick={onClose}>
+          Cancel
+        </button>
+      }
+      header={
+        <div className="flex items-start gap-3 min-w-0 flex-1">
           {listing.image_url && (
             <img
               src={listing.image_url}
@@ -4878,318 +4850,305 @@ function RegistrySearchDialog({
               </a>
             )}
           </div>
+        </div>
+      }
+    >
+      {!optionsLoaded ? (
+        <div className="text-sm text-fg-subtle">Loading options…</div>
+      ) : optionsEmpty ? (
+        <div className="card text-sm text-amber-400/90 space-y-2">
+          <div>
+            The registry option cache is empty. Fetch it once (a few seconds) so
+            the dropdowns can populate.
+          </div>
           <button
+            className="btn-primary"
             type="button"
-            className="text-fg-muted hover:text-fg text-xl leading-none px-2 flex-shrink-0"
-            onClick={onClose}
+            onClick={onRefreshOptions}
+            disabled={refreshing}
           >
-            ×
+            {refreshing ? "Fetching…" : "Fetch registry options"}
           </button>
         </div>
-
-        {!optionsLoaded ? (
-          <div className="text-sm text-fg-subtle">Loading options…</div>
-        ) : optionsEmpty ? (
-          <div className="card text-sm text-amber-400/90 space-y-2">
-            <div>
-              The registry option cache is empty. Fetch it once (a few seconds)
-              so the dropdowns can populate.
-            </div>
-            <button
-              className="btn-primary"
-              type="button"
-              onClick={onRefreshOptions}
-              disabled={refreshing}
-            >
-              {refreshing ? "Fetching…" : "Fetch registry options"}
-            </button>
-          </div>
-        ) : (
-          <>
-            <button
-              type="button"
-              className="flex items-center gap-1.5 text-xs font-medium text-fg-muted hover:text-fg"
-              onClick={() => setCriteriaOpen((v) => !v)}
-              aria-expanded={criteriaOpen}
-            >
-              <span className="text-fg-subtle">{criteriaOpen ? "▾" : "▸"}</span>
-              Search criteria
-            </button>
-            {criteriaOpen && (
-              <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),1fr))] gap-3 mt-2">
-                <div>
-                  <label className="label">Driver</label>
-                  <input
-                    list="dcr-drivers-list"
-                    type="text"
-                    value={driverInput}
-                    onChange={(e) => {
-                      setDriverInput(e.target.value);
-                      const match = drivers.find(
-                        (d) => d.display === e.target.value,
-                      );
-                      setSelectedDriverGuid(match?.value ?? "");
-                    }}
-                    className="input"
-                    placeholder="Type to search…"
-                    autoComplete="off"
-                  />
-                  <datalist id="dcr-drivers-list">
-                    {drivers.map((d) => (
-                      <option key={d.value} value={d.display} />
-                    ))}
-                  </datalist>
-                </div>
-                <div>
-                  <label className="label">Year</label>
-                  {/* Auto-filled from the listing title as a one-year range,
+      ) : (
+        <>
+          <button
+            type="button"
+            className="flex items-center gap-1.5 text-xs font-medium text-fg-muted hover:text-fg"
+            onClick={() => setCriteriaOpen((v) => !v)}
+            aria-expanded={criteriaOpen}
+          >
+            <span className="text-fg-subtle">{criteriaOpen ? "▾" : "▸"}</span>
+            Search criteria
+          </button>
+          {criteriaOpen && (
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),1fr))] gap-3 mt-2">
+              <div>
+                <label className="label">Driver</label>
+                <input
+                  list="dcr-drivers-list"
+                  type="text"
+                  value={driverInput}
+                  onChange={(e) => {
+                    setDriverInput(e.target.value);
+                    const match = drivers.find(
+                      (d) => d.display === e.target.value,
+                    );
+                    setSelectedDriverGuid(match?.value ?? "");
+                  }}
+                  className="input"
+                  placeholder="Type to search…"
+                  autoComplete="off"
+                />
+                <datalist id="dcr-drivers-list">
+                  {drivers.map((d) => (
+                    <option key={d.value} value={d.display} />
+                  ))}
+                </datalist>
+              </div>
+              <div>
+                <label className="label">Year</label>
+                {/* Auto-filled from the listing title as a one-year range,
                       which searches identically to the single year this
                       replaced — but can now be widened when the title's year
                       is the race season and the registry's is the release. */}
-                  <YearRangeFilter
-                    id="dialog-year"
-                    years={years.map((y) => y.value)}
-                    value={dialogYearRange}
-                    onChange={setDialogYearRange}
+                <YearRangeFilter
+                  id="dialog-year"
+                  years={years.map((y) => y.value)}
+                  value={dialogYearRange}
+                  onChange={setDialogYearRange}
+                />
+              </div>
+              <div>
+                <label className="label">OEM</label>
+                <input
+                  list="dcr-oems-list"
+                  type="text"
+                  value={oemInput}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setOemInput(v);
+                    const match = oems.find((o) => o.display === v);
+                    setSelectedOemGuid(match?.value ?? "");
+                  }}
+                  className="input"
+                  placeholder="Any (type to search…)"
+                  autoComplete="off"
+                />
+                <datalist id="dcr-oems-list">
+                  {(oemInput.trim() === "" && !showAllOems
+                    ? oems.filter((o) => isPreferredOem(o.display))
+                    : oems
+                  ).map((o) => (
+                    <option key={o.value} value={o.display} />
+                  ))}
+                </datalist>
+                {oemInput.trim() === "" && !showAllOems && (
+                  <button
+                    type="button"
+                    className="text-xs text-fg-subtle hover:text-fg-muted mt-1"
+                    onClick={() => setShowAllOems(true)}
+                  >
+                    More…
+                  </button>
+                )}
+              </div>
+              <div>
+                <label className="label">Scale</label>
+                <select
+                  value={selectedScaleGuid}
+                  onChange={(e) => setSelectedScaleGuid(e.target.value)}
+                  className="input"
+                >
+                  <option value="">Any</option>
+                  {scales.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.display}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Brand</label>
+                <input
+                  list="dcr-brands-list"
+                  type="text"
+                  value={brandInput}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setBrandInput(v);
+                    const match = brands.find((b) => b.display === v);
+                    setSelectedBrandGuid(match?.value ?? "");
+                  }}
+                  className="input"
+                  placeholder="Any (type to search…)"
+                  autoComplete="off"
+                />
+                <datalist id="dcr-brands-list">
+                  {brands.map((b) => (
+                    <option key={b.value} value={b.display} />
+                  ))}
+                </datalist>
+              </div>
+              <div>
+                <label className="label">Make</label>
+                <input
+                  list="dcr-makes-list"
+                  type="text"
+                  value={makeInput}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setMakeInput(v);
+                    const match = makes.find((m) => m.display === v);
+                    setSelectedMakeGuid(match?.value ?? "");
+                  }}
+                  className="input"
+                  placeholder="Any (type to search…)"
+                  autoComplete="off"
+                />
+                <datalist id="dcr-makes-list">
+                  {makes.map((m) => (
+                    <option key={m.value} value={m.display} />
+                  ))}
+                </datalist>
+              </div>
+              <div>
+                <label className="label">Finish</label>
+                <input
+                  list="dcr-finishes-list"
+                  type="text"
+                  value={finishInput}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setFinishInput(v);
+                    const match = finishes.find((f) => f.display === v);
+                    setSelectedFinishGuid(match?.value ?? "");
+                  }}
+                  className="input"
+                  placeholder="Any (type to search…)"
+                  autoComplete="off"
+                />
+                <datalist id="dcr-finishes-list">
+                  {finishes.map((f) => (
+                    <option key={f.value} value={f.display} />
+                  ))}
+                </datalist>
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between mt-3">
+            <button
+              type="button"
+              className="text-xs text-fg-subtle hover:text-fg-muted"
+              onClick={onRefreshOptions}
+              disabled={refreshing}
+              title="Re-fetch the dropdown choices from diecastregistry.com"
+            >
+              {refreshing ? "Refreshing options…" : "Refresh options"}
+            </button>
+            <button
+              className="btn-primary"
+              type="button"
+              onClick={onSearch}
+              disabled={searching}
+            >
+              {searching ? "Searching…" : "Search"}
+            </button>
+          </div>
+        </>
+      )}
+
+      {info && <div className="text-xs text-emerald-400 mt-2">{info}</div>}
+      {dialogError && (
+        <ErrorBanner error={dialogError} variant="inline" className="mt-2" />
+      )}
+
+      <div className="flex-1 overflow-y-auto -mx-1 px-1 mt-3 space-y-1 min-h-[8rem]">
+        {searching ? (
+          <div className="text-sm text-fg-subtle">Searching…</div>
+        ) : results === null ? null : results.length === 0 ? (
+          <div className="text-sm text-fg-subtle">No results.</div>
+        ) : (
+          results.map((r) => (
+            <button
+              key={r.registry_guid}
+              type="button"
+              className="w-full text-left rounded-md border border-border bg-bg-elevated hover:border-accent hover:bg-accent/5 px-3 py-2 disabled:opacity-50"
+              onClick={() => onLink(r)}
+              disabled={linkingGuid !== null}
+            >
+              <div className="flex items-center gap-3">
+                {r.image_url ? (
+                  <img
+                    src={
+                      r.image_url.startsWith("http")
+                        ? r.image_url
+                        : "https://www.diecastregistry.com" + r.image_url
+                    }
+                    alt=""
+                    loading="lazy"
+                    className="w-48 h-48 object-cover rounded border border-border shrink-0"
                   />
-                </div>
-                <div>
-                  <label className="label">OEM</label>
-                  <input
-                    list="dcr-oems-list"
-                    type="text"
-                    value={oemInput}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setOemInput(v);
-                      const match = oems.find((o) => o.display === v);
-                      setSelectedOemGuid(match?.value ?? "");
-                    }}
-                    className="input"
-                    placeholder="Any (type to search…)"
-                    autoComplete="off"
-                  />
-                  <datalist id="dcr-oems-list">
-                    {(oemInput.trim() === "" && !showAllOems
-                      ? oems.filter((o) => isPreferredOem(o.display))
-                      : oems
-                    ).map((o) => (
-                      <option key={o.value} value={o.display} />
-                    ))}
-                  </datalist>
-                  {oemInput.trim() === "" && !showAllOems && (
-                    <button
-                      type="button"
-                      className="text-xs text-fg-subtle hover:text-fg-muted mt-1"
-                      onClick={() => setShowAllOems(true)}
+                ) : (
+                  <div className="w-48 h-48 rounded border border-border bg-bg shrink-0" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="text-base font-medium truncate">
+                    {r.driver_name}
+                    {r.year && (
+                      <span className="text-fg-subtle ml-2">{r.year}</span>
+                    )}
+                  </div>
+                  <div className="text-sm text-fg-subtle truncate">
+                    {r.scheme_text ?? "(no scheme)"}
+                  </div>
+                  <div className="text-xs text-fg-faint mt-0.5">
+                    {[r.oem, r.brand, r.scale, r.make]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </div>
+                  {r.seq_produced_total !== null && (
+                    <div className="text-xs text-fg-faint mt-0.5">
+                      production qty {formatCount(r.seq_produced_total)}
+                    </div>
+                  )}
+                  {r.detail_url && (
+                    <a
+                      href={
+                        r.detail_url.startsWith("http")
+                          ? r.detail_url
+                          : "https://www.diecastregistry.com" + r.detail_url
+                      }
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const url = r.detail_url!.startsWith("http")
+                          ? r.detail_url!
+                          : "https://www.diecastregistry.com" + r.detail_url!;
+                        void openExternal(url);
+                      }}
+                      className="text-xs text-accent hover:underline mt-1 inline-block"
                     >
-                      More…
-                    </button>
+                      View on diecastregistry.com →
+                    </a>
                   )}
                 </div>
-                <div>
-                  <label className="label">Scale</label>
-                  <select
-                    value={selectedScaleGuid}
-                    onChange={(e) => setSelectedScaleGuid(e.target.value)}
-                    className="input"
-                  >
-                    <option value="">Any</option>
-                    {scales.map((s) => (
-                      <option key={s.value} value={s.value}>
-                        {s.display}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="label">Brand</label>
-                  <input
-                    list="dcr-brands-list"
-                    type="text"
-                    value={brandInput}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setBrandInput(v);
-                      const match = brands.find((b) => b.display === v);
-                      setSelectedBrandGuid(match?.value ?? "");
-                    }}
-                    className="input"
-                    placeholder="Any (type to search…)"
-                    autoComplete="off"
-                  />
-                  <datalist id="dcr-brands-list">
-                    {brands.map((b) => (
-                      <option key={b.value} value={b.display} />
-                    ))}
-                  </datalist>
-                </div>
-                <div>
-                  <label className="label">Make</label>
-                  <input
-                    list="dcr-makes-list"
-                    type="text"
-                    value={makeInput}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setMakeInput(v);
-                      const match = makes.find((m) => m.display === v);
-                      setSelectedMakeGuid(match?.value ?? "");
-                    }}
-                    className="input"
-                    placeholder="Any (type to search…)"
-                    autoComplete="off"
-                  />
-                  <datalist id="dcr-makes-list">
-                    {makes.map((m) => (
-                      <option key={m.value} value={m.display} />
-                    ))}
-                  </datalist>
-                </div>
-                <div>
-                  <label className="label">Finish</label>
-                  <input
-                    list="dcr-finishes-list"
-                    type="text"
-                    value={finishInput}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setFinishInput(v);
-                      const match = finishes.find((f) => f.display === v);
-                      setSelectedFinishGuid(match?.value ?? "");
-                    }}
-                    className="input"
-                    placeholder="Any (type to search…)"
-                    autoComplete="off"
-                  />
-                  <datalist id="dcr-finishes-list">
-                    {finishes.map((f) => (
-                      <option key={f.value} value={f.display} />
-                    ))}
-                  </datalist>
+                <div className="text-right text-xs tabular-nums shrink-0">
+                  <div>retail {formatCents(r.retail_value_cents)}</div>
+                  <div className="text-fg-subtle">
+                    wholesale {formatCents(r.wholesale_value_cents)}
+                  </div>
+                  {linkingGuid === r.registry_guid && (
+                    <div className="text-emerald-400 mt-1">Linking…</div>
+                  )}
                 </div>
               </div>
-            )}
-
-            <div className="flex items-center justify-between mt-3">
-              <button
-                type="button"
-                className="text-xs text-fg-subtle hover:text-fg-muted"
-                onClick={onRefreshOptions}
-                disabled={refreshing}
-                title="Re-fetch the dropdown choices from diecastregistry.com"
-              >
-                {refreshing ? "Refreshing options…" : "Refresh options"}
-              </button>
-              <button
-                className="btn-primary"
-                type="button"
-                onClick={onSearch}
-                disabled={searching}
-              >
-                {searching ? "Searching…" : "Search"}
-              </button>
-            </div>
-          </>
+            </button>
+          ))
         )}
-
-        {info && <div className="text-xs text-emerald-400 mt-2">{info}</div>}
-        {dialogError && (
-          <ErrorBanner error={dialogError} variant="inline" className="mt-2" />
-        )}
-
-        <div className="flex-1 overflow-y-auto -mx-1 px-1 mt-3 space-y-1 min-h-[8rem]">
-          {searching ? (
-            <div className="text-sm text-fg-subtle">Searching…</div>
-          ) : results === null ? null : results.length === 0 ? (
-            <div className="text-sm text-fg-subtle">No results.</div>
-          ) : (
-            results.map((r) => (
-              <button
-                key={r.registry_guid}
-                type="button"
-                className="w-full text-left rounded-md border border-border bg-bg-elevated hover:border-accent hover:bg-accent/5 px-3 py-2 disabled:opacity-50"
-                onClick={() => onLink(r)}
-                disabled={linkingGuid !== null}
-              >
-                <div className="flex items-center gap-3">
-                  {r.image_url ? (
-                    <img
-                      src={
-                        r.image_url.startsWith("http")
-                          ? r.image_url
-                          : "https://www.diecastregistry.com" + r.image_url
-                      }
-                      alt=""
-                      loading="lazy"
-                      className="w-48 h-48 object-cover rounded border border-border shrink-0"
-                    />
-                  ) : (
-                    <div className="w-48 h-48 rounded border border-border bg-bg shrink-0" />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <div className="text-base font-medium truncate">
-                      {r.driver_name}
-                      {r.year && (
-                        <span className="text-fg-subtle ml-2">{r.year}</span>
-                      )}
-                    </div>
-                    <div className="text-sm text-fg-subtle truncate">
-                      {r.scheme_text ?? "(no scheme)"}
-                    </div>
-                    <div className="text-xs text-fg-faint mt-0.5">
-                      {[r.oem, r.brand, r.scale, r.make]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </div>
-                    {r.seq_produced_total !== null && (
-                      <div className="text-xs text-fg-faint mt-0.5">
-                        production qty {formatCount(r.seq_produced_total)}
-                      </div>
-                    )}
-                    {r.detail_url && (
-                      <a
-                        href={
-                          r.detail_url.startsWith("http")
-                            ? r.detail_url
-                            : "https://www.diecastregistry.com" + r.detail_url
-                        }
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          const url = r.detail_url!.startsWith("http")
-                            ? r.detail_url!
-                            : "https://www.diecastregistry.com" + r.detail_url!;
-                          void openExternal(url);
-                        }}
-                        className="text-xs text-accent hover:underline mt-1 inline-block"
-                      >
-                        View on diecastregistry.com →
-                      </a>
-                    )}
-                  </div>
-                  <div className="text-right text-xs tabular-nums shrink-0">
-                    <div>retail {formatCents(r.retail_value_cents)}</div>
-                    <div className="text-fg-subtle">
-                      wholesale {formatCents(r.wholesale_value_cents)}
-                    </div>
-                    {linkingGuid === r.registry_guid && (
-                      <div className="text-emerald-400 mt-1">Linking…</div>
-                    )}
-                  </div>
-                </div>
-              </button>
-            ))
-          )}
-        </div>
-
-        <div className="flex items-center justify-end gap-2 mt-3 pt-3 border-t border-border">
-          <button type="button" className="btn-secondary" onClick={onClose}>
-            Cancel
-          </button>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
