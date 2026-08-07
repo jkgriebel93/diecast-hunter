@@ -703,7 +703,7 @@ export function Registry() {
                     </button>
                     <button
                       type="button"
-                      className="text-fg-subtle hover:text-red-400"
+                      className="link-danger"
                       onClick={() => void onDeletePresearch(ps)}
                       disabled={presearchBusy !== null}
                       title="Delete this pre-search"

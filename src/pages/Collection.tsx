@@ -917,7 +917,7 @@ function CollectionItemRow({
           )}
           <button
             type="button"
-            className="text-fg-subtle hover:text-red-400 disabled:opacity-50"
+            className="link-danger disabled:opacity-50"
             disabled={removingId !== null}
             onClick={() => onRemove(item)}
             title={

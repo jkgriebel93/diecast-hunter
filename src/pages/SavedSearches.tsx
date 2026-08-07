@@ -235,7 +235,7 @@ export function SavedSearches() {
                       Edit
                     </button>
                     <button
-                      className="text-fg-subtle hover:text-red-300"
+                      className="link-danger"
                       type="button"
                       onClick={() => onDelete(s)}
                     >

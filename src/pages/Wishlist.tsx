@@ -417,7 +417,7 @@ export function Wishlist() {
                   </span>
                   <button
                     type="button"
-                    className="text-red-400 hover:underline"
+                    className="link-danger"
                     onClick={() => void onDeleteList()}
                   >
                     Confirm
@@ -446,7 +446,7 @@ export function Wishlist() {
                   {lists.length > 1 && (
                     <button
                       type="button"
-                      className="text-fg-subtle hover:text-red-400"
+                      className="link-danger"
                       onClick={() => setListEditor("delete")}
                       title="Delete this wishlist and its entries"
                     >
@@ -747,7 +747,7 @@ function WishlistCard({
                 )}
                 <button
                   type="button"
-                  className="text-xs text-fg-subtle hover:text-red-400"
+                  className="link-danger text-xs"
                   onClick={onRemove}
                   title="Remove this entry from the wishlist"
                 >
@@ -976,7 +976,7 @@ function LinkedListingRow({
       <div className="tabular-nums text-fg shrink-0">{formatCents(total)}</div>
       <button
         type="button"
-        className="text-fg-subtle hover:text-red-400 shrink-0"
+        className="link-danger shrink-0"
         onClick={onUnlink}
         title="Unlink this listing from the wish"
       >

@@ -1,10 +1,10 @@
 # Implementation order for open DCH tickets
 
-As of 2026-08-07 (rev 12: DCH-34 and DCH-32 merged, DCH-36 filed, DCH-16 parked, DCH-30
-deployed pending its console verification). Sixteen tickets are merged — DCH-8, DCH-9,
+As of 2026-08-07 (rev 13: DCH-34, DCH-32 and DCH-33 merged, DCH-36 filed, DCH-16 parked, DCH-30
+deployed pending its console verification). Seventeen tickets are merged — DCH-8, DCH-9,
 DCH-10, DCH-11, DCH-12, DCH-14, DCH-15, DCH-17, DCH-18, DCH-22, DCH-28, DCH-29, DCH-30,
-DCH-31, DCH-32, DCH-34 — and DCH-19 spawned five follow-ups, so the open list is nine
-substantive items plus the roadmap buckets.
+DCH-31, DCH-32, DCH-33, DCH-34 — and DCH-19 spawned five follow-ups, so the open list is
+eight substantive items plus the roadmap buckets.
 
 The ordering principle has not changed: compounding work (training data, CI safety, anything
 that makes later tickets cheaper or safer) goes before features that only pay off once.
@@ -43,9 +43,30 @@ Two things worth carrying forward:
 
 | # | Ticket | What | Why here |
 | --- | --- | --- | --- |
-| 1 | DCH-33 | `.btn-danger` / `.link-danger` | Small, and DCH-20 needs it — the listing panel is full of destructive actions with no shared treatment. **Check its numbers first:** the audit's count for this one comes from the same raw `text-red-*` grep that overstated DCH-34, and those hits are mostly the destructive-button hovers this ticket is about — so the scope is probably real here, but confirm before planning. |
-| 2 | DCH-35 | Filter-row parity | "Clear filters" exists on one screen of seven. |
+| 1 | DCH-35 | Filter-row parity | "Clear filters" exists on one screen of seven. |
 | — | DCH-36 | `ErrorBanner` retitles authored prose | Filed from DCH-34. A presentation decision, not a mechanical fix. `Modal` now exists, so a notice variant has somewhere obvious to live. |
+
+**DCH-33 is done**, and it clears the last dependency on the two redesigns: `Modal` and the
+danger classes both exist, so DCH-20 and DCH-21 can start whenever you want them.
+
+Its numbers were the accurate ones — 10 / 6 / 6, essentially as the audit reported. That
+makes three for three on "verify the count first": DCH-34's was inflated, DCH-32's was
+slightly pessimistic, and this one held.
+
+Two decisions worth not re-deriving:
+
+*Severity picks the confirmation; form picks the class.* The ticket coupled them
+(irreversible → `.btn-danger`, reversible → `.link-danger`), which doesn't survive contact:
+Collection's Remove is irreversible but sits inline beside a plain-text "Edit", where a solid
+button would be absurd. So the rule is now two independent questions — rendered as a button →
+`.btn-danger`, rendered as inline text or a bare icon → `.link-danger`; irreversible →
+confirm naming what dies, reversible → don't. Every criterion still holds.
+
+*The red shade is measured, not chosen by eye.* A destructive button must not read as fainter
+than `.btn-primary` beside it, and the obvious red-600 fails that in dark mode — 4.03 WCAG
+contrast against the page versus accent's 5.29. The ramp is red-500 in dark and red-700 in
+light, both of which clear it. If the danger tokens are ever retuned, re-measure rather than
+eyeballing; the failure is invisible in one theme.
 
 **DCH-32 is done.** `src/components/Modal.tsx` owns every dialog; ten call sites across six
 files migrated. Two things about it are worth knowing before touching dialogs again:
@@ -78,8 +99,9 @@ occurrences, and almost all of them are `hover:text-red-400` on destructive icon
 which is **DCH-33's** subject, not DCH-18's. Exactly one genuine hand-rolled error box
 existed (`ManualEntryDialog`'s save failure, added by DCH-12 after the helper landed). The
 "visible defect today" framing in the ticket was wrong; `ErrorBanner` adoption was already
-essentially complete. Treat the audit's other raw-grep counts (DCH-33's especially) as
-upper bounds until someone eyeballs the hits.
+essentially complete. The lesson generalized: check the audit's raw-grep counts against the
+actual hits before planning. (DCH-33's later turned out to be accurate — the point is that
+you can't tell which without looking.)
 
 The `formatCount` half was real, and bigger than stated once dates were separated out: of
 the 19 `toLocaleString()` calls, 8 were counts and 11 were `new Date(x * 1000)`. The date
@@ -112,26 +134,25 @@ DCH-19 is done. Its output is the [UI Audit and Standardization
 Guidelines](https://thistlegrow.atlassian.net/wiki/spaces/DCH/pages/51183617) page, whose
 conventions checklist is what the two redesigns execute against.
 
-DCH-32 has landed, so the dialog half of that dependency is satisfied — both redesigns can now
-build against `Modal` instead of hand-rolling. **DCH-33 (danger classes) is still outstanding
-and still comes first**, for the same reason: DCH-20's listing panel is full of destructive
-actions, and giving them a shared treatment after the redesign means doing the work twice.
+Both prerequisites have landed. DCH-32 gave the redesigns `Modal`, and DCH-33 gave them
+`.btn-danger` / `.link-danger` — the two things that would have had to be redone if DCH-20 and
+DCH-21 had gone first. Nothing now blocks either.
 
 | # | Ticket | What |
 | --- | --- | --- |
-| 4 | DCH-20 | Redesign Saved Listing detail panel — 5,626 lines, the audit's worst offender on every axis |
-| 5 | DCH-21 | Reorganize Settings screen — 21 buttons with no hierarchy between sections |
+| 2 | DCH-20 | Redesign Saved Listing detail panel — 5,626 lines, the audit's worst offender on every axis |
+| 3 | DCH-21 | Reorganize Settings screen — 21 buttons with no hierarchy between sections |
 
 ## Later
 
 | # | Ticket | What | Notes |
 | --- | --- | --- | --- |
-| 5 | DCH-25 | "Production ready" definition spike | Spawns the real production work items — goes before them. |
-| 6 | DCH-24 | User documentation | After UI standardization so screenshots don't go stale. |
-| 7 | DCH-23 | Performance profiling pass | When something is actually slow, or pre-production. |
-| 8 | DCH-13 | Photo-tagging feasibility spike | Flagged likely-expensive; confirm or kill cheaply. |
-| 9 | DCH-26 | Lionel website integration | Expansion waits for solid core; needs use-case decision. |
-| 10 | DCH-27 | Revive Facebook Marketplace integration | Plugs back into the listing-receiver architecture. |
+| 4 | DCH-25 | "Production ready" definition spike | Spawns the real production work items — goes before them. |
+| 5 | DCH-24 | User documentation | After UI standardization so screenshots don't go stale. |
+| 6 | DCH-23 | Performance profiling pass | When something is actually slow, or pre-production. |
+| 7 | DCH-13 | Photo-tagging feasibility spike | Flagged likely-expensive; confirm or kill cheaply. |
+| 8 | DCH-26 | Lionel website integration | Expansion waits for solid core; needs use-case decision. |
+| 9 | DCH-27 | Revive Facebook Marketplace integration | Plugs back into the listing-receiver architecture. |
 
 ## Open items that aren't tickets
 

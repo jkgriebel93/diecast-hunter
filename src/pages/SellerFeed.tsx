@@ -705,7 +705,7 @@ function ManageSellersPanel({
                         Edit
                       </button>
                       <button
-                        className="text-fg-subtle hover:text-red-300"
+                        className="link-danger"
                         type="button"
                         onClick={() => onDelete(s)}
                       >
@@ -863,7 +863,7 @@ function FeedCard({
           {watched ? (
             <button
               type="button"
-              className="text-fg-muted hover:text-red-300 disabled:opacity-50"
+              className="link-danger"
               onClick={onUnwatch}
               disabled={busy}
             >

@@ -25,6 +25,11 @@ export default {
           DEFAULT: "rgb(var(--color-accent) / <alpha-value>)",
           hover: "rgb(var(--color-accent-hover) / <alpha-value>)",
         },
+        danger: {
+          DEFAULT: "rgb(var(--color-danger) / <alpha-value>)",
+          hover: "rgb(var(--color-danger-hover) / <alpha-value>)",
+          fg: "rgb(var(--color-danger-fg) / <alpha-value>)",
+        },
         fg: {
           DEFAULT: "rgb(var(--color-fg) / <alpha-value>)",
           muted: "rgb(var(--color-fg-muted) / <alpha-value>)",

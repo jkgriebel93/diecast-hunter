@@ -565,7 +565,7 @@ function SearchCard({
           {watched ? (
             <button
               type="button"
-              className="text-fg-muted hover:text-red-300 disabled:opacity-50"
+              className="link-danger"
               onClick={onUnwatch}
               disabled={busy}
               title="Remove from your eBay watchlist and stop tracking locally"
