@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { describeError } from "@/lib/errors";
 import {
   api,
   formatAgo,
@@ -685,7 +686,7 @@ export function Registry() {
                     {ps.last_error !== null && (
                       <span
                         className="text-red-400"
-                        title={`Last refresh failed: ${ps.last_error}`}
+                        title={`Last refresh failed: ${describeError(ps.last_error).title}`}
                       >
                         !
                       </span>
@@ -969,7 +970,7 @@ function RegistryResultCard({
             </div>
             {r.seq_produced_total !== null && (
               <div className="text-xs text-fg-faint mt-0.5">
-                production qty {r.seq_produced_total.toLocaleString()}
+                production qty {formatCount(r.seq_produced_total)}
               </div>
             )}
             <div className="flex items-center gap-3 mt-1">

@@ -4,6 +4,7 @@ import { ErrorBanner } from "@/components/ErrorBanner";
 import {
   api,
   driverListingCounts,
+  formatDateTime,
   sortDriverOptions,
   type AutoSyncSettings,
   type BackgroundSettings,
@@ -607,9 +608,7 @@ export function Settings() {
           </div>
           <div className="text-xs text-fg-subtle">
             {autoSyncLastRun
-              ? `Last background sync ${new Date(
-                  autoSyncLastRun * 1000,
-                ).toLocaleString()}`
+              ? `Last background sync ${formatDateTime(autoSyncLastRun)}`
               : "Background sync hasn't run yet."}
           </div>
         </div>
@@ -684,9 +683,7 @@ export function Settings() {
               <div className="text-sm font-medium">Sync My Garage</div>
               <div className="text-xs text-fg-subtle">
                 {lastSync
-                  ? `Last synced ${new Date(
-                      Number(lastSync) * 1000,
-                    ).toLocaleString()}`
+                  ? `Last synced ${formatDateTime(Number(lastSync))}`
                   : "Never synced"}
               </div>
             </div>
@@ -1565,7 +1562,7 @@ function MatcherLearningSection() {
               <span className="text-emerald-400">
                 learned
                 {status.trained_at
-                  ? ` (trained ${new Date(status.trained_at * 1000).toLocaleString()})`
+                  ? ` (trained ${formatDateTime(status.trained_at)})`
                   : ""}
               </span>
             ) : (
@@ -1588,7 +1585,7 @@ function MatcherLearningSection() {
           <div className="text-xs text-fg-subtle">
             Last training run:{" "}
             {status.last_train_at
-              ? new Date(status.last_train_at * 1000).toLocaleString()
+              ? formatDateTime(status.last_train_at)
               : "never"}
           </div>
           <div className="text-xs text-fg-subtle">

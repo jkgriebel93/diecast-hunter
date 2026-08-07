@@ -15,6 +15,7 @@ import {
   api,
   filterAllowedScales,
   formatCents,
+  formatCount,
   type CollectionRow,
 } from "@/lib/tauri";
 import { useImageSize, type ImageSize } from "@/lib/imageSize";
@@ -837,7 +838,7 @@ function CollectionItemRow({
                   item.diecast_type,
                   item.finish && `finish: ${item.finish}`,
                   item.production_qty &&
-                    `qty: ${item.production_qty.toLocaleString()}`,
+                    `qty: ${formatCount(item.production_qty)}`,
                   item.registration_number && `reg ${item.registration_number}`,
                 ]
                   .filter(Boolean)

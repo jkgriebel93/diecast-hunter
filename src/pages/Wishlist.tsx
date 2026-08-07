@@ -4,6 +4,7 @@ import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
   api,
   formatCents,
+  formatCount,
   type ListingRow,
   type WishlistEntry,
   type WishlistInfo,
@@ -701,7 +702,7 @@ function WishlistCard({
               </div>
               {entry.production_qty !== null && (
                 <div className="text-xs text-fg-faint mt-0.5">
-                  production qty {entry.production_qty.toLocaleString()}
+                  production qty {formatCount(entry.production_qty)}
                 </div>
               )}
               <div className="flex items-center gap-3 mt-1">

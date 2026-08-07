@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { api, ALLOWED_SCALES, type CollectionRow } from "@/lib/tauri";
+import { ErrorBanner } from "@/components/ErrorBanner";
 import {
   EMPTY_MANUAL_ENTRY_FORM,
   formFromRow,
@@ -40,7 +41,10 @@ export function ManualEntryDialog({
   );
   const [saving, setSaving] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  // Held unconverted so `ErrorBanner` can classify it — `String(err)` here
+  // would flatten a backend `AppError` into a string before anything got to
+  // read its prefix.
+  const [saveError, setSaveError] = useState<unknown>(null);
   const listId = useId();
 
   const errors = useMemo(() => validateManualEntry(form), [form]);
@@ -77,7 +81,7 @@ export function ManualEntryDialog({
         onSaved(`Added "${input.schemeText}" to your collection.`);
       }
     } catch (err) {
-      setSaveError(String(err));
+      setSaveError(err);
     } finally {
       setSaving(false);
     }
@@ -112,6 +116,10 @@ export function ManualEntryDialog({
           </p>
         </div>
 
+        {/* Validation messages are ours and already written for a person, so
+            they stay a plain list — running them through `describeError`
+            would only retitle them "Something went wrong." The save failure
+            below is a backend error and does go through `ErrorBanner`. */}
         {showErrors && (
           <ul className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300 space-y-0.5">
             {errors.map((msg) => (
@@ -119,11 +127,7 @@ export function ManualEntryDialog({
             ))}
           </ul>
         )}
-        {saveError && (
-          <div className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
-            {saveError}
-          </div>
-        )}
+        <ErrorBanner error={saveError} variant="inline" />
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Driver" required className="col-span-2">

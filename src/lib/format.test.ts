@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatAgo, formatCents, formatCount } from "./format";
+import { formatAgo, formatCents, formatCount, formatDateTime } from "./format";
 
 describe("formatCents", () => {
   it("adds thousands separators", () => {
@@ -60,5 +60,47 @@ describe("formatAgo", () => {
     // Clock skew between the eBay-reported end time and the local machine
     // shouldn't render a comp as "-1 days ago".
     expect(formatAgo(NOW + 5 * DAY, NOW)).toBe("today");
+  });
+});
+
+describe("formatDateTime", () => {
+  // 2026-01-23T21:05:00Z. Asserted against `toLocaleString()` on the same
+  // instant rather than a literal, because the expected string depends on
+  // the runner's timezone and locale — pinning it would make the test fail
+  // in CI for the wrong reason.
+  const TS = 1769202300;
+
+  it("renders a stored timestamp the same way the old inline call did", () => {
+    // DCH-34 replaced nineteen `new Date(x * 1000).toLocaleString()` calls
+    // with this helper on the promise that nothing visibly changed.
+    expect(formatDateTime(TS)).toBe(new Date(TS * 1000).toLocaleString());
+  });
+
+  it("treats the argument as seconds, not milliseconds", () => {
+    expect(formatDateTime(TS)).not.toBe(new Date(TS).toLocaleString());
+  });
+
+  it("renders missing timestamps as an em dash", () => {
+    // The actual bug this helper exists to prevent. The two missing cases
+    // failed in *different* wrong ways inline, which is why neither was
+    // obvious: `undefined` rendered the string "Invalid Date", and `null`
+    // coerced to 0 and confidently rendered the Unix epoch as if it were a
+    // real sync time.
+    expect(formatDateTime(undefined)).toBe("—");
+    expect(new Date(undefined! * 1000).toLocaleString()).toBe("Invalid Date");
+
+    expect(formatDateTime(null)).toBe("—");
+    expect(new Date(null! * 1000).getTime()).toBe(0);
+  });
+
+  it("renders unparseable values as an em dash rather than Invalid Date", () => {
+    expect(formatDateTime(NaN)).toBe("—");
+    expect(formatDateTime(Infinity)).toBe("—");
+    // Far outside the range Date can represent (±8.64e15 ms).
+    expect(formatDateTime(1e15)).toBe("—");
+  });
+
+  it("still formats the epoch, which is a real timestamp and not missing", () => {
+    expect(formatDateTime(0)).toBe(new Date(0).toLocaleString());
   });
 });

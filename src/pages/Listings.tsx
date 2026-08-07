@@ -11,6 +11,8 @@ import {
   api,
   formatAgo,
   formatCents,
+  formatCount,
+  formatDateTime,
   isPreferredOem,
   prepareBrandOptions,
   prepareMakeOptions,
@@ -1900,7 +1902,7 @@ function ListingCard({
               {ended
                 ? "ended"
                 : row.end_time
-                  ? `ends ${new Date(row.end_time * 1000).toLocaleString()}`
+                  ? `ends ${formatDateTime(row.end_time)}`
                   : ""}
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
@@ -2416,7 +2418,7 @@ function AttributesSection({
             <span className="text-fg">
               {row.production_count === 0
                 ? "0 (prototype)"
-                : row.production_count.toLocaleString()}
+                : formatCount(row.production_count)}
             </span>
           </span>
         )}
@@ -5142,7 +5144,7 @@ function RegistrySearchDialog({
                     </div>
                     {r.seq_produced_total !== null && (
                       <div className="text-xs text-fg-faint mt-0.5">
-                        production qty {r.seq_produced_total.toLocaleString()}
+                        production qty {formatCount(r.seq_produced_total)}
                       </div>
                     )}
                     {r.detail_url && (

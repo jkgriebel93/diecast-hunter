@@ -4,6 +4,8 @@ import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
   api,
   formatCents,
+  formatCount,
+  formatDateTime,
   type EbaySearchFilters,
   type EbaySearchItem,
   type EbaySearchPage,
@@ -517,7 +519,7 @@ export function SellerFeed() {
         <>
           <div className="flex items-center justify-between text-xs text-fg-subtle">
             <div>
-              Showing {showingFrom}–{showingTo} of {page.total.toLocaleString()}{" "}
+              Showing {showingFrom}–{showingTo} of {formatCount(page.total)}{" "}
               results
             </div>
             <div className="flex items-center gap-2">
@@ -677,7 +679,7 @@ function ManageSellersPanel({
                       </div>
                     )}
                     <div className="text-xs text-fg-faint mt-1">
-                      Saved {new Date(s.created_at * 1000).toLocaleString()}
+                      Saved {formatDateTime(s.created_at)}
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-1 shrink-0 text-xs">
@@ -820,7 +822,7 @@ function FeedCard({
               </div>
               {item.end_time && item.listing_type === "auction" && (
                 <div className="text-xs text-fg-subtle mt-0.5">
-                  ends {new Date(item.end_time * 1000).toLocaleString()}
+                  ends {formatDateTime(item.end_time)}
                 </div>
               )}
             </>
