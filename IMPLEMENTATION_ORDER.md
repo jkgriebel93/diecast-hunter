@@ -71,6 +71,7 @@ read-only projection.
 | DCH-35 | Filter contract and one sort vocabulary across seven list screens. |
 | DCH-36 | `NoticeBanner` — a third message channel for authored prose. |
 | DCH-24 | [User guide](https://thistlegrow.atlassian.net/wiki/spaces/DCH/pages/51609624) in Confluence — five pages, written against the standardized UI. |
+| DCH-43 | Collapsible facet sections on Saved Listings' filter sidebar. Added the dev-only screenshot harness (`docs/screenshots/README.md`). |
 
 ## Things worth not rediscovering
 
@@ -102,6 +103,13 @@ reads it from there.
 synced before it closed records the bid at sync time. The archive only began recording sold
 prices on 2026-08-03, so coverage is still thin and the Listings page falls back to registry
 retail. That's the pre-DCH-10 behaviour, not a broken state.
+
+**A sticky filter panel can't have an internal scrollbar.** DCH-43's obvious fix — cap the
+Listings sidebar's height and let it scroll — is wrong: the driver picker and the exclude
+menu are absolutely-positioned popovers anchored *inside* the panel, and an `overflow` on
+their scroll parent clips them. Sticky is also what makes overflow a real bug rather than a
+cosmetic one — once the panel sticks, scrolling the page no longer reveals its tail. So the
+lever is the panel's resting height (collapse what's off by default), not its overflow.
 
 **`cargo fmt` and `pnpm format` are safe repo-wide.** DCH-29 landed one mechanical commit per
 formatter, so neither rewrites untouched files. Use `pnpm format`, not `npx prettier` — the

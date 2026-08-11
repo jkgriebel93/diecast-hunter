@@ -41,6 +41,14 @@ import { Modal } from "@/components/Modal";
 import { ClearFiltersButton, FilteredEmpty } from "@/components/FilterCard";
 import { YearRangeFilter } from "@/components/YearRangeFilter";
 import {
+  LISTING_FACETS,
+  facetBadgeCount,
+  facetDefaultSelection,
+  facetSection,
+  facetSectionKey,
+  type FacetSection,
+} from "@/lib/facetSections";
+import {
   EMPTY_YEAR_RANGE,
   inYearRange,
   isEmptyRange,
@@ -264,6 +272,10 @@ function toggled<T>(set: Set<T>, v: T): Set<T> {
   return next;
 }
 
+/** Status is the one facet that starts narrowed — see LISTING_FACETS. */
+const defaultStatusFilter = () =>
+  facetDefaultSelection<StatusOption>(LISTING_FACETS, "status");
+
 function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
   if (a.size !== b.size) return false;
   for (const v of a) if (!b.has(v)) return false;
@@ -299,9 +311,8 @@ export function Listings() {
   >(null);
 
   const [searchText, setSearchText] = useState("");
-  const [statusFilter, setStatusFilter] = useState<Set<StatusOption>>(
-    () => new Set(["active"]),
-  );
+  const [statusFilter, setStatusFilter] =
+    useState<Set<StatusOption>>(defaultStatusFilter);
   const [matchFilter, setMatchFilter] = useState<Set<MatchOption>>(
     () => new Set(),
   );
@@ -920,7 +931,7 @@ export function Listings() {
   // filters stay visible.
   const activeFilterCount =
     (searchText.trim() !== "" ? 1 : 0) +
-    (!setsEqual(statusFilter, new Set<StatusOption>(["active"])) ? 1 : 0) +
+    (!setsEqual(statusFilter, defaultStatusFilter()) ? 1 : 0) +
     (matchFilter.size > 0 ? 1 : 0) +
     (offerFilter.size > 0 ? 1 : 0) +
     (typeFilter.size > 0 ? 1 : 0) +
@@ -931,7 +942,7 @@ export function Listings() {
 
   function clearAllFilters() {
     setSearchText("");
-    setStatusFilter(new Set(["active"]));
+    setStatusFilter(defaultStatusFilter());
     setMatchFilter(new Set());
     setOfferFilter(new Set());
     setTypeFilter(new Set());
@@ -1098,7 +1109,7 @@ export function Listings() {
                   onChange={(e) => setSearchText(e.target.value)}
                 />
                 <FacetList
-                  label="Status"
+                  facet={facetSection(LISTING_FACETS, "status")}
                   selected={statusFilter}
                   options={[
                     {
@@ -1122,7 +1133,7 @@ export function Listings() {
                   }
                 />
                 <FacetList
-                  label="Match"
+                  facet={facetSection(LISTING_FACETS, "match")}
                   selected={matchFilter}
                   options={[
                     {
@@ -1146,7 +1157,7 @@ export function Listings() {
                   }
                 />
                 <FacetList
-                  label="Offer"
+                  facet={facetSection(LISTING_FACETS, "offer")}
                   selected={offerFilter}
                   options={[
                     {
@@ -1170,7 +1181,7 @@ export function Listings() {
                   }
                 />
                 <FacetList
-                  label="Type"
+                  facet={facetSection(LISTING_FACETS, "type")}
                   selected={typeFilter}
                   options={[
                     {
@@ -5447,27 +5458,53 @@ function PanelChevronIcon({ direction }: { direction: "left" | "right" }) {
   );
 }
 
-/** One sidebar facet: a vertical checkbox list. Checked options OR together;
- *  none checked = no filtering. Each option shows a live result count
- *  (computed by the caller against every other active filter — "what would
- *  I see if only this were checked?"). */
+/** One sidebar facet: a collapsible vertical checkbox list. Checked options
+ *  OR together; none checked = no filtering. Each option shows a live result
+ *  count (computed by the caller against every other active filter — "what
+ *  would I see if only this were checked?").
+ *
+ *  Collapse state persists in the shared minimized store (DCH-43), so the
+ *  panel a user shaped stays that shape. A collapsed facet with checked
+ *  options wears a count badge — the DCH-35 contract holds whether or not
+ *  the checkboxes are on screen. */
 function FacetList({
-  label,
+  facet,
   selected,
   options,
   onToggle,
 }: {
-  label: string;
+  facet: FacetSection;
   selected: Set<string>;
   options: { value: string; label: string; count: number }[];
   onToggle: (v: string) => void;
 }) {
+  const [collapsed, toggleCollapsed] = useMinimized(
+    facetSectionKey("listings", facet.key),
+    facet.defaultCollapsed,
+  );
+  const badge = facetBadgeCount(collapsed, selected);
   return (
     <div title="Check any combination — no boxes checked shows everything">
-      <div className="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
-        {label}
+      <div className="flex items-center gap-1 mb-1">
+        <MinimizeToggle
+          minimized={collapsed}
+          onToggle={toggleCollapsed}
+          label={facet.label}
+          className="!w-4 !h-4"
+        />
+        <span className="text-[10px] uppercase tracking-wide text-fg-subtle">
+          {facet.label}
+        </span>
+        {badge !== null && (
+          <span
+            className="ml-auto rounded-full bg-accent/15 text-accent text-[10px] font-medium px-1.5 tabular-nums"
+            title={`${badge} option${badge === 1 ? "" : "s"} checked`}
+          >
+            {badge}
+          </span>
+        )}
       </div>
-      <div className="space-y-0.5">
+      <div className={`space-y-0.5 ${collapsed ? "hidden" : ""}`}>
         {options.map((opt) => {
           const active = selected.has(opt.value);
           return (
