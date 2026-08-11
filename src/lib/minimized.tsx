@@ -144,18 +144,26 @@ function collapsedKeys(): ReadonlySet<string> {
 export function MinimizeToggle({
   minimized,
   onToggle,
+  label,
   className = "",
 }: {
   minimized: boolean;
   onToggle: () => void;
+  /** What this toggle opens, e.g. a facet name. On a card the neighbouring
+   *  title is the context, but a panel of sibling toggles needs each one to
+   *  name itself or they all read as the same control. */
+  label?: string;
   className?: string;
 }) {
+  const action = minimized ? "Expand" : "Minimize";
+  const name = label ? `${action} ${label}` : action;
   return (
     <button
       type="button"
       className={`shrink-0 w-6 h-6 flex items-center justify-center rounded text-xs leading-none text-fg-subtle hover:text-fg hover:bg-bg-elevated ${className}`}
       onClick={onToggle}
-      title={minimized ? "Expand" : "Minimize"}
+      title={name}
+      aria-label={name}
       aria-expanded={!minimized}
     >
       <span
