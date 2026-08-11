@@ -32,6 +32,19 @@ const DRIVERS = [
   "William Byron",
 ];
 
+/** Uneven on purpose so the seller facet's counts differ and its ordering
+ *  (most listings first) is visible rather than incidental. Index 6 is
+ *  `null` — the no-seller bucket only appears when a row actually has one. */
+const SELLERS: (string | null)[] = [
+  "diecast_depot",
+  "diecast_depot",
+  "raceday_collectibles",
+  "diecast_depot",
+  "victorylane_1_24",
+  "raceday_collectibles",
+  null,
+];
+
 const DAY = 86400;
 /** Rounded down to the day: two captures on the same day are byte-identical,
  *  while the fixture still reads as live. A fixed epoch would buy full
@@ -61,7 +74,7 @@ function listing(i: number): ListingRow {
     end_reason: null,
     archived_at: null,
     end_time: NOW + DAY * (1 + (i % 6)),
-    seller_username: "diecast_depot",
+    seller_username: SELLERS[i % SELLERS.length],
     seller_rating: 99.2,
     image_url: null,
     saved_at: NOW - DAY * i,
@@ -166,6 +179,19 @@ if (preset === "expanded" || preset === "badges") {
   setManyMinimized(ALL_FACETS, false);
 }
 
+/** Click a control by its visible text. The seller popover has no stable
+ *  hook of its own, and adding a test id to the page for a screenshot would
+ *  put the harness's needs into the app. */
+function clickByText(selector: string, text: string) {
+  for (const el of document.querySelectorAll<HTMLElement>(selector)) {
+    if (el.textContent?.trim().startsWith(text)) {
+      el.click();
+      return true;
+    }
+  }
+  return false;
+}
+
 function clickOption(label: string) {
   for (const el of document.querySelectorAll<HTMLButtonElement>(
     'button[role="checkbox"]',
@@ -179,15 +205,53 @@ function clickOption(label: string) {
 
 function Harness() {
   React.useEffect(() => {
-    if (preset !== "badges") return;
-    const t = setTimeout(() => {
-      clickOption("Ended");
-      clickOption("Unconfirmed");
-      clickOption("Unmatched");
-      clickOption("Auction");
-      setManyMinimized(ALL_FACETS, true);
-    }, 400);
-    return () => clearTimeout(t);
+    if (preset === "badges") {
+      const t = setTimeout(() => {
+        clickOption("Ended");
+        clickOption("Unconfirmed");
+        clickOption("Unmatched");
+        clickOption("Auction");
+        setManyMinimized(ALL_FACETS, true);
+      }, 400);
+      return () => clearTimeout(t);
+    }
+    // The seller presets drive the real control rather than seeding state:
+    // the filter lives in the page's own useState, and a screenshot of a
+    // state the UI can't reach isn't evidence of anything.
+    if (preset.startsWith("seller")) {
+      const t = setTimeout(() => {
+        clickByText("button", "All sellers");
+        if (preset === "seller-open") return;
+        setTimeout(() => {
+          if (preset === "seller-empty") {
+            clickByText("label", "victorylane_1_24");
+          } else {
+            clickByText("label", "diecast_depot");
+            clickByText("label", "raceday_collectibles");
+          }
+          // Dismiss through the popover's own scrim, and only then touch
+          // anything behind it — the scrim would swallow the click. The
+          // trigger is no longer labelled "All sellers" once something is
+          // checked, which is the point of the shot.
+          setTimeout(() => {
+            document
+              .querySelector<HTMLElement>("div.fixed.inset-0.z-30")
+              ?.click();
+            // Crossing a seller with a status they have none of is the
+            // DCH-35 "your filters excluded everything" state, reached
+            // through the new facet.
+            if (preset === "seller-empty") {
+              setTimeout(() => {
+                clickOption("Archived");
+                // Status ORs, so Active has to come off or its rows stay.
+                clickOption("Active");
+              }, 60);
+            }
+          }, 60);
+        }, 60);
+      }, 300);
+      return () => clearTimeout(t);
+    }
   }, []);
   return (
     <div className="h-full flex flex-col">

@@ -49,6 +49,13 @@ import {
   type FacetSection,
 } from "@/lib/facetSections";
 import {
+  passesSellerFilter,
+  sellerFilterLabel,
+  sellerOptions,
+  type SellerKey,
+  type SellerOption,
+} from "@/lib/sellerFilter";
+import {
   EMPTY_YEAR_RANGE,
   inYearRange,
   isEmptyRange,
@@ -165,6 +172,9 @@ interface ListingFilterState {
   excluded: Set<number>;
   /** "all", "none", or `d:<lowercased driver name>`. */
   driver: string;
+  /** Lower-cased seller usernames, `null` for rows with no seller. Empty =
+   *  facet off; multiple sellers OR together. */
+  seller: Set<SellerKey>;
   /** Bounds on the matched registry entry's year; unset = no year filter. */
   year: YearRange;
   offersByItemId: Map<string, ReceivedOffer>;
@@ -234,6 +244,7 @@ function listingPassesFilters(row: ListingRow, f: ListingFilterState): boolean {
       return false;
     }
   }
+  if (!passesSellerFilter(row.seller_username, f.seller)) return false;
   if (f.group !== "all") {
     if (f.group === "none") {
       if (row.group_ids.length > 0) return false;
@@ -331,6 +342,9 @@ export function Listings() {
   );
   // "all", "none", or `d:<lowercased driver name>` — see listingPassesFilters.
   const [driverFilter, setDriverFilter] = useState<string>("all");
+  const [sellerFilter, setSellerFilter] = useState<Set<SellerKey>>(
+    () => new Set(),
+  );
   const [yearFilter, setYearFilter] = useState<YearRange>(EMPTY_YEAR_RANGE);
   const [sortMode, setSortMode] = useState<SortMode>("seen-desc");
   const [bucketSort, setBucketSort] = useState<BucketSort>("name-asc");
@@ -785,6 +799,7 @@ export function Listings() {
       group: groupFilter,
       excluded: excludedGroupIds,
       driver: driverFilter,
+      seller: sellerFilter,
       year: yearFilter,
       offersByItemId,
     }),
@@ -797,6 +812,7 @@ export function Listings() {
       groupFilter,
       excludedGroupIds,
       driverFilter,
+      sellerFilter,
       yearFilter,
       offersByItemId,
     ],
@@ -915,6 +931,17 @@ export function Listings() {
     return key;
   }, [driverFilter, rows]);
 
+  // Seller options for the sidebar popover, derived from the loaded rows the
+  // same way the driver options are: every filter applies except the seller
+  // facet itself, so a count answers "how many would I see if I picked this
+  // seller?".
+  const sellerFilterOptions = useMemo(() => {
+    const f: ListingFilterState = { ...filterState, seller: new Set() };
+    return sellerOptions(
+      (rows ?? []).filter((r) => listingPassesFilters(r, f)),
+    );
+  }, [rows, filterState]);
+
   /** Years present on the loaded listings' registry matches, newest-first.
    *  Derived from the rows rather than the DCR form options so the dropdown
    *  only offers years that can actually return something. */
@@ -938,6 +965,7 @@ export function Listings() {
     (groupFilter !== "all" ? 1 : 0) +
     (excludedGroupIds.size > 0 ? 1 : 0) +
     (driverFilter !== "all" ? 1 : 0) +
+    (sellerFilter.size > 0 ? 1 : 0) +
     (isEmptyRange(yearFilter) ? 0 : 1);
 
   function clearAllFilters() {
@@ -949,6 +977,7 @@ export function Listings() {
     setGroupFilter("all");
     setExcludedGroupIds(new Set());
     setDriverFilter("all");
+    setSellerFilter(new Set());
     setYearFilter(EMPTY_YEAR_RANGE);
   }
 
@@ -1085,21 +1114,34 @@ export function Listings() {
                 )}
               </button>
             ) : (
-              <aside className="w-52 shrink-0 card !p-3 space-y-4 sticky top-4">
-                <div className="flex items-center justify-between">
+              // space-y-3, not -4: the panel is sticky, so height it can't
+              // afford is height the user can never scroll to (DCH-43). The
+              // Seller section (DCH-44) costs about what the tighter rhythm
+              // gives back across ten sections.
+              <aside className="w-52 shrink-0 card !p-3 space-y-3 sticky top-4">
+                {/* Clear filters lives in the header, not at the foot of the
+                    panel: on a short window the foot is the part that falls
+                    off, and the way out of an over-narrowed list is the last
+                    control that should be unreachable. */}
+                <div className="flex items-center justify-between gap-1">
                   <span className="text-[10px] uppercase tracking-wide text-fg-subtle">
                     Filters
                   </span>
-                  <button
-                    type="button"
-                    className="text-fg-subtle hover:text-fg"
-                    onClick={() => setFiltersCollapsed(true)}
-                    title="Hide filters"
-                    aria-label="Hide filters"
-                    aria-expanded={true}
-                  >
-                    <PanelChevronIcon direction="left" />
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    {activeFilterCount > 0 && (
+                      <ClearFiltersButton onClear={clearAllFilters} />
+                    )}
+                    <button
+                      type="button"
+                      className="text-fg-subtle hover:text-fg"
+                      onClick={() => setFiltersCollapsed(true)}
+                      title="Hide filters"
+                      aria-label="Hide filters"
+                      aria-expanded={true}
+                    >
+                      <PanelChevronIcon direction="left" />
+                    </button>
+                  </div>
                 </div>
                 <input
                   type="text"
@@ -1217,6 +1259,25 @@ export function Listings() {
                     onChange={setDriverFilter}
                   />
                 </div>
+                {/* One seller means filtering by it is a no-op. The second
+                    clause keeps the control on screen when a selection is
+                    still narrowing — a filter you can't see is the thing
+                    DCH-35 forbids. */}
+                {(sellerFilterOptions.length > 1 || sellerFilter.size > 0) && (
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
+                      Seller
+                    </div>
+                    <SellerFilterSelect
+                      options={sellerFilterOptions}
+                      selected={sellerFilter}
+                      onToggle={(key) =>
+                        setSellerFilter((prev) => toggled(prev, key))
+                      }
+                      onClear={() => setSellerFilter(new Set())}
+                    />
+                  </div>
+                )}
                 {yearFilterOptions.length > 0 && (
                   <div>
                     <div className="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
@@ -1298,9 +1359,6 @@ export function Listings() {
                     />
                   </div>
                 </div>
-                {activeFilterCount > 0 && (
-                  <ClearFiltersButton onClear={clearAllFilters} />
-                )}
               </aside>
             )}
 
@@ -5426,6 +5484,130 @@ function ExcludeGroupsMenu({
                   onClick={onClear}
                 >
                   Clear exclusions
+                </button>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Searchable multi-select of the sellers present in the loaded listings
+ *  (DCH-44). A popover rather than a checkbox facet on purpose: the seller
+ *  list is unbounded, and one row per seller in the sidebar is the shape
+ *  DCH-43 had to undo. The trigger is a fixed height whatever is picked, and
+ *  the list scrolls inside the popover. */
+function SellerFilterSelect({
+  options,
+  selected,
+  onToggle,
+  onClear,
+}: {
+  options: SellerOption[];
+  selected: Set<SellerKey>;
+  onToggle: (key: SellerKey) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  // Whether to hang the popover above the trigger. Sitting near the bottom
+  // of the filter panel, a downward menu is clipped by the pane's scrollport
+  // — and because the panel is sticky, scrolling doesn't reveal the tail.
+  // Measured at open time against the viewport, which is where the pane's
+  // scrollport ends.
+  const [flipUp, setFlipUp] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter((o) => o.label.toLowerCase().includes(q));
+  }, [options, query]);
+
+  /** Worst case: the search box plus a full-height scrolling list plus the
+   *  Clear row. Overestimating only flips the menu upward a little early. */
+  const MAX_POPOVER_PX = 330;
+
+  return (
+    <div className="relative">
+      <button
+        ref={triggerRef}
+        type="button"
+        className={`input !py-1 !text-xs flex items-center justify-between gap-2 text-left ${
+          selected.size > 0 ? "!border-accent text-accent" : ""
+        }`}
+        onClick={() => {
+          const rect = triggerRef.current?.getBoundingClientRect();
+          if (rect) {
+            const below = window.innerHeight - rect.bottom;
+            // Only flip when going up actually buys room; on a very short
+            // window neither direction fits and down is the familiar one.
+            setFlipUp(below < MAX_POPOVER_PX && rect.top > below);
+          }
+          setOpen((v) => !v);
+          setQuery("");
+        }}
+        title="Filter listings by eBay seller"
+      >
+        <span className="truncate">{sellerFilterLabel(selected, options)}</span>
+        <span className="text-fg-subtle shrink-0">▾</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div
+            className={`absolute z-40 left-0 right-0 min-w-[12rem] rounded border border-border bg-bg-elevated shadow-lg py-1 ${
+              flipUp ? "bottom-full mb-1" : "top-full mt-1"
+            }`}
+          >
+            {options.length > 6 && (
+              <div className="px-2 pb-1">
+                <input
+                  type="text"
+                  className="input !py-1 !text-xs"
+                  placeholder="Search sellers…"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  autoFocus
+                />
+              </div>
+            )}
+            <div className="max-h-64 overflow-y-auto">
+              {filtered.length === 0 ? (
+                <div className="px-2 py-1 text-xs text-fg-subtle">
+                  No sellers match “{query.trim()}”.
+                </div>
+              ) : (
+                filtered.map((o) => (
+                  <label
+                    // Keys are trimmed usernames, so a leading space can never
+                    // collide with the no-seller bucket.
+                    key={o.key ?? " no-seller"}
+                    className="flex items-center gap-2 px-2 py-1 text-xs cursor-pointer hover:bg-bg"
+                  >
+                    <input
+                      type="checkbox"
+                      className="accent-current"
+                      checked={selected.has(o.key)}
+                      onChange={() => onToggle(o.key)}
+                    />
+                    <span className="truncate">{o.label}</span>
+                    <span className="ml-auto text-fg-subtle tabular-nums">
+                      {o.count}
+                    </span>
+                  </label>
+                ))
+              )}
+            </div>
+            {selected.size > 0 && (
+              <div className="border-t border-border mt-1 pt-1 px-2">
+                <button
+                  type="button"
+                  className="text-xs text-fg-subtle hover:text-fg underline decoration-dotted underline-offset-2"
+                  onClick={onClear}
+                >
+                  Clear sellers
                 </button>
               </div>
             )}

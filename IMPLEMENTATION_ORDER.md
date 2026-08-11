@@ -72,6 +72,7 @@ read-only projection.
 | DCH-36 | `NoticeBanner` — a third message channel for authored prose. |
 | DCH-24 | [User guide](https://thistlegrow.atlassian.net/wiki/spaces/DCH/pages/51609624) in Confluence — five pages, written against the standardized UI. |
 | DCH-43 | Collapsible facet sections on Saved Listings' filter sidebar. Added the dev-only screenshot harness (`docs/screenshots/README.md`). |
+| DCH-44 | Seller facet on Saved Listings, as a popover. Moved **Clear filters** into the panel header. |
 
 ## Things worth not rediscovering
 
@@ -110,6 +111,13 @@ menu are absolutely-positioned popovers anchored *inside* the panel, and an `ove
 their scroll parent clips them. Sticky is also what makes overflow a real bug rather than a
 cosmetic one — once the panel sticks, scrolling the page no longer reveals its tail. So the
 lever is the panel's resting height (collapse what's off by default), not its overflow.
+
+**Every new filter spends that headroom, so price it before adding one.** DCH-44's Seller
+section put the panel back over the fold at a 700px window within a day of DCH-43 fixing it.
+It was paid for by tightening the panel to `space-y-3` and moving **Clear filters** into the
+panel header — where it is also unconditionally visible, which is what the DCH-35 contract
+wanted all along: the way out of an over-narrowed list should not be the control that falls
+off the bottom. Measure at 700px with the screenshot harness rather than reasoning about it.
 
 **`cargo fmt` and `pnpm format` are safe repo-wide.** DCH-29 landed one mechanical commit per
 formatter, so neither rewrites untouched files. Use `pnpm format`, not `npx prettier` — the
