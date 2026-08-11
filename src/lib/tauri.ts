@@ -390,6 +390,28 @@ export const api = {
     invoke<void>("link_listing_to_wishlist", { entryId, listingId }),
   unlinkListingFromWishlist: (entryId: number, listingId: number) =>
     invoke<void>("unlink_listing_from_wishlist", { entryId, listingId }),
+  getShareSettings: () => invoke<ShareSettings>("get_share_settings"),
+  saveShareSettings: (workerUrl: string, secret: string) =>
+    invoke<ShareSettings>("save_share_settings", { workerUrl, secret }),
+  clearShareSettings: () => invoke<ShareSettings>("clear_share_settings"),
+  wishlistShareStatus: (wishlistId: number) =>
+    invoke<ShareStatus>("wishlist_share_status", { wishlistId }),
+  shareWishlist: (
+    wishlistId: number,
+    opts: {
+      includeNotes?: boolean;
+      includeCandidates?: boolean;
+      ttlDays?: number;
+    } = {},
+  ) =>
+    invoke<ShareStatus>("share_wishlist", {
+      wishlistId,
+      includeNotes: opts.includeNotes ?? false,
+      includeCandidates: opts.includeCandidates ?? false,
+      ttlDays: opts.ttlDays ?? 30,
+    }),
+  revokeWishlistShare: (wishlistId: number) =>
+    invoke<ShareStatus>("revoke_wishlist_share", { wishlistId }),
   addListingsToWishlist: (wishlistId: number, listingIds: number[]) =>
     invoke<WishlistBulkAddResult>("add_listings_to_wishlist", {
       wishlistId,
@@ -416,6 +438,27 @@ export interface WishlistAddResult {
   registry_entry_id: number;
   /** False when the entry was already on this list. */
   created: boolean;
+}
+
+/** Sharing config, as Settings needs it. The secret is never returned. */
+export interface ShareSettings {
+  worker_url: string | null;
+  has_secret: boolean;
+}
+
+/** Share state of one wishlist (DCH-46). */
+export interface ShareStatus {
+  wishlist_id: number;
+  /** null when never shared, or after a revoke. */
+  slug: string | null;
+  url: string | null;
+  shared_at: number | null;
+  /** Unix seconds. The Worker's KV TTL is the real authority; this is what
+   *  lets the UI say "expires in 12 days" without a round trip. */
+  expires_at: number | null;
+  /** False when no Worker URL / secret is configured — the dialog explains
+   *  what's missing rather than offering a button that fails. */
+  configured: boolean;
 }
 
 /** Outcome of bulk-adding saved listings to a wishlist (DCH-45). */

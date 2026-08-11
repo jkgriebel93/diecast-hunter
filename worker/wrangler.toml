@@ -13,6 +13,15 @@ ENDPOINT_URL = "https://diecast-hunter-ebay.johnkgriebel.workers.dev/marketplace
 binding = "EBAY_KEY_CACHE"
 id = "ce3715558b634a548c7dc133a0fc149b"
 
+# Shared wishlists (DCH-46). Values are whole HTML documents keyed
+# `share:<slug>`, each written with a TTL so links expire on their own.
+# Before the first deploy run:
+#   wrangler kv namespace create SHARES
+# and replace the placeholder id below with the value wrangler prints.
+[[kv_namespaces]]
+binding = "SHARES"
+id = "REPLACE_WITH_SHARES_NAMESPACE_ID"
+
 # Native rate limiter for POST /marketplace-deletion. Checked inside the worker
 # before the KV-backed signature lookup, so throttled requests cost no KV
 # reads. 20 requests / 60s per client IP is far above legitimate eBay volume

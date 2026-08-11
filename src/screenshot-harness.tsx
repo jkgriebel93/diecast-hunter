@@ -19,13 +19,21 @@ import ReactDOM from "react-dom/client";
 import { ThemeProvider } from "./lib/theme";
 import { FontScaleProvider } from "./lib/fontScale";
 import { Listings } from "./pages/Listings";
+import { Wishlist } from "./pages/Wishlist";
+// Wishlist links to other pages through <ViewLink>, which reads the
+// workspace context. Listings doesn't, which is why this only showed up
+// once a second page was photographed.
+import { WorkspaceProvider } from "./lib/workspace";
+import { Settings } from "./pages/Settings";
 import { resetMinimized, setManyMinimized } from "./lib/minimized";
 import { facetSectionKey } from "./lib/facetSections";
 import type {
   DriverOption,
   ListingGroup,
   ListingRow,
+  ShareStatus,
   WishlistBulkAddResult,
+  WishlistEntry,
   WishlistInfo,
 } from "./lib/tauri";
 import "./index.css";
@@ -176,9 +184,70 @@ const WISHLIST_ADD: Record<string, WishlistBulkAddResult> = {
   },
 };
 
+/** A few wishes so the Share dialog has a list behind it. */
+function wish(i: number): WishlistEntry {
+  const driver = DRIVERS[i % DRIVERS.length];
+  return {
+    entry_id: i,
+    wishlist_id: 1,
+    registry_entry_id: 900 + i,
+    registry_guid: `guid-${i}`,
+    driver_name: driver,
+    year: 2020 + (i % 5),
+    oem: "Chevrolet",
+    brand: "Action",
+    scale: "1/24",
+    make: "CWC",
+    scheme_text: i % 2 === 0 ? "Valvoline" : "HendrickCars.com",
+    production_qty: 2400,
+    retail_value_cents: 9999,
+    wholesale_value_cents: null,
+    image_url: null,
+    detail_url: null,
+    notes: i === 1 ? "Only if it's under $80 delivered." : null,
+    added_at: NOW - DAY * i,
+    sort_rank: i,
+    listings: [],
+  };
+}
+
+const WISHES: WishlistEntry[] = Array.from({ length: 5 }, (_, i) =>
+  wish(i + 1),
+);
+
 // Preset state driven by the query string so each capture is deterministic.
 const params = new URLSearchParams(location.search);
 const preset = params.get("preset") ?? "default";
+
+/** DCH-46's three states: unconfigured, configured but not yet shared, and
+ *  live. `configured` is what decides whether the dialog offers a button or
+ *  explains what's missing. */
+const SHARE_STATUS: Record<string, ShareStatus> = {
+  "share-unconfigured": {
+    wishlist_id: 1,
+    slug: null,
+    url: null,
+    shared_at: null,
+    expires_at: null,
+    configured: false,
+  },
+  "share-ready": {
+    wishlist_id: 1,
+    slug: null,
+    url: null,
+    shared_at: null,
+    expires_at: null,
+    configured: true,
+  },
+  "share-live": {
+    wishlist_id: 1,
+    slug: "K7fQ2mX9pLr4vNc1sYb8Zt",
+    url: "https://diecast-hunter-ebay.example.workers.dev/w/K7fQ2mX9pLr4vNc1sYb8Zt",
+    shared_at: NOW - DAY * 2,
+    expires_at: NOW + DAY * 28,
+    configured: true,
+  },
+};
 
 const RESULTS: Record<string, unknown> = {
   list_listings: LISTINGS,
@@ -191,6 +260,35 @@ const RESULTS: Record<string, unknown> = {
   },
   add_listings_to_wishlist:
     WISHLIST_ADD[preset] ?? WISHLIST_ADD["wishlist-added"],
+  list_wishlist: WISHES,
+  // Enough of Settings to render the Accounts tab for the sharing card.
+  get_credentials: {
+    diecastregistry_username: "you@example.com",
+    diecastregistry_has_password: true,
+    ebay_connected: true,
+  },
+  get_setting: null,
+  get_auto_sync_settings: {
+    enabled: false,
+    interval_hours: 12,
+    prewarm_max_entries: 25,
+  },
+  get_ebay_credentials: {
+    has_app_id: true,
+    has_cert_id: true,
+    environment: "production",
+  },
+  get_ebay_ru_name: null,
+  get_ebay_oauth_status: {
+    connected: true,
+    expires_at: null,
+    environment: "production",
+  },
+  get_share_settings: { worker_url: null, has_secret: false },
+  wishlist_share_status:
+    SHARE_STATUS[preset] ?? SHARE_STATUS["share-unconfigured"],
+  share_wishlist: SHARE_STATUS["share-live"],
+  revoke_wishlist_share: SHARE_STATUS["share-ready"],
   list_listing_groups: GROUPS,
   list_ebay_offers: [],
   list_drivers: DRIVERS.map<DriverOption>((name, i) => ({
@@ -299,6 +397,25 @@ function Harness() {
       }, 300);
       return () => clearTimeout(t);
     }
+    if (preset === "settings-share") {
+      // The sharing card is the last one in the Accounts tab, so a
+      // viewport-sized capture at scroll 0 would miss it entirely.
+      const t = setTimeout(() => {
+        const port = document.querySelector(".absolute.inset-0.overflow-auto");
+        if (port) port.scrollTop = port.scrollHeight;
+      }, 400);
+      return () => clearTimeout(t);
+    }
+    if (preset.startsWith("share")) {
+      let cancelled = false;
+      void (async () => {
+        await new Promise((r) => setTimeout(r, 250));
+        if (!cancelled) clickByText("button", "Share…");
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
     if (preset.startsWith("wishlist")) {
       let cancelled = false;
       void (async () => {
@@ -334,12 +451,22 @@ function Harness() {
     <div className="h-full flex flex-col">
       <div className="flex items-stretch border-b border-border bg-bg-panel text-xs">
         <div className="px-4 py-2 border-r border-border text-fg">
-          Saved Listings
+          {preset === "settings-share"
+            ? "Settings"
+            : preset.startsWith("share")
+              ? "Wishlist"
+              : "Saved Listings"}
         </div>
       </div>
       <div className="relative flex-1 min-h-0">
         <div className="absolute inset-0 overflow-auto">
-          <Listings />
+          {preset === "settings-share" ? (
+            <Settings />
+          ) : preset.startsWith("share") ? (
+            <Wishlist />
+          ) : (
+            <Listings />
+          )}
         </div>
       </div>
     </div>
@@ -350,7 +477,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ThemeProvider>
       <FontScaleProvider>
-        <Harness />
+        <WorkspaceProvider>
+          <Harness />
+        </WorkspaceProvider>
       </FontScaleProvider>
     </ThemeProvider>
   </React.StrictMode>,

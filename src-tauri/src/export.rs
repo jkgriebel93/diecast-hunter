@@ -95,6 +95,33 @@ pub async fn export_registry_results(
     })
 }
 
+/// What a rendered wishlist is allowed to contain.
+///
+/// A file on the user's own disk gets everything. A share is public to
+/// anyone holding the link, so the default is the opposite: notes are
+/// free-form and can say anything, and the candidate lines carry prices and
+/// seller names — what the user is paying attention to and what they expect
+/// to pay. Neither is inferable from the wish itself, which is the test for
+/// whether omitting it actually protects something.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WishlistRenderOptions {
+    pub include_notes: bool,
+    pub include_candidates: bool,
+}
+
+impl WishlistRenderOptions {
+    /// Everything — the local file export.
+    pub const FULL: Self = Self {
+        include_notes: true,
+        include_candidates: true,
+    };
+    /// The cars and nothing else — the default for a public link.
+    pub const PUBLIC: Self = Self {
+        include_notes: false,
+        include_candidates: false,
+    };
+}
+
 /// Wishlist counterpart of [`export_registry_results`]: same document shape,
 /// plus per-entry notes and linked candidate listings.
 pub async fn export_wishlist(
@@ -103,6 +130,45 @@ pub async fn export_wishlist(
     wishes: &[WishlistEntry],
     path: &str,
 ) -> AppResult<ExportSummary> {
+    let rendered =
+        render_wishlist(progress, list_name, wishes, WishlistRenderOptions::FULL).await?;
+    progress.step(
+        "Writing file…",
+        Some(wishes.len() as u32),
+        Some(wishes.len() as u32),
+    );
+    tokio::fs::write(path, rendered.html).await?;
+    progress.done(format!(
+        "Exported {} entr{} to {path}.",
+        rendered.entries,
+        if rendered.entries == 1 { "y" } else { "ies" },
+    ));
+    Ok(ExportSummary {
+        path: path.to_string(),
+        entries: rendered.entries,
+        images_embedded: rendered.images_embedded,
+        images_failed: rendered.images_failed,
+    })
+}
+
+/// A rendered document plus what went into it. Separate from
+/// [`ExportSummary`] because a share has no path.
+pub struct RenderedWishlist {
+    pub html: String,
+    pub entries: usize,
+    pub images_embedded: usize,
+    pub images_failed: usize,
+}
+
+/// Build the wishlist document in memory. Split out of `export_wishlist` so
+/// sharing (DCH-46) uploads exactly the document the file export writes,
+/// rather than a second renderer that would drift from it.
+pub async fn render_wishlist(
+    progress: &ProgressEmitter,
+    list_name: &str,
+    wishes: &[WishlistEntry],
+    options: WishlistRenderOptions,
+) -> AppResult<RenderedWishlist> {
     let client = reqwest::Client::builder()
         .user_agent(USER_AGENT)
         .timeout(std::time::Duration::from_secs(30))
@@ -138,22 +204,17 @@ pub async fn export_wishlist(
             header: wishlist_header_line(w),
             subheader: wishlist_subheader_line(w),
             image_data_uri: image,
-            notes: w.notes.clone(),
-            candidates: w.listings.iter().map(candidate_line).collect(),
+            notes: options.include_notes.then(|| w.notes.clone()).flatten(),
+            candidates: if options.include_candidates {
+                w.listings.iter().map(candidate_line).collect()
+            } else {
+                Vec::new()
+            },
         });
     }
 
-    progress.step("Writing file…", Some(total), Some(total));
-    let doc = build_document(list_name, "entry", &entries);
-    tokio::fs::write(path, doc).await?;
-    progress.done(format!(
-        "Exported {} entr{} to {path}.",
-        entries.len(),
-        if entries.len() == 1 { "y" } else { "ies" },
-    ));
-
-    Ok(ExportSummary {
-        path: path.to_string(),
+    Ok(RenderedWishlist {
+        html: build_document(list_name, "entry", &entries),
         entries: entries.len(),
         images_embedded,
         images_failed,

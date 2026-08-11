@@ -6,12 +6,20 @@
 
 import type { Env } from "../src/index";
 
-export type FakeKv = KVNamespace & { _store: Map<string, string> };
+export type FakeKv = KVNamespace & {
+  _store: Map<string, string>;
+  /** Options each put was called with, so TTL can be asserted rather than
+   *  assumed — an expiring share that silently never expires looks
+   *  identical in every other test. */
+  _putOptions: Map<string, { expirationTtl?: number } | undefined>;
+};
 
 export function makeKv(): FakeKv {
   const store = new Map<string, string>();
+  const putOptions = new Map<string, { expirationTtl?: number } | undefined>();
   const ns = {
     _store: store,
+    _putOptions: putOptions,
     async get(key: string, opts?: unknown): Promise<unknown> {
       const raw = store.get(key);
       if (raw === undefined) return null;
@@ -20,8 +28,13 @@ export function makeKv(): FakeKv {
       if (type === "json") return JSON.parse(raw);
       return raw;
     },
-    async put(key: string, value: string): Promise<void> {
+    async put(
+      key: string,
+      value: string,
+      options?: { expirationTtl?: number },
+    ): Promise<void> {
       store.set(key, value);
+      putOptions.set(key, options);
     },
     async delete(key: string): Promise<void> {
       store.delete(key);
@@ -205,10 +218,12 @@ export function makeRateLimit(success = true): Env["POST_LIMITER"] {
 
 export function makeEnv(overrides: Partial<Env> = {}): Env & {
   EBAY_KEY_CACHE: FakeKv;
+  SHARES: FakeKv;
   DB: FakeD1;
 } {
   return {
     EBAY_KEY_CACHE: makeKv(),
+    SHARES: makeKv(),
     DB: makeD1(),
     POST_LIMITER: makeRateLimit(),
     EBAY_VERIFICATION_TOKEN: "verify-token-x".padEnd(40, "x"),
@@ -217,7 +232,7 @@ export function makeEnv(overrides: Partial<Env> = {}): Env & {
     EBAY_CLIENT_ID: "client-id",
     EBAY_CLIENT_SECRET: "client-secret",
     ...overrides,
-  } as Env & { EBAY_KEY_CACHE: FakeKv; DB: FakeD1 };
+  } as Env & { EBAY_KEY_CACHE: FakeKv; SHARES: FakeKv; DB: FakeD1 };
 }
 
 export async function generateP256Keypair(): Promise<CryptoKeyPair> {
