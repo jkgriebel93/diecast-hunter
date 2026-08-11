@@ -49,8 +49,17 @@ pub const KEY_LISTING_RECEIVER_PORT: &str = "listing_receiver.port";
 /// random in the user-port range; configurable via settings if it conflicts.
 pub const DEFAULT_LISTING_RECEIVER_PORT: u16 = 17381;
 
+/// Base URL of the user's own Cloudflare Worker, used for wishlist sharing
+/// (DCH-46) — e.g. `https://diecast-hunter-ebay.<name>.workers.dev`. Not a
+/// secret, so it lives in the settings table; unset means sharing is off and
+/// the UI says so rather than failing at click time.
+pub const KEY_SHARE_WORKER_URL: &str = "share.worker_url";
+
 pub const ENTRY_DCR_PASSWORD: &str = "diecastregistry.password";
 pub const ENTRY_LISTING_RECEIVER_SECRET: &str = "listing_receiver.shared_secret";
+/// The Worker's `APP_SHARED_SECRET`. Keyring, never SQLite — it authorizes
+/// writing to and revoking from a public endpoint.
+pub const ENTRY_SHARE_WORKER_SECRET: &str = "share.worker_secret";
 pub const ENTRY_EBAY_OAUTH: &str = "ebay.oauth_token";
 pub const ENTRY_EBAY_APP_ID: &str = "ebay.app_id";
 pub const ENTRY_EBAY_CERT_ID: &str = "ebay.cert_id";

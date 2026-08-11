@@ -47,6 +47,11 @@ export interface Env {
   // public keys. The only KV binding the worker still uses — caching with
   // TTL is what KV is good at.
   EBAY_KEY_CACHE: KVNamespace;
+  // Shared wishlists (DCH-46), keyed `share:<slug>` with a KV TTL. Separate
+  // from EBAY_KEY_CACHE on purpose: that namespace is a cache whose entries
+  // are free to evict, and these are user-visible links whose disappearance
+  // is a broken share.
+  SHARES: KVNamespace;
   // D1 deletions store. Source of truth for both writes and reads.
   DB: D1Database;
   // Native rate limiter for POST /marketplace-deletion, checked before the
@@ -63,6 +68,7 @@ export interface Env {
 
 import { parseSigHeader, verifyEbaySignature } from "./ebay-signature";
 import { reportInsertFailure } from "./sentry";
+import { handleDeleteShare, handleGetShare, handlePutShare } from "./share";
 
 /**
  * The slice of `ExecutionContext` this worker uses. Narrowed so tests can
@@ -102,6 +108,22 @@ export default {
     if (path === "/api/test-alert" && method === "POST") {
       const auth = checkAuth(req, env);
       return auth ?? handleTestAlert(env);
+    }
+    // Wishlist sharing (DCH-46). The write side is authenticated with the
+    // same Bearer secret as the deletion API; the read side is public,
+    // because the recipient is someone's friend with a phone.
+    if (path === "/api/share" && method === "PUT") {
+      const auth = checkAuth(req, env);
+      return auth ?? handlePutShare(req, env.SHARES, url, Date.now());
+    }
+    if (path.startsWith("/api/share/") && method === "DELETE") {
+      const auth = checkAuth(req, env);
+      return (
+        auth ?? handleDeleteShare(path.slice("/api/share/".length), env.SHARES)
+      );
+    }
+    if (path.startsWith("/w/") && method === "GET") {
+      return handleGetShare(path.slice("/w/".length), env.SHARES);
     }
     if (path === "/ebay-oauth-callback" && method === "GET") {
       return handleOauthCallback(url);
@@ -751,6 +773,7 @@ function privacyPage(): string {
 </ul>
 <h2>Data sharing</h2>
 <p>No data is shared with third parties. The application connects only to: eBay's APIs (with the user's own credentials), diecastregistry.com (with the user's own credentials), and a small Cloudflare Worker the user themself deploys to receive eBay's deletion notifications.</p>
+<p>That same Worker can host a wishlist the user chooses to share. Sharing is explicit and per-list: it publishes a rendered copy of that wishlist at a random, unguessable URL, readable by anyone who has the link and not indexed by search engines. Personal notes and the listings being watched are omitted unless the user opts to include them. Shared copies expire automatically, and the user can revoke one at any time.</p>
 <h2>Data deletion</h2>
 <p>The app honors eBay's account-deletion notification process. When eBay notifies of an account deletion via the configured Worker endpoint, the desktop app removes any local rows referencing that user.</p>
 <h2>Contact</h2>

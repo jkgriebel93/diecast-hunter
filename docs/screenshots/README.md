@@ -47,3 +47,4 @@ underneath it and does nothing).
 | `manual-collection-entry/` | DCH-12 | Adding a car DCR doesn't list |
 | `seller-filter/` | DCH-44 | Saved Listings' Seller facet, open / picked / empty |
 | `wishlist-bulk-add/` | DCH-45 | Select mode → Add to wishlist, and its notices |
+| `wishlist-sharing/` | DCH-46 | Share dialog (unconfigured / ready / live) and its settings |

@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { NoticeBanner } from "@/components/NoticeBanner";
 import {
   api,
   driverListingCounts,
@@ -21,6 +22,7 @@ import {
   type PrewarmedDriver,
   type PrewarmSummary,
   type RegistrySearchMode,
+  type ShareSettings,
   type SyncSummary,
   type TrainOutcome,
 } from "@/lib/tauri";
@@ -184,6 +186,66 @@ export function Settings() {
   const [awaitingPaste, setAwaitingPaste] = useState(false);
   const [oauthBusy, setOauthBusy] = useState(false);
   const [oauthMessage, setOauthMessage] = useState<string | null>(null);
+
+  // Wishlist sharing (DCH-46).
+  const [shareSettings, setShareSettings] = useState<ShareSettings | null>(
+    null,
+  );
+  const [shareUrl, setShareUrl] = useState("");
+  const [shareSecret, setShareSecret] = useState("");
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareNotice, setShareNotice] = useState<string | null>(null);
+  const [shareError, setShareError] = useState<unknown>(null);
+
+  async function loadShareSettings() {
+    try {
+      const s = await api.getShareSettings();
+      setShareSettings(s);
+      setShareUrl(s.worker_url ?? "");
+    } catch (e) {
+      setShareError(e);
+    }
+  }
+
+  async function onShareSave(e: FormEvent) {
+    e.preventDefault();
+    setShareBusy(true);
+    setShareError(null);
+    setShareNotice(null);
+    try {
+      const saved = await api.saveShareSettings(shareUrl, shareSecret);
+      setShareSettings(saved);
+      setShareSecret("");
+      setShareNotice("Sharing settings saved.");
+    } catch (err) {
+      setShareError(err);
+    } finally {
+      setShareBusy(false);
+    }
+  }
+
+  async function onShareClear() {
+    const ok = window.confirm(
+      "Remove the sharing Worker URL and secret?\n\nLinks you have already " +
+        "shared keep working until they expire — turn them off from the " +
+        "Wishlist page first if you want them gone now.",
+    );
+    if (!ok) return;
+    setShareBusy(true);
+    setShareError(null);
+    setShareNotice(null);
+    try {
+      const cleared = await api.clearShareSettings();
+      setShareSettings(cleared);
+      setShareUrl("");
+      setShareSecret("");
+      setShareNotice("Sharing settings removed.");
+    } catch (err) {
+      setShareError(err);
+    } finally {
+      setShareBusy(false);
+    }
+  }
   const [oauthError, setOauthError] = useState<string | null>(null);
   const [tab, setTab] = useState<SettingsTab>(loadTab);
 
@@ -496,6 +558,7 @@ export function Settings() {
 
   useEffect(() => {
     refresh();
+    void loadShareSettings();
   }, []);
 
   async function onSave(e: FormEvent) {
@@ -918,6 +981,83 @@ export function Settings() {
                 <ErrorBanner error={oauthError} variant="inline" />
               )}
             </div>
+          </section>
+
+          {/* Its own card, filed by what it is — a credential — rather than
+              by the feature that happens to use it (DCH-21). */}
+          <section className="card space-y-4">
+            <div>
+              <h3 className="text-base font-medium">Wishlist sharing</h3>
+              <p className="text-xs text-fg-subtle mt-1">
+                Your own Cloudflare Worker, used to publish a wishlist behind a
+                private link. Deploy <code>worker/</code> with{" "}
+                <code>wrangler deploy</code>, then paste its URL and the{" "}
+                <code>APP_SHARED_SECRET</code> you set on it. The secret is
+                stored in the Windows Credential Manager. Leave this blank and
+                the Wishlist page's <em>Copy as text</em> still works.
+              </p>
+            </div>
+
+            <form onSubmit={onShareSave} className="space-y-3">
+              <div>
+                <label className="label">Worker URL</label>
+                <input
+                  className="input"
+                  type="url"
+                  value={shareUrl}
+                  onChange={(e) => setShareUrl(e.target.value)}
+                  autoComplete="off"
+                  placeholder="https://diecast-hunter-ebay.you.workers.dev"
+                />
+              </div>
+              <div>
+                <label className="label">
+                  Shared secret{" "}
+                  {shareSettings?.has_secret && (
+                    <span className="text-fg-subtle normal-case">
+                      (saved — leave blank to keep)
+                    </span>
+                  )}
+                </label>
+                <input
+                  className="input"
+                  type="password"
+                  value={shareSecret}
+                  onChange={(e) => setShareSecret(e.target.value)}
+                  autoComplete="off"
+                  placeholder={shareSettings?.has_secret ? "••••••••" : ""}
+                />
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  className="btn-primary"
+                  type="submit"
+                  disabled={shareBusy}
+                >
+                  {shareBusy ? "Saving…" : "Save"}
+                </button>
+                {(shareSettings?.worker_url || shareSettings?.has_secret) && (
+                  <button
+                    className="btn-danger"
+                    type="button"
+                    onClick={onShareClear}
+                    disabled={shareBusy}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+              {shareNotice && (
+                <NoticeBanner
+                  variant="inline"
+                  tone="success"
+                  message={shareNotice}
+                />
+              )}
+              {shareError !== null && (
+                <ErrorBanner error={shareError} variant="inline" />
+              )}
+            </form>
           </section>
         </>
       )}

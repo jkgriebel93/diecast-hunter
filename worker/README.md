@@ -345,3 +345,42 @@ KV):
 2. **WAF custom rule** (Security → WAF → Custom rules): Block or Managed
    Challenge the same path when `ip.geoip.asnum` is not eBay's ASN, after
    confirming eBay's ASN from the `deletion_post` logs.
+
+## Wishlist sharing (DCH-46)
+
+Three routes back the desktop app's **Share…** action on a wishlist:
+
+| Route | Auth | Purpose |
+| --- | --- | --- |
+| `PUT /api/share?ttl_days=N` | `Bearer APP_SHARED_SECRET` | Store a rendered wishlist, return `{slug, url, expires_at}` |
+| `GET /w/<slug>` | none | Serve it to whoever has the link |
+| `DELETE /api/share/<slug>` | `Bearer APP_SHARED_SECRET` | Revoke |
+
+The request body is the HTML document itself, not a JSON envelope: these
+carry their images inline as data URIs and run to megabytes, and
+base64-in-JSON would inflate that by a third for nothing.
+
+**The slug is the entire security model.** There is no login on the read
+path, because the recipient is someone's friend with a phone, not a user of
+this app. So the slug is 128 bits from the CSPRNG rather than a counter, and
+the response carries `X-Robots-Tag: noindex, nofollow` — a link pasted into a
+public channel must not become a permanent search result for someone's
+personal wishlist. Anything genuinely private is stripped before upload, on
+the desktop side, where the fields are known.
+
+Shares expire via KV TTL: 30 days by default, 90 maximum. A link that
+outlives the conversation it was sent in is a liability nobody is
+maintaining. `DELETE` on an unknown slug returns 204 — revoke means "make
+this link stop working", and it already doesn't.
+
+Needs one more binding before the first deploy:
+
+```sh
+wrangler kv namespace create SHARES
+# paste the printed id over the placeholder in wrangler.toml
+wrangler deploy
+```
+
+It is a separate namespace from `EBAY_KEY_CACHE` on purpose: that one is a
+cache whose entries are free to evict, and these are user-visible links whose
+disappearance is a broken share.

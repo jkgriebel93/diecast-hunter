@@ -74,6 +74,7 @@ read-only projection.
 | DCH-43 | Collapsible facet sections on Saved Listings' filter sidebar. Added the dev-only screenshot harness (`docs/screenshots/README.md`). |
 | DCH-44 | Seller facet on Saved Listings, as a popover. Moved **Clear filters** into the panel header. |
 | DCH-45 | Bulk **Add to wishlist** from Select mode, with inline list creation. Bulk bar messages now carry a tone. |
+| DCH-46 | Share a wishlist by public link via the Worker, plus a zero-infra **Copy as text**. First app→Worker channel. |
 
 ## Things worth not rediscovering
 

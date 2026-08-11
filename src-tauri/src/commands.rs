@@ -2477,6 +2477,104 @@ pub async fn unlink_listing_from_wishlist(
     wishlist::unlink_listing(&state.db.pool, entry_id, listing_id).await
 }
 
+// ---------- wishlist sharing (DCH-46) ----------
+
+/// Sharing config as the Settings screen needs it. The secret is reported
+/// as present/absent and never returned — same shape as the DCR password.
+#[derive(Debug, Serialize)]
+pub struct ShareSettings {
+    pub worker_url: Option<String>,
+    pub has_secret: bool,
+}
+
+#[tauri::command]
+pub async fn get_share_settings(state: State<'_, AppState>) -> AppResult<ShareSettings> {
+    Ok(ShareSettings {
+        worker_url: settings::get(&state.db.pool, settings::KEY_SHARE_WORKER_URL).await?,
+        has_secret: settings::secret_get(settings::ENTRY_SHARE_WORKER_SECRET)?.is_some(),
+    })
+}
+
+/// Save the Worker URL and, when a non-empty one is supplied, the shared
+/// secret. An empty `secret` leaves the stored one alone so the user can
+/// correct the URL without re-typing the credential.
+#[tauri::command]
+pub async fn save_share_settings(
+    state: State<'_, AppState>,
+    worker_url: String,
+    secret: String,
+) -> AppResult<ShareSettings> {
+    let url = worker_url.trim().trim_end_matches('/');
+    settings::set(&state.db.pool, settings::KEY_SHARE_WORKER_URL, url).await?;
+    if !secret.trim().is_empty() {
+        settings::secret_set(settings::ENTRY_SHARE_WORKER_SECRET, secret.trim())?;
+    }
+    get_share_settings(state).await
+}
+
+#[tauri::command]
+pub async fn clear_share_settings(state: State<'_, AppState>) -> AppResult<ShareSettings> {
+    settings::set(&state.db.pool, settings::KEY_SHARE_WORKER_URL, "").await?;
+    settings::secret_delete(settings::ENTRY_SHARE_WORKER_SECRET)?;
+    get_share_settings(state).await
+}
+
+/// Current share state of one wishlist, including whether sharing is
+/// configured at all — the dialog uses that to explain what's missing
+/// instead of offering a button that fails.
+#[tauri::command]
+pub async fn wishlist_share_status(
+    state: State<'_, AppState>,
+    wishlist_id: i64,
+) -> AppResult<crate::share::ShareStatus> {
+    crate::share::status(&state.db.pool, wishlist_id).await
+}
+
+/// Render the wishlist and publish it under a fresh unguessable slug,
+/// replacing any previous share for this list. `include_notes` /
+/// `include_candidates` restore the private fields a public link omits by
+/// default; both default to off.
+#[tauri::command]
+pub async fn share_wishlist(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    wishlist_id: i64,
+    include_notes: Option<bool>,
+    include_candidates: Option<bool>,
+    ttl_days: Option<u32>,
+) -> AppResult<crate::share::ShareStatus> {
+    // Start from what a public link is allowed to carry and let the caller
+    // opt back in, so the safe shape is stated once, in export.rs, rather
+    // than re-asserted as a pair of `false`s here.
+    let default = crate::export::WishlistRenderOptions::PUBLIC;
+    let options = crate::export::WishlistRenderOptions {
+        include_notes: include_notes.unwrap_or(default.include_notes),
+        include_candidates: include_candidates.unwrap_or(default.include_candidates),
+    };
+    let progress = ProgressEmitter::new(app, "wishlist_share");
+    let result = crate::share::share(
+        &state.db.pool,
+        &progress,
+        wishlist_id,
+        options,
+        ttl_days.unwrap_or(30),
+    )
+    .await;
+    if let Err(e) = &result {
+        progress.fail(e.to_string());
+    }
+    result
+}
+
+/// Take a shared link out of circulation.
+#[tauri::command]
+pub async fn revoke_wishlist_share(
+    state: State<'_, AppState>,
+    wishlist_id: i64,
+) -> AppResult<crate::share::ShareStatus> {
+    crate::share::revoke(&state.db.pool, wishlist_id).await
+}
+
 /// Bulk-add saved listings to a wishlist as purchase candidates (DCH-45).
 /// Resolves each listing through its registry match, find-or-creates the
 /// wish, and links the listing — all in one transaction. Listings with no

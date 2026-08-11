@@ -13,6 +13,7 @@ import {
 import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { ViewLink } from "@/components/ViewLink";
+import { ShareWishlistDialog } from "@/components/ShareWishlistDialog";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { Modal } from "@/components/Modal";
@@ -147,6 +148,8 @@ export function Wishlist() {
   useEffect(() => {
     void init();
   }, []);
+
+  const [shareOpen, setShareOpen] = useState(false);
 
   async function init() {
     setError(null);
@@ -368,6 +371,19 @@ export function Wishlist() {
           <button
             className="btn-secondary"
             type="button"
+            onClick={() => setShareOpen(true)}
+            disabled={activeId === null || !entries || entries.length === 0}
+            title={
+              entries && entries.length > 0
+                ? "Share this list as a link, or copy it as text"
+                : "Nothing to share yet"
+            }
+          >
+            Share…
+          </button>
+          <button
+            className="btn-secondary"
+            type="button"
             onClick={onExport}
             disabled={exporting || !entries || entries.length === 0}
             title={
@@ -578,6 +594,15 @@ export function Wishlist() {
             setLinkTarget(null);
             await reload();
           }}
+        />
+      )}
+
+      {shareOpen && activeId !== null && (
+        <ShareWishlistDialog
+          wishlistId={activeId}
+          listName={activeList?.name ?? "Wishlist"}
+          entries={entries ?? []}
+          onClose={() => setShareOpen(false)}
         />
       )}
     </div>

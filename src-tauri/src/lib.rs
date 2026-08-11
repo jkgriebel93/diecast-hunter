@@ -15,6 +15,7 @@ mod progress;
 mod saved;
 mod scheduler;
 mod settings;
+mod share;
 mod sync;
 mod wishlist;
 
@@ -316,6 +317,12 @@ pub fn run() {
             commands::link_listing_to_wishlist,
             commands::unlink_listing_from_wishlist,
             commands::add_listings_to_wishlist,
+            commands::get_share_settings,
+            commands::save_share_settings,
+            commands::clear_share_settings,
+            commands::wishlist_share_status,
+            commands::share_wishlist,
+            commands::revoke_wishlist_share,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
