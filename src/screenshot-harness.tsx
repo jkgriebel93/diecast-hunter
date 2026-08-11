@@ -31,6 +31,7 @@ import type {
   DriverOption,
   ListingGroup,
   ListingRow,
+  ShareRecord,
   ShareStatus,
   WishlistBulkAddResult,
   WishlistEntry,
@@ -249,6 +250,46 @@ const SHARE_STATUS: Record<string, ShareStatus> = {
   },
 };
 
+/** DCH-48's public links, as the Settings list renders them: one healthy,
+ *  one on its last day, one already dead. The expired row is the point —
+ *  it stays listed so the user learns the link is gone from here rather
+ *  than from whoever they sent it to. */
+const SHARE_RECORDS: ShareRecord[] = [
+  {
+    id: 3,
+    kind: "listings",
+    label: "Daytona auctions — Aug 11, 2026",
+    slug: "K7fQ2mX9pLr4vNc1sYb8Zt",
+    url: "https://diecast-hunter-ebay.example.workers.dev/w/K7fQ2mX9pLr4vNc1sYb8Zt",
+    item_count: 5,
+    shared_at: NOW - DAY * 2,
+    expires_at: NOW + DAY * 28,
+  },
+  {
+    id: 2,
+    kind: "listings",
+    label: "For Dad",
+    slug: "b3Vt8sQ1yLm5xKc7nZd2Wp",
+    url: "https://diecast-hunter-ebay.example.workers.dev/w/b3Vt8sQ1yLm5xKc7nZd2Wp",
+    item_count: 2,
+    shared_at: NOW - DAY * 29,
+    // Off real `Date.now()`, not the day-rounded `NOW`: this row exists to
+    // show the under-a-day countdown, and midnight-plus-five-hours is in the
+    // past for most of the day, which rendered it "expired" instead.
+    expires_at: Math.floor(Date.now() / 1000) + 3600 * 5,
+  },
+  {
+    id: 1,
+    kind: "listings",
+    label: "3 listings — Jun 2, 2026",
+    slug: "Qm4pR7vT2xLb9nKc5sYd1Z",
+    url: "https://diecast-hunter-ebay.example.workers.dev/w/Qm4pR7vT2xLb9nKc5sYd1Z",
+    item_count: 3,
+    shared_at: NOW - DAY * 70,
+    expires_at: NOW - DAY * 40,
+  },
+];
+
 const RESULTS: Record<string, unknown> = {
   list_listings: LISTINGS,
   list_wishlists: WISHLISTS,
@@ -284,7 +325,19 @@ const RESULTS: Record<string, unknown> = {
     expires_at: null,
     environment: "production",
   },
-  get_share_settings: { worker_url: null, has_secret: false },
+  // `share-*` and `settings-share` are DCH-46's unconfigured states; the
+  // listing-share presets need a Worker or the dialog only ever explains
+  // what's missing.
+  get_share_settings:
+    preset.startsWith("listing-share") && preset !== "listing-share-unset"
+      ? {
+          worker_url: "https://diecast-hunter-ebay.example.workers.dev",
+          has_secret: true,
+        }
+      : { worker_url: null, has_secret: false },
+  list_shares: preset === "settings-links" ? SHARE_RECORDS : [],
+  share_listings: SHARE_RECORDS[0],
+  revoke_share: null,
   wishlist_share_status:
     SHARE_STATUS[preset] ?? SHARE_STATUS["share-unconfigured"],
   share_wishlist: SHARE_STATUS["share-live"],
@@ -476,14 +529,41 @@ function Harness() {
       }, 300);
       return () => clearTimeout(t);
     }
-    if (preset === "settings-share") {
-      // The sharing card is the last one in the Accounts tab, so a
-      // viewport-sized capture at scroll 0 would miss it entirely.
+    if (preset === "settings-share" || preset === "settings-links") {
+      // The sharing cards are last in the Accounts tab, so a viewport-sized
+      // capture at scroll 0 would miss them entirely.
       const t = setTimeout(() => {
         const port = document.querySelector(".absolute.inset-0.overflow-auto");
         if (port) port.scrollTop = port.scrollHeight;
       }, 400);
       return () => clearTimeout(t);
+    }
+    // DCH-48: select mode → pick listings → Share selection…. Driven through
+    // the real controls, so the shot is evidence the flow reaches the state.
+    if (preset.startsWith("listing-share")) {
+      let cancelled = false;
+      void (async () => {
+        const step = async (fn: () => void, ms = 150) => {
+          await new Promise((r) => setTimeout(r, ms));
+          if (!cancelled) fn();
+        };
+        await step(() => clickByText("button", "Select mode"), 300);
+        await step(() => {
+          const boxes = document.querySelectorAll<HTMLInputElement>(
+            'input[aria-label="Select listing"]',
+          );
+          for (const box of Array.from(boxes).slice(0, 5)) box.click();
+        });
+        await step(() => clickByText("button", "Share selection…"));
+        if (preset === "listing-share-created") {
+          // The stubbed command returns a live record, so this is the
+          // copy-the-link state the user actually lands on.
+          await step(() => clickByText("button", "Create link"), 200);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
     }
     if (preset.startsWith("share")) {
       let cancelled = false;
@@ -530,7 +610,7 @@ function Harness() {
     <div className="h-full flex flex-col">
       <div className="flex items-stretch border-b border-border bg-bg-panel text-xs">
         <div className="px-4 py-2 border-r border-border text-fg">
-          {preset === "settings-share"
+          {preset.startsWith("settings-")
             ? "Settings"
             : preset.startsWith("share")
               ? "Wishlist"
@@ -539,7 +619,7 @@ function Harness() {
       </div>
       <div className="relative flex-1 min-h-0">
         <div className="absolute inset-0 overflow-auto">
-          {preset === "settings-share" ? (
+          {preset.startsWith("settings-") ? (
             <Settings />
           ) : preset.startsWith("share") ? (
             <Wishlist />

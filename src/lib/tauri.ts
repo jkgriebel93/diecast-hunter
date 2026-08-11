@@ -412,6 +412,24 @@ export const api = {
     }),
   revokeWishlistShare: (wishlistId: number) =>
     invoke<ShareStatus>("revoke_wishlist_share", { wishlistId }),
+  /** Publish a selection of saved listings as a public page (DCH-48). Each
+   *  call mints a new link; nothing is replaced. */
+  shareListings: (
+    listingIds: number[],
+    opts?: {
+      label?: string;
+      includeValuations?: boolean;
+      ttlDays?: number;
+    },
+  ) =>
+    invoke<ShareRecord>("share_listings", {
+      listingIds,
+      label: opts?.label ?? null,
+      includeValuations: opts?.includeValuations ?? null,
+      ttlDays: opts?.ttlDays ?? null,
+    }),
+  listShares: () => invoke<ShareRecord[]>("list_shares"),
+  revokeShare: (shareId: number) => invoke<void>("revoke_share", { shareId }),
   addListingsToWishlist: (wishlistId: number, listingIds: number[]) =>
     invoke<WishlistBulkAddResult>("add_listings_to_wishlist", {
       wishlistId,
@@ -459,6 +477,21 @@ export interface ShareStatus {
   /** False when no Worker URL / secret is configured — the dialog explains
    *  what's missing rather than offering a button that fails. */
   configured: boolean;
+}
+
+/** One row of the `shares` table (DCH-48): a public link with no durable
+ *  entity behind it, so the row is the share. */
+export interface ShareRecord {
+  id: number;
+  /** What the slug points at. Only "listings" today. */
+  kind: string;
+  label: string;
+  slug: string;
+  url: string;
+  item_count: number;
+  shared_at: number;
+  /** Unix seconds, or null if the Worker didn't say. */
+  expires_at: number | null;
 }
 
 /** Outcome of bulk-adding saved listings to a wishlist (DCH-45). */

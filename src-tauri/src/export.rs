@@ -153,7 +153,7 @@ pub async fn export_wishlist(
 
 /// A rendered document plus what went into it. Separate from
 /// [`ExportSummary`] because a share has no path.
-pub struct RenderedWishlist {
+pub struct RenderedDocument {
     pub html: String,
     pub entries: usize,
     pub images_embedded: usize,
@@ -168,7 +168,7 @@ pub async fn render_wishlist(
     list_name: &str,
     wishes: &[WishlistEntry],
     options: WishlistRenderOptions,
-) -> AppResult<RenderedWishlist> {
+) -> AppResult<RenderedDocument> {
     let client = reqwest::Client::builder()
         .user_agent(USER_AGENT)
         .timeout(std::time::Duration::from_secs(30))
@@ -205,16 +205,111 @@ pub async fn render_wishlist(
             subheader: wishlist_subheader_line(w),
             image_data_uri: image,
             notes: options.include_notes.then(|| w.notes.clone()).flatten(),
-            candidates: if options.include_candidates {
+            bullets_label: Some("Candidate listings".into()),
+            bullets: if options.include_candidates {
                 w.listings.iter().map(candidate_line).collect()
             } else {
                 Vec::new()
             },
+            ..Default::default()
         });
     }
 
-    Ok(RenderedWishlist {
+    Ok(RenderedDocument {
         html: build_document(list_name, "entry", &entries),
+        entries: entries.len(),
+        images_embedded,
+        images_failed,
+    })
+}
+
+/// What a rendered set of saved listings is allowed to contain (DCH-48).
+///
+/// Unlike the wishlist's options, prices and sellers are *not* toggleable:
+/// they are the content. "Here are the five auctions I'm watching" with the
+/// prices removed is not a smaller share, it is a pointless one.
+///
+/// What is toggleable is the part that isn't eBay's data. Deal score and
+/// comps are our own valuation of someone else's listing, derived from the
+/// registry and from an archive of sales only this user has. Publishing them
+/// tells the recipient — and the seller, if the link travels — what we think
+/// the car is worth, which is a different disclosure from what eBay already
+/// shows on the item page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ListingRenderOptions {
+    pub include_valuations: bool,
+}
+
+impl ListingRenderOptions {
+    /// eBay's own facts and nothing we inferred — the default for a link.
+    pub const PUBLIC: Self = Self {
+        include_valuations: false,
+    };
+}
+
+/// Saved-listings counterpart of [`render_wishlist`] (DCH-48).
+///
+/// Every selected listing renders, matched or not: the selection is the
+/// user's statement of what they want to show, and silently dropping the
+/// unmatched ones is the failure mode that made routing this through
+/// wishlists the wrong answer.
+pub async fn render_listings(
+    progress: &ProgressEmitter,
+    title: &str,
+    rows: &[crate::commands::ListingRow],
+    options: ListingRenderOptions,
+) -> AppResult<RenderedDocument> {
+    let client = reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?;
+
+    let total = rows.len() as u32;
+    let mut images_embedded = 0usize;
+    let mut images_failed = 0usize;
+    let mut entries: Vec<EntryHtml> = Vec::with_capacity(rows.len());
+
+    for (i, r) in rows.iter().enumerate() {
+        progress.check_cancelled()?;
+        progress.step(
+            format!("Fetching image {} of {}…", i + 1, total),
+            Some(i as u32),
+            Some(total),
+        );
+        let image = match &r.image_url {
+            Some(u) => match fetch_image_data_uri(&client, u).await {
+                Ok(uri) => {
+                    images_embedded += 1;
+                    Some(uri)
+                }
+                Err(e) => {
+                    tracing::warn!("export: image fetch failed for {u}: {e}");
+                    images_failed += 1;
+                    None
+                }
+            },
+            None => None,
+        };
+        let mut bullets = Vec::new();
+        if let Some(line) = listing_match_line(r) {
+            bullets.push(line);
+        }
+        if options.include_valuations {
+            bullets.extend(listing_valuation_lines(r));
+        }
+        entries.push(EntryHtml {
+            header: r.title.clone(),
+            link: Some(r.url.clone()),
+            subheader: listing_subheader_line(r),
+            image_data_uri: image,
+            bullets_label: (!bullets.is_empty()).then(|| "Details".to_string()),
+            bullets,
+            ..Default::default()
+        });
+    }
+
+    Ok(RenderedDocument {
+        html: build_document(title, "listing", &entries),
         entries: entries.len(),
         images_embedded,
         images_failed,
@@ -350,13 +445,43 @@ fn csv_field(s: &str) -> String {
 #[derive(Default)]
 struct EntryHtml {
     header: String,
+    /// Absolute http(s) URL the header links to, for documents whose entries
+    /// point somewhere (a shared listing links to its eBay item). `None`
+    /// renders the header as plain text. Always run through
+    /// [`safe_http_url`] first — this string lands in an `href` on a page
+    /// served to the public.
+    link: Option<String>,
     subheader: String,
     image_data_uri: Option<String>,
     /// Free-form user notes (wishlist only), rendered italic under the
     /// subheader.
     notes: Option<String>,
-    /// Pre-formatted linked-listing lines (wishlist only), one bullet each.
-    candidates: Vec<String>,
+    /// Heading above [`EntryHtml::bullets`]. The two travel together; a
+    /// caller that sets one and not the other gets a list with no label or a
+    /// label with no list, which is why they are read as a pair below.
+    bullets_label: Option<String>,
+    /// Pre-formatted extra lines, one bullet each: candidate listings on a
+    /// wishlist entry, the registry match and opt-in valuations on a shared
+    /// listing.
+    bullets: Vec<String>,
+}
+
+/// A URL safe to put in an `href` on a public page, or `None`.
+///
+/// These documents are uploaded to a Worker and served to anyone holding the
+/// link, so a `javascript:` or `data:` URL reaching an `href` would be stored
+/// XSS. The URLs in play come from our own database and are eBay item links,
+/// so this rejects nothing in practice — which is exactly why it has to be
+/// enforced here rather than trusted at each call site, where the next kind
+/// of share will be written by someone who never read this comment.
+fn safe_http_url(url: &str) -> Option<String> {
+    let trimmed = url.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("http://") || lower.starts_with("https://") {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
 }
 
 /// DCR's diecast-type vocabulary. Search-result scheme text sometimes ends
@@ -543,6 +668,135 @@ fn candidate_line(l: &crate::wishlist::WishlistListing) -> String {
     line
 }
 
+/// The facts line under a shared listing: what it costs, what it is, where
+/// it stands, and who's selling (DCH-48).
+///
+/// Everything here is on the eBay page the header links to, which is the
+/// test for whether it belongs on a public share at all. Missing pieces are
+/// dropped rather than rendered as blanks — a listing synced before eBay
+/// returned a shipping quote should read as "no shipping quote", which is
+/// what saying nothing means, not "$0.00".
+fn listing_subheader_line(r: &crate::commands::ListingRow) -> String {
+    let mut parts: Vec<String> = Vec::new();
+
+    if let Some(price) = r.price_cents {
+        let mut money = format_dollars(price);
+        match r.shipping_cents {
+            Some(0) => money.push_str(" + free shipping"),
+            Some(s) => money.push_str(&format!(" + {} shipping", format_dollars(s))),
+            None => {}
+        }
+        parts.push(money);
+    }
+    if let Some(c) = r.condition.as_deref().filter(|c| !c.trim().is_empty()) {
+        parts.push(c.to_string());
+    }
+
+    let kind = match r.listing_type.as_deref() {
+        Some("auction") => Some("auction"),
+        Some("fixed") => Some("Buy It Now"),
+        _ => None,
+    };
+    match (kind, r.accepts_offers) {
+        (Some(k), true) => parts.push(format!("{k} + offers")),
+        (Some(k), false) => parts.push(k.to_string()),
+        (None, true) => parts.push("accepts offers".into()),
+        (None, false) => {}
+    }
+
+    parts.push(listing_state_phrase(r));
+
+    if let Some(seller) = r
+        .seller_username
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+    {
+        parts.push(format!("seller {seller}"));
+    }
+
+    parts.join(" · ")
+}
+
+/// Where a listing stands, in words a recipient can act on.
+///
+/// An end *time* is only meaningful while the listing is live; once it has
+/// ended, why it ended is the useful fact and the timestamp is history. A
+/// share is a snapshot, so this deliberately says "ends" with a date rather
+/// than a countdown — "ends in 2 days" is wrong the moment the page is
+/// opened tomorrow, and the whole point of a link is that it is read later.
+fn listing_state_phrase(r: &crate::commands::ListingRow) -> String {
+    if r.is_archived || r.status != "active" {
+        return match r.end_reason.as_deref() {
+            Some("sold") => "sold".to_string(),
+            Some("removed") => "no longer listed".to_string(),
+            _ => "ended".to_string(),
+        };
+    }
+    match r.end_time {
+        Some(t) => match chrono::DateTime::from_timestamp(t, 0) {
+            Some(dt) => format!(
+                "ends {}",
+                dt.with_timezone(&chrono::Local).format("%b %-d, %Y")
+            ),
+            None => "active".to_string(),
+        },
+        None => "active".to_string(),
+    }
+}
+
+/// The registry match as one bullet, or `None` for an unmatched listing.
+/// Unmatched is not an error state here — it just has nothing to say.
+fn listing_match_line(r: &crate::commands::ListingRow) -> Option<String> {
+    r.registry_entry_id?;
+    let mut head = match (
+        r.matched_driver_name.as_deref(),
+        r.matched_scheme_text.as_deref(),
+    ) {
+        (Some(d), Some(s)) if !s.trim().is_empty() => format!("{d} — {s}"),
+        (Some(d), _) => d.to_string(),
+        (None, Some(s)) if !s.trim().is_empty() => s.to_string(),
+        (None, _) => "registry entry".to_string(),
+    };
+    let specs: Vec<String> = [
+        r.matched_year.map(|y| y.to_string()),
+        r.matched_oem.clone(),
+        r.matched_brand.clone(),
+        r.matched_scale.clone(),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|s| !s.trim().is_empty())
+    .collect();
+    if !specs.is_empty() {
+        head.push_str(&format!(" ({})", specs.join(" · ")));
+    }
+    Some(format!("Registry match: {head}"))
+}
+
+/// Our own valuation of someone else's listing — off by default, and only
+/// ever reached through [`ListingRenderOptions::include_valuations`].
+fn listing_valuation_lines(r: &crate::commands::ListingRow) -> Vec<String> {
+    let mut out = Vec::new();
+    if let (Some(score), Some(retail)) = (r.deal_score, r.matched_retail_cents) {
+        out.push(format!(
+            "{:.0}% of registry retail ({})",
+            score,
+            format_dollars(retail)
+        ));
+    }
+    if let Some(c) = &r.comps {
+        out.push(format!(
+            "{} recent sale{}: {} – {} (median {})",
+            c.count,
+            if c.count == 1 { "" } else { "s" },
+            format_dollars(c.low_cents),
+            format_dollars(c.high_cents),
+            format_dollars(c.median_cents),
+        ));
+    }
+    out
+}
+
 /// Split "#24 DuPont Monte Carlo" into ("24", "DuPont Monte Carlo").
 /// Without a leading #number, the whole string is the scheme remainder.
 fn split_scheme(scheme: Option<&str>) -> (Option<String>, Option<String>) {
@@ -641,7 +895,16 @@ fn build_document(title: &str, noun: &str, entries: &[EntryHtml]) -> String {
     let mut body = String::new();
     for e in entries {
         body.push_str("<section class=\"entry\">\n");
-        body.push_str(&format!("<h2>{}</h2>\n", html_escape(&e.header)));
+        let header = html_escape(&e.header);
+        match e.link.as_deref().and_then(safe_http_url) {
+            // `noopener` because these open in someone else's browser, and
+            // `nofollow` to match the page's own noindex posture.
+            Some(href) => body.push_str(&format!(
+                "<h2><a href=\"{}\" rel=\"noopener nofollow\">{header}</a></h2>\n",
+                html_escape(&href)
+            )),
+            None => body.push_str(&format!("<h2>{header}</h2>\n")),
+        }
         if !e.subheader.is_empty() {
             body.push_str(&format!(
                 "<div class=\"sub\">{}</div>\n",
@@ -658,11 +921,15 @@ fn build_document(title: &str, noun: &str, entries: &[EntryHtml]) -> String {
             Some(uri) => body.push_str(&format!("<img src=\"{uri}\" alt=\"\">\n")),
             None => body.push_str("<div class=\"noimg\">image unavailable</div>\n"),
         }
-        if !e.candidates.is_empty() {
-            body.push_str(
-                "<div class=\"cands-label\">Candidate listings</div>\n<ul class=\"cands\">\n",
-            );
-            for c in &e.candidates {
+        if !e.bullets.is_empty() {
+            if let Some(label) = e.bullets_label.as_deref() {
+                body.push_str(&format!(
+                    "<div class=\"cands-label\">{}</div>\n",
+                    html_escape(label)
+                ));
+            }
+            body.push_str("<ul class=\"cands\">\n");
+            for c in &e.bullets {
                 body.push_str(&format!("<li>{}</li>\n", html_escape(c)));
             }
             body.push_str("</ul>\n");
@@ -1020,6 +1287,148 @@ mod tests {
         assert!(!csv.contains("null"));
     }
 
+    fn sample_listing() -> crate::commands::ListingRow {
+        crate::commands::ListingRow {
+            title: "1998 Action 1:24 Dale Earnhardt #3 GM Goodwrench".into(),
+            url: "https://www.ebay.com/itm/123".into(),
+            price_cents: Some(3499),
+            shipping_cents: Some(850),
+            condition: Some("Used".into()),
+            listing_type: Some("auction".into()),
+            status: "active".into(),
+            end_time: Some(1_754_000_000),
+            seller_username: Some("dixie_diecast".into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn listing_subheader_reads_as_the_ebay_page_does() {
+        let line = listing_subheader_line(&sample_listing());
+        assert!(line.starts_with("$34.99 + $8.50 shipping · Used · auction · "));
+        assert!(line.ends_with("· seller dixie_diecast"), "{line}");
+    }
+
+    #[test]
+    fn free_shipping_says_so_and_an_unknown_quote_says_nothing() {
+        // Rendering a missing quote as "$0.00" would advertise free shipping
+        // the seller never offered.
+        let mut free = sample_listing();
+        free.shipping_cents = Some(0);
+        assert!(listing_subheader_line(&free).contains("+ free shipping"));
+
+        let mut unknown = sample_listing();
+        unknown.shipping_cents = None;
+        let line = listing_subheader_line(&unknown);
+        assert!(line.contains("$34.99"), "{line}");
+        assert!(!line.contains("shipping"), "{line}");
+    }
+
+    #[test]
+    fn an_ended_listing_reports_why_rather_than_when() {
+        // A share is read later, so "ends in 2 days" would be a lie by
+        // tomorrow; once ended, the outcome is the useful fact.
+        let mut sold = sample_listing();
+        sold.status = "ended".into();
+        sold.is_archived = true;
+        sold.end_reason = Some("sold".into());
+        assert!(listing_subheader_line(&sold).contains("· sold ·"));
+
+        let mut removed = sample_listing();
+        removed.status = "ended".into();
+        removed.end_reason = Some("removed".into());
+        assert!(listing_subheader_line(&removed).contains("no longer listed"));
+
+        let mut ended = sample_listing();
+        ended.status = "ended".into();
+        assert!(listing_subheader_line(&ended).contains("· ended ·"));
+    }
+
+    #[test]
+    fn buy_it_now_and_offers_are_folded_into_one_phrase() {
+        let mut bin = sample_listing();
+        bin.listing_type = Some("fixed".into());
+        bin.accepts_offers = true;
+        assert!(listing_subheader_line(&bin).contains("Buy It Now + offers"));
+    }
+
+    #[test]
+    fn an_unmatched_listing_still_renders_and_simply_says_less() {
+        // The failure that made wishlists the wrong vehicle for this: an
+        // unmatched listing must not silently drop out of the share.
+        let row = sample_listing();
+        assert_eq!(listing_match_line(&row), None);
+        assert!(!listing_subheader_line(&row).is_empty());
+    }
+
+    #[test]
+    fn a_matched_listing_names_the_car_and_its_specs() {
+        let mut row = sample_listing();
+        row.registry_entry_id = Some(9);
+        row.matched_driver_name = Some("Dale Earnhardt".into());
+        row.matched_scheme_text = Some("GM Goodwrench Plus".into());
+        row.matched_year = Some(1998);
+        row.matched_brand = Some("Action".into());
+        row.matched_scale = Some("1/24".into());
+        assert_eq!(
+            listing_match_line(&row).unwrap(),
+            "Registry match: Dale Earnhardt — GM Goodwrench Plus (1998 · Action · 1/24)"
+        );
+    }
+
+    #[test]
+    fn valuations_are_absent_unless_asked_for() {
+        // The AC: deal score and comps are our inference about someone
+        // else's listing, not eBay's data, so a link doesn't carry them.
+        let mut row = sample_listing();
+        row.registry_entry_id = Some(9);
+        row.deal_score = Some(61.4);
+        row.matched_retail_cents = Some(9999);
+        let lines = listing_valuation_lines(&row);
+        assert_eq!(lines, vec!["61% of registry retail ($99.99)".to_string()]);
+        assert_eq!(
+            ListingRenderOptions::PUBLIC,
+            ListingRenderOptions {
+                include_valuations: false
+            }
+        );
+    }
+
+    #[test]
+    fn a_header_link_is_rendered_and_a_hostile_one_is_not() {
+        // These documents are served to the public from the user's own
+        // domain, so an href is the one place a bad URL becomes stored XSS.
+        assert_eq!(
+            safe_http_url("https://www.ebay.com/itm/1"),
+            Some("https://www.ebay.com/itm/1".to_string())
+        );
+        assert!(safe_http_url("HTTP://EBAY.COM/x").is_some());
+        assert_eq!(safe_http_url("javascript:alert(1)"), None);
+        assert_eq!(safe_http_url("data:text/html,<script>"), None);
+        assert_eq!(safe_http_url("/relative/path"), None);
+
+        let doc = build_document(
+            "Shared",
+            "listing",
+            &[
+                EntryHtml {
+                    header: "Linked".into(),
+                    link: Some("https://www.ebay.com/itm/1?a=1&b=2".into()),
+                    ..Default::default()
+                },
+                EntryHtml {
+                    header: "Hostile".into(),
+                    link: Some("javascript:alert(1)".into()),
+                    ..Default::default()
+                },
+            ],
+        );
+        assert!(doc.contains(r#"<a href="https://www.ebay.com/itm/1?a=1&amp;b=2""#));
+        assert!(!doc.contains("javascript:"));
+        assert!(doc.contains("<h2>Hostile</h2>"));
+        assert!(doc.contains("2 listings —"));
+    }
+
     #[test]
     fn wishlist_document_has_notes_and_candidates() {
         let w = sample_wish();
@@ -1035,11 +1444,14 @@ mod tests {
                 subheader: wishlist_subheader_line(&w),
                 image_data_uri: None,
                 notes: w.notes.clone(),
-                candidates: w.listings.iter().map(candidate_line).collect(),
+                bullets_label: Some("Candidate listings".into()),
+                bullets: w.listings.iter().map(candidate_line).collect(),
+                ..Default::default()
             }],
         );
         assert!(doc.contains("1 entry —"));
         assert!(doc.contains("max $60, chrome only"));
+        assert!(doc.contains("Candidate listings"));
         assert!(doc.contains("Jeff Gordon 1:24 DuPont &lt;NIB&gt; — $55.00 (ebay, active)"));
         let two = build_document(
             "Wishlist",

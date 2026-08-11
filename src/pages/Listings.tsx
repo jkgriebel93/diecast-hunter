@@ -41,6 +41,7 @@ import { ErrorBanner } from "@/components/ErrorBanner";
 import { NoticeBanner } from "@/components/NoticeBanner";
 import { Modal } from "@/components/Modal";
 import { WishlistPickerDialog } from "@/components/WishlistPickerDialog";
+import { ShareListingsDialog } from "@/components/ShareListingsDialog";
 import { describeWishlistAdd, type WishlistNotice } from "@/lib/wishlistNotice";
 import { ClearFiltersButton, FilteredEmpty } from "@/components/FilterCard";
 import { YearRangeFilter } from "@/components/YearRangeFilter";
@@ -332,6 +333,11 @@ export function Listings() {
   const [bulkNotice, setBulkNotice] = useState<WishlistNotice | null>(null);
   const [bulkCreateGroupOpen, setBulkCreateGroupOpen] = useState(false);
   const [bulkWishlistOpen, setBulkWishlistOpen] = useState(false);
+  const [bulkShareOpen, setBulkShareOpen] = useState(false);
+  // Whether a Worker is configured at all (DCH-48). Read once on mount so the
+  // dialog can explain what's missing instead of offering a button that fails
+  // only after every image has been downloaded and embedded.
+  const [shareConfigured, setShareConfigured] = useState(false);
   // When set, the per-listing "create a new group" editor is open for this
   // listing; on save the freshly created group is applied to it.
   const [createGroupForListingId, setCreateGroupForListingId] = useState<
@@ -385,6 +391,24 @@ export function Listings() {
       // ignore
     }
   }, [filtersCollapsed]);
+
+  // Sharing needs a Worker URL and secret. A failure to read them is not
+  // worth a banner on the Listings page — it just means the share dialog
+  // explains what's missing, which is what it would say anyway.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const s = await api.getShareSettings();
+        if (!cancelled) setShareConfigured(!!s.worker_url && s.has_secret);
+      } catch {
+        // leave it false
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Collapse/expand-all plumbing for the grouped views. The per-section
   // collapse state lives inside GroupedByDriver/GroupedByGroup (they own
@@ -1786,6 +1810,7 @@ export function Listings() {
           onCreateGroup={() => setBulkCreateGroupOpen(true)}
           onRemoveFromGroup={onBulkRemoveFromGroup}
           onAddToWishlist={() => setBulkWishlistOpen(true)}
+          onShareSelection={() => setBulkShareOpen(true)}
         />
       )}
 
@@ -1794,6 +1819,14 @@ export function Listings() {
           selectedCount={selectedIds.size}
           onPick={onBulkAddToWishlist}
           onClose={() => setBulkWishlistOpen(false)}
+        />
+      )}
+
+      {bulkShareOpen && (
+        <ShareListingsDialog
+          listingIds={Array.from(selectedIds)}
+          configured={shareConfigured}
+          onClose={() => setBulkShareOpen(false)}
         />
       )}
 
@@ -3565,6 +3598,7 @@ function BulkSelectionBar({
   onCreateGroup,
   onRemoveFromGroup,
   onAddToWishlist,
+  onShareSelection,
 }: {
   selectedCount: number;
   visibleCount: number;
@@ -3581,6 +3615,7 @@ function BulkSelectionBar({
   onCreateGroup: () => void;
   onRemoveFromGroup: (groupId: number) => void;
   onAddToWishlist: () => void;
+  onShareSelection: () => void;
 }) {
   const activeGroups = groups.filter((g) => !g.archived);
   return (
@@ -3633,6 +3668,15 @@ function BulkSelectionBar({
           title="Add the selection to a wishlist as purchase candidates"
         >
           Add to wishlist…
+        </button>
+        <button
+          type="button"
+          className="text-xs text-fg-muted hover:text-fg disabled:opacity-40"
+          onClick={onShareSelection}
+          disabled={busy || selectedCount === 0}
+          title="Publish the selection as a public page and copy its link"
+        >
+          Share selection…
         </button>
         <div className="h-5 w-px bg-border" />
         <button

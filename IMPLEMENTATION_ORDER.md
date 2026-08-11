@@ -76,6 +76,7 @@ read-only projection.
 | DCH-45 | Bulk **Add to wishlist** from Select mode, with inline list creation. Bulk bar messages now carry a tone. |
 | DCH-46 | Share a wishlist by public link via the Worker, plus a zero-infra **Copy as text**. First app→Worker channel. |
 | DCH-47 | Saved Listings' filter panel rebuilt as a scrolling accordion (Design A): every section collapses with a summary in its header, the middle scrolls, search and **Clear filters** are pinned. Shared `AnchoredMenu` for the three filter dropdowns. |
+| DCH-48 | **Share selection…** on Saved Listings — an ad-hoc set of listings published through the DCH-46 pipeline. New `shares` table, `render_listings`, and an Active links card in Settings. The Worker needed no changes. |
 
 ## Things worth not rediscovering
 
@@ -134,6 +135,22 @@ never moved, so the panel jumps every time a menu opens. Portal to `document.bod
 **Measure the panel at 520px, not 700px, with the screenshot harness.** 700px is where the
 old panel broke; the current one has to hold at any height, and the interesting failures
 (footer past the fold, floor on the scroll region) only appear well below that.
+
+**A share is a document, so the Worker never learns what's in it.** `/api/share`
+takes an HTML blob and a TTL, which is why DCH-48 added a second share *kind* without
+touching `worker/` at all. Anything new that wants a public link needs a renderer and a
+row — not an endpoint. The two things that are not negotiable on that page: every URL
+that reaches an `href` goes through `export::safe_http_url` (it is served from the
+user's own domain, so a bad URL there is stored XSS), and anything the app *inferred*
+rather than copied from the source — deal score, comps — is off unless the dialog
+explicitly turned it on.
+
+**A refused clipboard is not an error.** It surfaced in the headless screenshot run,
+where `navigator.clipboard` always fails: the share had been published, the link was on
+screen, and the dialog said "Something went wrong." Copy failures are partial success
+(`NoticeBanner` `tone="warning"`), and the same defect still exists in
+`ShareWishlistDialog` from DCH-46 — left alone because DCH-48's acceptance criteria said
+wishlist sharing was unchanged.
 
 **`cargo fmt` and `pnpm format` are safe repo-wide.** DCH-29 landed one mechanical commit per
 formatter, so neither rewrites untouched files. Use `pnpm format`, not `npx prettier` — the
