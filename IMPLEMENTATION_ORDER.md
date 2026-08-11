@@ -75,6 +75,7 @@ read-only projection.
 | DCH-44 | Seller facet on Saved Listings, as a popover. Moved **Clear filters** into the panel header. |
 | DCH-45 | Bulk **Add to wishlist** from Select mode, with inline list creation. Bulk bar messages now carry a tone. |
 | DCH-46 | Share a wishlist by public link via the Worker, plus a zero-infra **Copy as text**. First app→Worker channel. |
+| DCH-47 | Saved Listings' filter panel rebuilt as a scrolling accordion (Design A): every section collapses with a summary in its header, the middle scrolls, search and **Clear filters** are pinned. Shared `AnchoredMenu` for the three filter dropdowns. |
 
 ## Things worth not rediscovering
 
@@ -107,19 +108,32 @@ synced before it closed records the bid at sync time. The archive only began rec
 prices on 2026-08-03, so coverage is still thin and the Listings page falls back to registry
 retail. That's the pre-DCH-10 behaviour, not a broken state.
 
-**A sticky filter panel can't have an internal scrollbar.** DCH-43's obvious fix — cap the
-Listings sidebar's height and let it scroll — is wrong: the driver picker and the exclude
-menu are absolutely-positioned popovers anchored *inside* the panel, and an `overflow` on
-their scroll parent clips them. Sticky is also what makes overflow a real bug rather than a
-cosmetic one — once the panel sticks, scrolling the page no longer reveals its tail. So the
-lever is the panel's resting height (collapse what's off by default), not its overflow.
+**A sticky panel's height is a hard budget, and managing the budget was the wrong fix.**
+DCH-43 and DCH-44 both treated the Listings filter sidebar's resting height as the lever:
+collapse what's off by default, tighten the rhythm, move **Clear filters** somewhere safer.
+Each bought room and none bought a bound, so DCH-44's Seller section put the panel back over
+the fold within a day. The reason the obvious fix — cap it and let it scroll — was rejected
+twice is that the three filter dropdowns were `position: absolute` *inside* the panel, so an
+`overflow` on their scroll parent clipped them. DCH-47 moved them to `position: fixed` first
+(`lib/anchoredMenu.ts`), which made the scroller free, and the budget stopped existing.
+The general shape: when a layout constraint keeps costing you, check whether one dependency
+is what makes it a constraint at all.
 
-**Every new filter spends that headroom, so price it before adding one.** DCH-44's Seller
-section put the panel back over the fold at a 700px window within a day of DCH-43 fixing it.
-It was paid for by tightening the panel to `space-y-3` and moving **Clear filters** into the
-panel header — where it is also unconditionally visible, which is what the DCH-35 contract
-wanted all along: the way out of an over-narrowed list should not be the control that falls
-off the bottom. Measure at 700px with the screenshot harness rather than reasoning about it.
+**Percentage heights don't work against a flex-sized parent.** `flex-1 min-h-0` on a box and
+`h-full overflow-y-auto` on the scroller inside it looks tidier than putting both on one
+element, and silently doesn't work: the parent has no *specified* height, so the child's
+`height: 100%` is indefinite and falls back to the content's own height. The result is a
+scroller exactly as tall as its contents — no scrollbar, no overflow, and the clipping done
+by whatever ancestor has `overflow-hidden`. It looks identical to the bug you were fixing.
+
+**A `fixed` menu still lives in the DOM where you rendered it.** Fixed positioning escapes an
+ancestor's *clipping*, but not its *scrolling*: autofocusing an input inside a menu rendered
+in a scroller's subtree makes the browser scroll that ancestor to "reveal" an element that
+never moved, so the panel jumps every time a menu opens. Portal to `document.body`.
+
+**Measure the panel at 520px, not 700px, with the screenshot harness.** 700px is where the
+old panel broke; the current one has to hold at any height, and the interesting failures
+(footer past the fold, floor on the scroll region) only appear well below that.
 
 **`cargo fmt` and `pnpm format` are safe repo-wide.** DCH-29 landed one mechanical commit per
 formatter, so neither rewrites untouched files. Use `pnpm format`, not `npx prettier` — the
