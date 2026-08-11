@@ -20,7 +20,7 @@ id = "ce3715558b634a548c7dc133a0fc149b"
 # and replace the placeholder id below with the value wrangler prints.
 [[kv_namespaces]]
 binding = "SHARES"
-id = "REPLACE_WITH_SHARES_NAMESPACE_ID"
+id = "b63f99a466f140d9a23fb944254127c8"
 
 # Native rate limiter for POST /marketplace-deletion. Checked inside the worker
 # before the KV-backed signature lookup, so throttled requests cost no KV
