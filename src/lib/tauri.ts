@@ -390,6 +390,11 @@ export const api = {
     invoke<void>("link_listing_to_wishlist", { entryId, listingId }),
   unlinkListingFromWishlist: (entryId: number, listingId: number) =>
     invoke<void>("unlink_listing_from_wishlist", { entryId, listingId }),
+  addListingsToWishlist: (wishlistId: number, listingIds: number[]) =>
+    invoke<WishlistBulkAddResult>("add_listings_to_wishlist", {
+      wishlistId,
+      listingIds,
+    }),
   exportWishlistHtml: (wishlistId: number, path: string) =>
     invoke<ExportSummary>("export_wishlist_html", { wishlistId, path }),
   exportCollectionHtml: (rows: CollectionRow[], path: string) =>
@@ -411,6 +416,19 @@ export interface WishlistAddResult {
   registry_entry_id: number;
   /** False when the entry was already on this list. */
   created: boolean;
+}
+
+/** Outcome of bulk-adding saved listings to a wishlist (DCH-45). */
+export interface WishlistBulkAddResult {
+  /** Listings newly linked to an entry on this list. */
+  linked: number;
+  /** Listings that were already candidates — skipped without erroring. */
+  already_present: number;
+  /** Wishes created because the list didn't have that diecast yet. Always
+   *  ≤ `linked`; several listings can land on one new entry. */
+  entries_created: number;
+  /** Listings with no registry match, which can't be represented as a wish. */
+  skipped_no_match: number;
 }
 
 /** A saved listing linked to a wishlist entry as a purchase candidate. */

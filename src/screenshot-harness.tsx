@@ -21,7 +21,13 @@ import { FontScaleProvider } from "./lib/fontScale";
 import { Listings } from "./pages/Listings";
 import { resetMinimized, setManyMinimized } from "./lib/minimized";
 import { facetSectionKey } from "./lib/facetSections";
-import type { DriverOption, ListingGroup, ListingRow } from "./lib/tauri";
+import type {
+  DriverOption,
+  ListingGroup,
+  ListingRow,
+  WishlistBulkAddResult,
+  WishlistInfo,
+} from "./lib/tauri";
 import "./index.css";
 
 const DRIVERS = [
@@ -139,8 +145,52 @@ const GROUPS: ListingGroup[] = [
   },
 ];
 
+const WISHLISTS: WishlistInfo[] = [
+  { wishlist_id: 1, name: "Hunts", created_at: 1, entry_count: 12 },
+  { wishlist_id: 2, name: "Grail cars", created_at: 2, entry_count: 3 },
+];
+
+/** DCH-45's two reportable shapes. `wishlist-partial` is the one worth
+ *  photographing: a partial add is a warning, not an error, and the whole
+ *  point is that it doesn't look like a failure. */
+const WISHLIST_ADD: Record<string, WishlistBulkAddResult> = {
+  "wishlist-added": {
+    linked: 4,
+    already_present: 0,
+    entries_created: 3,
+    skipped_no_match: 0,
+  },
+  "wishlist-partial": {
+    linked: 4,
+    already_present: 1,
+    entries_created: 3,
+    skipped_no_match: 2,
+  },
+  // Nothing addable at all: still not an error, and the message has to say
+  // what to do rather than just reporting a zero.
+  "wishlist-none": {
+    linked: 0,
+    already_present: 0,
+    entries_created: 0,
+    skipped_no_match: 7,
+  },
+};
+
+// Preset state driven by the query string so each capture is deterministic.
+const params = new URLSearchParams(location.search);
+const preset = params.get("preset") ?? "default";
+
 const RESULTS: Record<string, unknown> = {
   list_listings: LISTINGS,
+  list_wishlists: WISHLISTS,
+  create_wishlist: {
+    wishlist_id: 3,
+    name: "New list",
+    created_at: 3,
+    entry_count: 0,
+  },
+  add_listings_to_wishlist:
+    WISHLIST_ADD[preset] ?? WISHLIST_ADD["wishlist-added"],
   list_listing_groups: GROUPS,
   list_ebay_offers: [],
   list_drivers: DRIVERS.map<DriverOption>((name, i) => ({
@@ -163,9 +213,6 @@ const RESULTS: Record<string, unknown> = {
   convertFileSrc: (p: string) => p,
 };
 
-// Preset state driven by the query string so each capture is deterministic.
-const params = new URLSearchParams(location.search);
-const preset = params.get("preset") ?? "default";
 localStorage.clear();
 // The minimized store snapshots localStorage at import time, so seed it
 // through its own API rather than writing the key underneath it.
@@ -251,6 +298,36 @@ function Harness() {
         }, 60);
       }, 300);
       return () => clearTimeout(t);
+    }
+    if (preset.startsWith("wishlist")) {
+      let cancelled = false;
+      void (async () => {
+        const step = async (fn: () => void) => {
+          await new Promise((r) => setTimeout(r, 150));
+          if (!cancelled) fn();
+        };
+        await step(() => clickByText("button", "Select mode"));
+        await step(() => {
+          // Four rows so the counts in the notice have something to be
+          // about; the fixture gives roughly two in three a registry match.
+          const boxes = document.querySelectorAll<HTMLInputElement>(
+            'input[aria-label="Select listing"]',
+          );
+          for (const box of Array.from(boxes).slice(0, 7)) box.click();
+        });
+        await step(() => clickByText("button", "Add to wishlist…"));
+        if (preset === "wishlist-picker") return;
+        if (preset === "wishlist-new") {
+          await step(() => clickByText("button", "+ New wishlist…"));
+          return;
+        }
+        // Picking a list runs the real handler; the stubbed command decides
+        // which of DCH-45's reportable shapes comes back.
+        await step(() => clickByText("button", "Hunts"));
+      })();
+      return () => {
+        cancelled = true;
+      };
     }
   }, []);
   return (

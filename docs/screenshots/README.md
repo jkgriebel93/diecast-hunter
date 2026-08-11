@@ -46,3 +46,4 @@ underneath it and does nothing).
 | `listing-panel/` | DCH-20 | Listing cards collapsed by default |
 | `manual-collection-entry/` | DCH-12 | Adding a car DCR doesn't list |
 | `seller-filter/` | DCH-44 | Saved Listings' Seller facet, open / picked / empty |
+| `wishlist-bulk-add/` | DCH-45 | Select mode → Add to wishlist, and its notices |
