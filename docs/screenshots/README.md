@@ -45,3 +45,4 @@ underneath it and does nothing).
 | `helper-adoption/` | DCH-34 | Shared formatters on the list screens |
 | `listing-panel/` | DCH-20 | Listing cards collapsed by default |
 | `manual-collection-entry/` | DCH-12 | Adding a car DCR doesn't list |
+| `seller-filter/` | DCH-44 | Saved Listings' Seller facet, open / picked / empty |
