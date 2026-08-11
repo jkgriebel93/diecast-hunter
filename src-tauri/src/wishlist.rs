@@ -436,6 +436,155 @@ pub async fn set_notes(pool: &SqlitePool, entry_id: i64, notes: Option<String>) 
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Bulk add from Saved Listings (DCH-45)
+// ---------------------------------------------------------------------------
+
+/// What happened to one selected listing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListingWishOutcome {
+    /// Newly linked as a candidate. `entry_created` separates "this list
+    /// didn't have the car yet" from "added a second candidate to a wish
+    /// that was already there" — both are success, but only the first
+    /// changes what the list contains.
+    Linked { entry_created: bool },
+    /// Already a candidate on this list. A no-op, not an error.
+    AlreadyPresent,
+    /// No confirmed or auto registry match, so there is no wish for the
+    /// listing to be a candidate *for*. Also covers a listing that has
+    /// vanished since the user selected it: the match row cascades with it,
+    /// and either way there is nothing to add.
+    NoRegistryMatch,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct WishlistBulkAddResult {
+    /// Listings newly linked to an entry on this list.
+    pub linked: i64,
+    /// Listings that were already candidates — skipped without erroring.
+    pub already_present: i64,
+    /// Wishes created because the list didn't have that diecast yet. Always
+    /// ≤ `linked`; several listings can land on one new entry.
+    pub entries_created: i64,
+    /// Listings that can't be represented as a wish.
+    pub skipped_no_match: i64,
+}
+
+/// Counting, split out from the SQL so it can be tested. The arithmetic is
+/// where this goes quietly wrong — an `already_present` derived by
+/// subtraction (the way the group bulk-add does it) would silently absorb
+/// the skipped rows and report that nothing was skipped.
+pub fn tally_wish_outcomes(outcomes: &[ListingWishOutcome]) -> WishlistBulkAddResult {
+    let mut out = WishlistBulkAddResult::default();
+    for outcome in outcomes {
+        match outcome {
+            ListingWishOutcome::Linked { entry_created } => {
+                out.linked += 1;
+                if *entry_created {
+                    out.entries_created += 1;
+                }
+            }
+            ListingWishOutcome::AlreadyPresent => out.already_present += 1,
+            ListingWishOutcome::NoRegistryMatch => out.skipped_no_match += 1,
+        }
+    }
+    out
+}
+
+/// Add saved listings to a wishlist as purchase candidates, in one
+/// transaction.
+///
+/// A wishlist entry is a *registry entry*, not a listing, so each listing
+/// has to be resolved through its registry match first: find-or-create the
+/// wish for that diecast on this list, then link the listing to it. Doing
+/// that per listing from the frontend would mean two round trips each and a
+/// half-applied list if one failed midway.
+///
+/// Listings without a registry match are skipped rather than rejected — the
+/// caller reports them, because a partial add is a notice, not a failure.
+pub async fn add_listings(
+    pool: &SqlitePool,
+    wishlist_id: i64,
+    listing_ids: &[i64],
+) -> AppResult<WishlistBulkAddResult> {
+    // Checked up front so a stale list id is an error even when the
+    // selection is empty, matching listing_groups::add_listings.
+    let (exists,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM wishlists WHERE id = ?")
+        .bind(wishlist_id)
+        .fetch_one(pool)
+        .await?;
+    if exists == 0 {
+        return Err(AppError::Config("wishlist no longer exists".into()));
+    }
+    if listing_ids.is_empty() {
+        return Ok(WishlistBulkAddResult::default());
+    }
+
+    let now = Utc::now().timestamp();
+    let mut tx = pool.begin().await?;
+    let mut outcomes = Vec::with_capacity(listing_ids.len());
+
+    for &listing_id in listing_ids {
+        let matched: Option<(i64,)> = sqlx::query_as(
+            "SELECT registry_entry_id FROM listing_matches
+             WHERE listing_id = ? AND registry_entry_id IS NOT NULL",
+        )
+        .bind(listing_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some((registry_entry_id,)) = matched else {
+            outcomes.push(ListingWishOutcome::NoRegistryMatch);
+            continue;
+        };
+
+        // Same insert as add_from_search: a new wish joins at the bottom of
+        // the stack rank rather than displacing the user's curated #1.
+        let entry_res = sqlx::query(
+            "INSERT INTO wishlist_entries (wishlist_id, registry_entry_id, added_at, sort_rank)
+             VALUES (?, ?, ?, (SELECT COALESCE(MAX(sort_rank) + 1, 0)
+                               FROM wishlist_entries WHERE wishlist_id = ?))
+             ON CONFLICT(wishlist_id, registry_entry_id) DO NOTHING",
+        )
+        .bind(wishlist_id)
+        .bind(registry_entry_id)
+        .bind(now)
+        .bind(wishlist_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_fk_violation)?;
+        let entry_created = entry_res.rows_affected() > 0;
+
+        let (entry_id,): (i64,) = sqlx::query_as(
+            "SELECT id FROM wishlist_entries WHERE wishlist_id = ? AND registry_entry_id = ?",
+        )
+        .bind(wishlist_id)
+        .bind(registry_entry_id)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        let link_res = sqlx::query(
+            "INSERT INTO wishlist_entry_listings (entry_id, listing_id, linked_at)
+             VALUES (?, ?, ?)
+             ON CONFLICT(entry_id, listing_id) DO NOTHING",
+        )
+        .bind(entry_id)
+        .bind(listing_id)
+        .bind(now)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_fk_violation)?;
+
+        outcomes.push(if link_res.rows_affected() > 0 {
+            ListingWishOutcome::Linked { entry_created }
+        } else {
+            ListingWishOutcome::AlreadyPresent
+        });
+    }
+
+    tx.commit().await?;
+    Ok(tally_wish_outcomes(&outcomes))
+}
+
 /// Link a saved listing to a wishlist entry. Re-linking is a no-op.
 pub async fn link_listing(pool: &SqlitePool, entry_id: i64, listing_id: i64) -> AppResult<()> {
     sqlx::query(
@@ -471,4 +620,64 @@ fn map_fk_violation(e: sqlx::Error) -> AppError {
         }
     }
     AppError::Db(e)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn linked(entry_created: bool) -> ListingWishOutcome {
+        ListingWishOutcome::Linked { entry_created }
+    }
+
+    #[test]
+    fn tally_counts_nothing_for_an_empty_selection() {
+        assert_eq!(tally_wish_outcomes(&[]), WishlistBulkAddResult::default());
+    }
+
+    #[test]
+    fn tally_counts_each_outcome_in_its_own_bucket() {
+        let out = tally_wish_outcomes(&[
+            linked(true),
+            linked(false),
+            ListingWishOutcome::AlreadyPresent,
+            ListingWishOutcome::NoRegistryMatch,
+            ListingWishOutcome::NoRegistryMatch,
+        ]);
+        assert_eq!(
+            out,
+            WishlistBulkAddResult {
+                linked: 2,
+                already_present: 1,
+                entries_created: 1,
+                skipped_no_match: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn skipped_listings_never_count_as_already_present() {
+        // The bug this guards: deriving already_present as
+        // `selected - linked` (the shape listing_groups uses, where every
+        // row is addable) would absorb the skips and report that nothing
+        // was skipped — the one fact the user needs from a partial add.
+        let out = tally_wish_outcomes(&[linked(true), ListingWishOutcome::NoRegistryMatch]);
+        assert_eq!(out.already_present, 0);
+        assert_eq!(out.skipped_no_match, 1);
+    }
+
+    #[test]
+    fn several_listings_can_share_one_new_wish() {
+        // Two listings for the same diecast create one entry, so
+        // entries_created trails linked rather than matching it.
+        let out = tally_wish_outcomes(&[linked(true), linked(false)]);
+        assert_eq!(out.linked, 2);
+        assert_eq!(out.entries_created, 1);
+    }
+
+    #[test]
+    fn entries_created_never_exceeds_linked() {
+        let out = tally_wish_outcomes(&[linked(true), linked(true), linked(false)]);
+        assert!(out.entries_created <= out.linked);
+    }
 }

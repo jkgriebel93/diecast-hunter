@@ -2477,6 +2477,20 @@ pub async fn unlink_listing_from_wishlist(
     wishlist::unlink_listing(&state.db.pool, entry_id, listing_id).await
 }
 
+/// Bulk-add saved listings to a wishlist as purchase candidates (DCH-45).
+/// Resolves each listing through its registry match, find-or-creates the
+/// wish, and links the listing — all in one transaction. Listings with no
+/// registry match come back in `skipped_no_match` rather than failing the
+/// call; the caller reports them as a notice.
+#[tauri::command]
+pub async fn add_listings_to_wishlist(
+    state: State<'_, AppState>,
+    wishlist_id: i64,
+    listing_ids: Vec<i64>,
+) -> AppResult<wishlist::WishlistBulkAddResult> {
+    wishlist::add_listings(&state.db.pool, wishlist_id, &listing_ids).await
+}
+
 // ---------- registry pre-searches (DCH-14) ----------
 
 #[tauri::command]

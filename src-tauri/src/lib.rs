@@ -315,6 +315,7 @@ pub fn run() {
             commands::set_wishlist_notes,
             commands::link_listing_to_wishlist,
             commands::unlink_listing_from_wishlist,
+            commands::add_listings_to_wishlist,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

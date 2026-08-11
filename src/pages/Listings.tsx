@@ -32,12 +32,16 @@ import {
   type ListingRow,
   type ProductionSearchResult,
   type ReceivedOffer,
+  type WishlistInfo,
 } from "@/lib/tauri";
 import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { NoticeBanner } from "@/components/NoticeBanner";
 import { Modal } from "@/components/Modal";
+import { WishlistPickerDialog } from "@/components/WishlistPickerDialog";
+import { describeWishlistAdd, type WishlistNotice } from "@/lib/wishlistNotice";
 import { ClearFiltersButton, FilteredEmpty } from "@/components/FilterCard";
 import { YearRangeFilter } from "@/components/YearRangeFilter";
 import {
@@ -313,8 +317,12 @@ export function Listings() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
-  const [bulkMessage, setBulkMessage] = useState<string | null>(null);
+  // Authored prose about an action that went through, so it carries its own
+  // tone rather than being an error (DCH-36). `warning` is "worked, minus
+  // these" — the wishlist add uses it for listings it had to skip.
+  const [bulkNotice, setBulkNotice] = useState<WishlistNotice | null>(null);
   const [bulkCreateGroupOpen, setBulkCreateGroupOpen] = useState(false);
+  const [bulkWishlistOpen, setBulkWishlistOpen] = useState(false);
   // When set, the per-listing "create a new group" editor is open for this
   // listing; on save the freshly created group is applied to it.
   const [createGroupForListingId, setCreateGroupForListingId] = useState<
@@ -556,25 +564,27 @@ export function Listings() {
   function exitSelectMode() {
     setSelectMode(false);
     setSelectedIds(new Set());
-    setBulkMessage(null);
+    setBulkNotice(null);
   }
 
   async function onBulkAddToGroup(groupId: number) {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return;
     setBulkBusy(true);
-    setBulkMessage(null);
+    setBulkNotice(null);
     setError(null);
     try {
       const result = await api.addListingsToGroup(groupId, ids);
       const group = groups.find((g) => g.id === groupId);
       const name = group?.name ?? "group";
-      setBulkMessage(
-        `Added ${result.added} to "${name}"` +
+      setBulkNotice({
+        tone: "success",
+        message:
+          `Added ${formatCount(result.added)} to "${name}"` +
           (result.already_present > 0
-            ? ` (${result.already_present} already there).`
+            ? ` (${formatCount(result.already_present)} already there).`
             : "."),
-      );
+      });
       await Promise.all([load(), loadGroups()]);
     } catch (e) {
       setError(String(e));
@@ -589,15 +599,21 @@ export function Listings() {
     setBulkCreateGroupOpen(false);
     const ids = Array.from(selectedIds);
     setBulkBusy(true);
-    setBulkMessage(null);
+    setBulkNotice(null);
     setError(null);
     try {
       if (ids.length === 0) {
-        setBulkMessage(`Created "${group.name}".`);
+        setBulkNotice({
+          tone: "success",
+          message: `Created "${group.name}".`,
+        });
         return;
       }
       const result = await api.addListingsToGroup(group.id, ids);
-      setBulkMessage(`Created "${group.name}" and added ${result.added}.`);
+      setBulkNotice({
+        tone: "success",
+        message: `Created "${group.name}" and added ${formatCount(result.added)}.`,
+      });
     } catch (e) {
       setError(String(e));
     } finally {
@@ -606,17 +622,41 @@ export function Listings() {
     }
   }
 
+  // Add the selection to a wishlist as purchase candidates (DCH-45). The
+  // backend resolves each listing through its registry match and does the
+  // find-or-create + link in one transaction, so all this has to decide is
+  // what to say about what came back.
+  async function onBulkAddToWishlist(wishlist: WishlistInfo) {
+    const ids = Array.from(selectedIds);
+    setBulkWishlistOpen(false);
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    setBulkNotice(null);
+    setError(null);
+    try {
+      const result = await api.addListingsToWishlist(wishlist.wishlist_id, ids);
+      setBulkNotice(describeWishlistAdd(result, wishlist.name));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   async function onBulkRemoveFromGroup(groupId: number) {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return;
     setBulkBusy(true);
-    setBulkMessage(null);
+    setBulkNotice(null);
     setError(null);
     try {
       const removed = await api.removeListingsFromGroup(groupId, ids);
       const group = groups.find((g) => g.id === groupId);
       const name = group?.name ?? "group";
-      setBulkMessage(`Removed ${removed} from "${name}".`);
+      setBulkNotice({
+        tone: "success",
+        message: `Removed ${formatCount(removed)} from "${name}".`,
+      });
       await Promise.all([load(), loadGroups()]);
     } catch (e) {
       setError(String(e));
@@ -1656,7 +1696,7 @@ export function Listings() {
           groups={groups}
           selectedDriverKeys={selectedDriverKeys}
           busy={bulkBusy}
-          message={bulkMessage}
+          notice={bulkNotice}
           onSelectAllVisible={() => {
             setSelectedIds(
               new Set((filteredRows ?? []).map((r) => r.listing_id)),
@@ -1667,6 +1707,15 @@ export function Listings() {
           onAddToGroup={onBulkAddToGroup}
           onCreateGroup={() => setBulkCreateGroupOpen(true)}
           onRemoveFromGroup={onBulkRemoveFromGroup}
+          onAddToWishlist={() => setBulkWishlistOpen(true)}
+        />
+      )}
+
+      {bulkWishlistOpen && (
+        <WishlistPickerDialog
+          selectedCount={selectedIds.size}
+          onPick={onBulkAddToWishlist}
+          onClose={() => setBulkWishlistOpen(false)}
         />
       )}
 
@@ -3430,26 +3479,30 @@ function BulkSelectionBar({
   groups,
   selectedDriverKeys,
   busy,
-  message,
+  notice,
   onSelectAllVisible,
   onClear,
   onDone,
   onAddToGroup,
   onCreateGroup,
   onRemoveFromGroup,
+  onAddToWishlist,
 }: {
   selectedCount: number;
   visibleCount: number;
   groups: ListingGroup[];
   selectedDriverKeys: { ids: Set<number>; names: Set<string> };
   busy: boolean;
-  message: string | null;
+  /** Authored prose carrying its own tone (DCH-36) — a partial add is a
+   *  warning, not an error, because the rest of it went through. */
+  notice: WishlistNotice | null;
   onSelectAllVisible: () => void;
   onClear: () => void;
   onDone: () => void;
   onAddToGroup: (groupId: number) => void;
   onCreateGroup: () => void;
   onRemoveFromGroup: (groupId: number) => void;
+  onAddToWishlist: () => void;
 }) {
   const activeGroups = groups.filter((g) => !g.archived);
   return (
@@ -3494,6 +3547,15 @@ function BulkSelectionBar({
           onPick={onRemoveFromGroup}
           emptyHint="No groups exist."
         />
+        <button
+          type="button"
+          className="text-xs text-fg-muted hover:text-fg disabled:opacity-40"
+          onClick={onAddToWishlist}
+          disabled={busy || selectedCount === 0}
+          title="Add the selection to a wishlist as purchase candidates"
+        >
+          Add to wishlist…
+        </button>
         <div className="h-5 w-px bg-border" />
         <button
           type="button"
@@ -3503,10 +3565,13 @@ function BulkSelectionBar({
         >
           Done
         </button>
-        {message && (
-          <span className="text-xs text-emerald-400 ml-2 whitespace-nowrap">
-            {message}
-          </span>
+        {notice && (
+          <NoticeBanner
+            variant="inline"
+            tone={notice.tone}
+            message={notice.message}
+            className="ml-2 max-w-md"
+          />
         )}
       </div>
     </div>
