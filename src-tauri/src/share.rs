@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 use crate::error::{AppError, AppResult};
-use crate::export::{self, WishlistRenderOptions};
+use crate::export::{self, ListingRenderOptions, WishlistRenderOptions};
 use crate::progress::ProgressEmitter;
 use crate::settings;
 
@@ -130,29 +130,8 @@ pub async fn share(
     let rendered = export::render_wishlist(progress, &name, &entries, options).await?;
 
     progress.step("Uploading…", None, None);
-    let client = reqwest::Client::builder()
-        .user_agent(USER_AGENT)
-        .timeout(std::time::Duration::from_secs(UPLOAD_TIMEOUT_SECS))
-        .build()?;
-    let res = client
-        .put(format!("{base}/api/share?ttl_days={ttl_days}"))
-        .bearer_auth(&secret)
-        .header("content-type", "text/html; charset=utf-8")
-        .body(rendered.html)
-        .send()
-        .await?;
-
-    let status_code = res.status();
-    if !status_code.is_success() {
-        let body = res.text().await.unwrap_or_default();
-        return Err(map_upload_failure(status_code.as_u16(), &body));
-    }
-    // Parsed from text rather than `res.json()`: reqwest's json feature
-    // isn't enabled in this crate and one response body doesn't justify it.
-    let raw = res.text().await?;
-    let body: ShareResponse = serde_json::from_str(&raw).map_err(|e| {
-        AppError::Parse(format!("worker returned an unreadable share response: {e}"))
-    })?;
+    let client = share_client()?;
+    let body = upload_html(&client, &base, &secret, rendered.html, ttl_days).await?;
 
     let previous: Option<(Option<String>,)> =
         sqlx::query_as("SELECT share_slug FROM wishlists WHERE id = ?")
@@ -203,10 +182,7 @@ pub async fn revoke(pool: &SqlitePool, wishlist_id: i64) -> AppResult<ShareStatu
 
     let mut remote_error: Option<String> = None;
     if let (Some(slug), Some((base, secret))) = (slug.as_deref(), share_config(pool).await?) {
-        let client = reqwest::Client::builder()
-            .user_agent(USER_AGENT)
-            .timeout(std::time::Duration::from_secs(30))
-            .build()?;
+        let client = share_client()?;
         if let Err(e) = delete_remote(&client, &base, &secret, slug).await {
             remote_error = Some(e.to_string());
         }
@@ -228,6 +204,47 @@ pub async fn revoke(pool: &SqlitePool, wishlist_id: i64) -> AppResult<ShareStatu
     status(pool, wishlist_id).await
 }
 
+/// The HTTP client every share operation uses. One builder rather than three
+/// so a timeout change can't apply to two of them.
+fn share_client() -> AppResult<reqwest::Client> {
+    Ok(reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .timeout(std::time::Duration::from_secs(UPLOAD_TIMEOUT_SECS))
+        .build()?)
+}
+
+/// PUT a rendered document and return what the Worker recorded.
+///
+/// Content-agnostic on purpose — the Worker stores any HTML blob, so a
+/// wishlist and a set of listings differ only in what was rendered upstream
+/// of here. That is the whole reason DCH-48 needed no Worker changes.
+async fn upload_html(
+    client: &reqwest::Client,
+    base: &str,
+    secret: &str,
+    html: String,
+    ttl_days: u32,
+) -> AppResult<ShareResponse> {
+    let res = client
+        .put(format!("{base}/api/share?ttl_days={ttl_days}"))
+        .bearer_auth(secret)
+        .header("content-type", "text/html; charset=utf-8")
+        .body(html)
+        .send()
+        .await?;
+
+    let status_code = res.status();
+    if !status_code.is_success() {
+        let body = res.text().await.unwrap_or_default();
+        return Err(map_upload_failure(status_code.as_u16(), &body));
+    }
+    // Parsed from text rather than `res.json()`: reqwest's json feature
+    // isn't enabled in this crate and one response body doesn't justify it.
+    let raw = res.text().await?;
+    serde_json::from_str(&raw)
+        .map_err(|e| AppError::Parse(format!("worker returned an unreadable share response: {e}")))
+}
+
 async fn delete_remote(
     client: &reqwest::Client,
     base: &str,
@@ -244,6 +261,143 @@ async fn delete_remote(
             "worker returned {} revoking the share",
             res.status().as_u16()
         )));
+    }
+    Ok(())
+}
+
+/// One row of the `shares` table (DCH-48) — a link with no durable entity
+/// behind it, so the row *is* the share.
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct ShareRecord {
+    pub id: i64,
+    /// What the slug points at. Only `"listings"` today; the column exists
+    /// so the next share type doesn't need another table.
+    pub kind: String,
+    pub label: String,
+    pub slug: String,
+    pub url: String,
+    pub item_count: i64,
+    pub shared_at: i64,
+    pub expires_at: Option<i64>,
+}
+
+/// What to call a share when the user didn't say.
+///
+/// The dialog prefills a dated label, but a user can clear the field, and an
+/// empty name in the Settings list is a row nobody can identify well enough
+/// to revoke. Kept pure and free of the date so it can't disagree with the
+/// row's own `shared_at`, which is what the UI actually formats.
+pub fn share_label(label: &str, count: usize) -> String {
+    let trimmed = label.trim();
+    if !trimmed.is_empty() {
+        // Bounded because it is a display string in a fixed-width list, and
+        // nothing stops a paste. Truncating on a char boundary, not a byte.
+        return trimmed.chars().take(120).collect();
+    }
+    format!("{count} listing{}", if count == 1 { "" } else { "s" })
+}
+
+/// Render the selected listings and publish them under a fresh slug.
+///
+/// Unlike the wishlist share there is nothing to replace: each call mints a
+/// new link and a new row. Two shares of the same listings are two different
+/// conversations with two different people, and revoking one shouldn't
+/// silently kill the other.
+pub async fn share_listings(
+    pool: &SqlitePool,
+    progress: &ProgressEmitter,
+    rows: &[crate::commands::ListingRow],
+    label: &str,
+    options: ListingRenderOptions,
+    ttl_days: u32,
+) -> AppResult<ShareRecord> {
+    // Before any rendering: embedding images for a dozen listings takes real
+    // time, and discovering afterwards that no Worker is configured would
+    // waste it and teach the user nothing.
+    let Some((base, secret)) = share_config(pool).await? else {
+        return Err(AppError::Config(
+            "sharing isn't set up — add your Worker URL and shared secret in \
+             Settings → Accounts before sharing listings"
+                .into(),
+        ));
+    };
+    if rows.is_empty() {
+        return Err(AppError::Config("nothing selected to share".into()));
+    }
+
+    let title = share_label(label, rows.len());
+    let rendered = export::render_listings(progress, &title, rows, options).await?;
+
+    progress.step("Uploading…", None, None);
+    let client = share_client()?;
+    let body = upload_html(&client, &base, &secret, rendered.html, ttl_days).await?;
+
+    let id: i64 = sqlx::query_scalar(
+        "INSERT INTO shares (kind, label, slug, url, item_count, shared_at, expires_at)
+         VALUES ('listings', ?, ?, ?, ?, ?, ?)
+         RETURNING id",
+    )
+    .bind(&title)
+    .bind(&body.slug)
+    .bind(&body.url)
+    .bind(rows.len() as i64)
+    .bind(chrono::Utc::now().timestamp())
+    .bind(body.expires_at)
+    .fetch_one(pool)
+    .await?;
+
+    progress.done(format!("Shared {}.", title));
+    sqlx::query_as("SELECT * FROM shares WHERE id = ?")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .map_err(Into::into)
+}
+
+/// Every live share, newest first. Expired rows are still returned — the
+/// Worker's TTL has already made the link dead, and showing the row is how
+/// the user finds out rather than discovering it from whoever they sent it
+/// to. The UI marks them expired and offers the same Remove.
+pub async fn list_shares(pool: &SqlitePool) -> AppResult<Vec<ShareRecord>> {
+    sqlx::query_as("SELECT * FROM shares ORDER BY shared_at DESC")
+        .fetch_all(pool)
+        .await
+        .map_err(Into::into)
+}
+
+/// Take one share out of circulation.
+///
+/// Same semantics as the wishlist revoke: the local row goes even when the
+/// remote delete fails, so the list can't get stuck showing a link the user
+/// has already asked to retire. The Worker treats an unknown slug as gone,
+/// and the KV TTL is the backstop.
+pub async fn revoke_share(pool: &SqlitePool, share_id: i64) -> AppResult<()> {
+    let row: Option<(String,)> = sqlx::query_as("SELECT slug FROM shares WHERE id = ?")
+        .bind(share_id)
+        .fetch_optional(pool)
+        .await?;
+    let Some((slug,)) = row else {
+        // Already gone. Revoke is the user asking for the link to stop
+        // working, and it already has — erroring would make a double-click
+        // look like a failure.
+        return Ok(());
+    };
+
+    let mut remote_error: Option<String> = None;
+    if let Some((base, secret)) = share_config(pool).await? {
+        let client = share_client()?;
+        if let Err(e) = delete_remote(&client, &base, &secret, &slug).await {
+            remote_error = Some(e.to_string());
+        }
+    }
+
+    sqlx::query("DELETE FROM shares WHERE id = ?")
+        .bind(share_id)
+        .execute(pool)
+        .await?;
+
+    if let Some(e) = remote_error {
+        tracing::warn!("share: remote revoke failed, local row removed: {e}");
     }
     Ok(())
 }
@@ -331,6 +485,27 @@ mod tests {
     fn an_unknown_status_without_a_body_doesnt_dangle_a_colon() {
         let m = message(map_upload_failure(502, "   "));
         assert!(!m.trim_end().ends_with(':'), "{m}");
+    }
+
+    #[test]
+    fn a_blank_label_falls_back_to_the_item_count() {
+        // An unnamed row in the Settings list is a link nobody can identify
+        // well enough to revoke, which is where revoking happens.
+        assert_eq!(share_label("", 5), "5 listings");
+        assert_eq!(share_label("   ", 1), "1 listing");
+    }
+
+    #[test]
+    fn a_supplied_label_wins_and_is_trimmed() {
+        assert_eq!(share_label("  Auctions for Dad  ", 3), "Auctions for Dad");
+    }
+
+    #[test]
+    fn a_pasted_label_is_bounded_on_a_char_boundary() {
+        // Multi-byte on purpose: a byte-wise truncate would panic here.
+        let long = "é".repeat(500);
+        let out = share_label(&long, 2);
+        assert_eq!(out.chars().count(), 120);
     }
 
     #[test]

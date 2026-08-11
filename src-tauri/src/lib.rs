@@ -323,6 +323,9 @@ pub fn run() {
             commands::wishlist_share_status,
             commands::share_wishlist,
             commands::revoke_wishlist_share,
+            commands::share_listings,
+            commands::list_shares,
+            commands::revoke_share,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -45,6 +45,7 @@ underneath it and does nothing).
 | `facet-collapse/` | DCH-43 | Saved Listings' collapsible filter facets — **superseded by `filter-pane/`**; kept as the record of that PR, and its `expanded` / `badges` presets are gone |
 | `filter-pane/` | DCH-47 | The filter sidebar as a scrolling accordion: at rest, collapsed summaries, mid-scroll, a menu escaping the scroll region, and (at 520px) the pinned footer |
 | `filter-parity/` | DCH-35 | Clear filters, filtered-empty, result counts |
+| `listing-sharing/` | DCH-48 | Share selection dialog, the created link, the unconfigured state, and Settings' Active links |
 | `helper-adoption/` | DCH-34 | Shared formatters on the list screens |
 | `listing-panel/` | DCH-20 | Listing cards collapsed by default |
 | `manual-collection-entry/` | DCH-12 | Adding a car DCR doesn't list |

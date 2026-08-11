@@ -533,7 +533,11 @@ pub async fn sync_ebay_all(
     result
 }
 
-#[derive(Serialize)]
+// `Default` is for tests only — `export.rs`'s line builders take a whole
+// `ListingRow`, and spelling out fifty-odd fields per case would bury the
+// one field each test is about. Nothing in the app constructs a default row:
+// every real one comes from `load_listing_rows`.
+#[derive(Serialize, Default)]
 pub struct ListingRow {
     pub listing_id: i64,
     pub seller_code: String,
@@ -687,6 +691,22 @@ struct ListingRowRaw {
 
 #[tauri::command]
 pub async fn list_listings(state: State<'_, AppState>) -> AppResult<Vec<ListingRow>> {
+    load_listing_rows(&state.db.pool).await
+}
+
+/// Every saved listing with its match, comps and derived scores.
+///
+/// Split out of the command (DCH-48) so sharing publishes exactly the rows
+/// the page shows, rather than a second query that would have to re-derive
+/// the deal score and re-wire the comp index — the two places would then
+/// disagree the first time either changed.
+///
+/// Deliberately unfiltered: callers that want a subset take the ids they
+/// need from the result. This is a personal watchlist, so the whole table is
+/// hundreds of rows and is already loaded on every visit to the page; a
+/// dynamic `IN (?, ?, …)` would buy nothing and cost the only place in this
+/// file that builds SQL by string concatenation.
+pub async fn load_listing_rows(pool: &sqlx::SqlitePool) -> AppResult<Vec<ListingRow>> {
     let rows: Vec<ListingRowRaw> = sqlx::query_as(
         "SELECT l.id, s.code AS seller_code, l.external_id, l.url, l.title,
                 l.price_cents, l.shipping_cents, l.currency,
@@ -725,12 +745,12 @@ pub async fn list_listings(state: State<'_, AppState>) -> AppResult<Vec<ListingR
          LEFT JOIN drivers ad ON ad.id = l.driver_id
          ORDER BY l.status = 'active' DESC, l.last_seen_at DESC",
     )
-    .fetch_all(&state.db.pool)
+    .fetch_all(pool)
     .await?;
 
     // Loaded once for the whole page rather than per row — see `comps` for
     // why the archive is small enough to hold in memory.
-    let comp_index = crate::comps::CompIndex::load(&state.db.pool, Utc::now().timestamp()).await?;
+    let comp_index = crate::comps::CompIndex::load(pool, Utc::now().timestamp()).await?;
 
     Ok(rows
         .into_iter()
@@ -2573,6 +2593,65 @@ pub async fn revoke_wishlist_share(
     wishlist_id: i64,
 ) -> AppResult<crate::share::ShareStatus> {
     crate::share::revoke(&state.db.pool, wishlist_id).await
+}
+
+/// Publish a selection of saved listings as a public page (DCH-48).
+///
+/// The ids are resolved against the same rows the Listings page renders and
+/// re-ordered to match it, so the page reads the way the user's screen did
+/// rather than in the order they happened to tick the boxes. Ids that no
+/// longer exist are dropped silently — a listing deleted between selecting
+/// and sharing is not an error worth blocking the share for.
+#[tauri::command]
+pub async fn share_listings(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    listing_ids: Vec<i64>,
+    label: Option<String>,
+    include_valuations: Option<bool>,
+    ttl_days: Option<u32>,
+) -> AppResult<crate::share::ShareRecord> {
+    let wanted: std::collections::HashSet<i64> = listing_ids.iter().copied().collect();
+    let rows: Vec<ListingRow> = load_listing_rows(&state.db.pool)
+        .await?
+        .into_iter()
+        .filter(|r| wanted.contains(&r.listing_id))
+        .collect();
+
+    // Start from what a public link is allowed to carry and let the caller
+    // opt back in, so the safe shape is stated once, in export.rs.
+    let default = crate::export::ListingRenderOptions::PUBLIC;
+    let options = crate::export::ListingRenderOptions {
+        include_valuations: include_valuations.unwrap_or(default.include_valuations),
+    };
+
+    let progress = ProgressEmitter::new(app, "listings_share");
+    let result = crate::share::share_listings(
+        &state.db.pool,
+        &progress,
+        &rows,
+        label.as_deref().unwrap_or(""),
+        options,
+        ttl_days.unwrap_or(30),
+    )
+    .await;
+    if let Err(e) = &result {
+        progress.fail(e.to_string());
+    }
+    result
+}
+
+/// Every public link this app has minted, newest first.
+#[tauri::command]
+pub async fn list_shares(state: State<'_, AppState>) -> AppResult<Vec<crate::share::ShareRecord>> {
+    crate::share::list_shares(&state.db.pool).await
+}
+
+/// Retire one public link. The local row goes even if the Worker delete
+/// fails — see `share::revoke_share`.
+#[tauri::command]
+pub async fn revoke_share(state: State<'_, AppState>, share_id: i64) -> AppResult<()> {
+    crate::share::revoke_share(&state.db.pool, share_id).await
 }
 
 /// Bulk-add saved listings to a wishlist as purchase candidates (DCH-45).

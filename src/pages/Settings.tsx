@@ -2,9 +2,11 @@ import { FormEvent, useEffect, useState } from "react";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { NoticeBanner } from "@/components/NoticeBanner";
+import { describeExpiry } from "@/lib/shareLinks";
 import {
   api,
   driverListingCounts,
+  formatCount,
   formatDate,
   formatDateTime,
   formatTime,
@@ -22,6 +24,7 @@ import {
   type PrewarmedDriver,
   type PrewarmSummary,
   type RegistrySearchMode,
+  type ShareRecord,
   type ShareSettings,
   type SyncSummary,
   type TrainOutcome,
@@ -224,11 +227,73 @@ export function Settings() {
     }
   }
 
+  // Active public links (DCH-48). Separate state from the credential card
+  // above: one is a setting, the other is a list of live things, and a
+  // failure to load the list must not blank out the settings form.
+  const [shares, setShares] = useState<ShareRecord[] | null>(null);
+  const [sharesBusy, setSharesBusy] = useState<number | null>(null);
+  const [sharesNotice, setSharesNotice] = useState<{
+    tone: "success" | "warning";
+    message: string;
+  } | null>(null);
+  const [sharesError, setSharesError] = useState<unknown>(null);
+
+  async function loadShares() {
+    try {
+      setShares(await api.listShares());
+    } catch (e) {
+      setSharesError(e);
+    }
+  }
+
+  // A refused clipboard is a partial success, not a failure — the URL is on
+  // screen and selectable either way (DCH-36).
+  async function onCopyShare(share: ShareRecord) {
+    setSharesError(null);
+    try {
+      await navigator.clipboard.writeText(share.url);
+      setSharesNotice({ tone: "success", message: "Link copied." });
+    } catch {
+      setSharesNotice({
+        tone: "warning",
+        message:
+          "Couldn't reach the clipboard — select the link above to copy it.",
+      });
+    }
+  }
+
+  async function onRevokeShare(share: ShareRecord) {
+    // Irreversible in the way that matters: the slug is unguessable and a
+    // new share mints a new one, so anyone holding this link loses access
+    // for good (DCH-33).
+    const ok = window.confirm(
+      `Turn off the link for "${share.label}"?\n\nAnyone holding it loses ` +
+        `access immediately, and re-sharing creates a different link. Your ` +
+        `saved listings are not touched.`,
+    );
+    if (!ok) return;
+    setSharesBusy(share.id);
+    setSharesError(null);
+    setSharesNotice(null);
+    try {
+      await api.revokeShare(share.id);
+      setSharesNotice({
+        tone: "success",
+        message: `"${share.label}" is no longer shared.`,
+      });
+      await loadShares();
+    } catch (e) {
+      setSharesError(e);
+    } finally {
+      setSharesBusy(null);
+    }
+  }
+
   async function onShareClear() {
     const ok = window.confirm(
       "Remove the sharing Worker URL and secret?\n\nLinks you have already " +
-        "shared keep working until they expire — turn them off from the " +
-        "Wishlist page first if you want them gone now.",
+        "shared keep working until they expire — turn them off in Active " +
+        "links below first if you want them gone now.",
     );
     if (!ok) return;
     setShareBusy(true);
@@ -559,6 +624,7 @@ export function Settings() {
   useEffect(() => {
     refresh();
     void loadShareSettings();
+    void loadShares();
   }, []);
 
   async function onSave(e: FormEvent) {
@@ -1058,6 +1124,91 @@ export function Settings() {
                 <ErrorBanner error={shareError} variant="inline" />
               )}
             </form>
+          </section>
+
+          {/* Its own card: the one above is a credential, this is a list of
+              live things published under someone's name (DCH-21, DCH-48). */}
+          <section className="card space-y-4">
+            <div>
+              <h3 className="text-base font-medium">Active links</h3>
+              <p className="text-xs text-fg-subtle mt-1">
+                Pages you've published from the Saved Listings page. Each is
+                public to anyone holding its link until it expires or you turn
+                it off here.
+              </p>
+            </div>
+
+            {sharesNotice && (
+              <NoticeBanner
+                variant="inline"
+                tone={sharesNotice.tone}
+                message={sharesNotice.message}
+              />
+            )}
+            {sharesError !== null && (
+              <ErrorBanner error={sharesError} variant="inline" />
+            )}
+
+            {shares === null ? (
+              <p className="text-sm text-fg-muted">Loading…</p>
+            ) : shares.length === 0 ? (
+              <p className="text-sm text-fg-muted">
+                No links yet. Turn on Select mode on Saved Listings, pick some
+                listings, then choose <em>Share selection…</em>.
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {shares.map((s) => {
+                  const expiry = describeExpiry(
+                    s.expires_at,
+                    Math.floor(Date.now() / 1000),
+                  );
+                  return (
+                    <li
+                      key={s.id}
+                      className="rounded border border-border bg-bg-elevated px-3 py-2 space-y-1"
+                    >
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="text-sm font-medium truncate">
+                          {s.label}
+                        </span>
+                        <span
+                          className={`shrink-0 text-[11px] ${
+                            expiry.expired ? "text-fg" : "text-fg-subtle"
+                          }`}
+                        >
+                          {expiry.text}
+                        </span>
+                      </div>
+                      <div className="font-mono text-[11px] break-all text-fg-muted">
+                        {s.url}
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-fg-subtle">
+                        <span>
+                          {formatCount(s.item_count)} listings ·{" "}
+                          {formatDate(s.shared_at)}
+                        </span>
+                        <button
+                          type="button"
+                          className="text-fg-muted hover:text-fg"
+                          onClick={() => void onCopyShare(s)}
+                        >
+                          Copy link
+                        </button>
+                        <button
+                          type="button"
+                          className="link-danger"
+                          onClick={() => void onRevokeShare(s)}
+                          disabled={sharesBusy === s.id}
+                        >
+                          {sharesBusy === s.id ? "Turning off…" : "Turn off"}
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </section>
         </>
       )}
