@@ -46,12 +46,21 @@ import { ClearFiltersButton, FilteredEmpty } from "@/components/FilterCard";
 import { YearRangeFilter } from "@/components/YearRangeFilter";
 import {
   LISTING_FACETS,
-  facetBadgeCount,
   facetDefaultSelection,
   facetSection,
   facetSectionKey,
   type FacetSection,
 } from "@/lib/facetSections";
+import {
+  controlSection,
+  facetSummary,
+  groupSummary,
+  useScrollEdges,
+  useStickyMaxHeight,
+  yearSummary,
+  type FilterSummary,
+} from "@/lib/filterPanel";
+import { AnchoredMenu, AnchoredMenuList } from "@/components/AnchoredMenu";
 import {
   passesSellerFilter,
   sellerFilterLabel,
@@ -1008,6 +1017,69 @@ export function Listings() {
     (sellerFilter.size > 0 ? 1 : 0) +
     (isEmptyRange(yearFilter) ? 0 : 1);
 
+  // Facet options are built here rather than inline in the panel because
+  // two things need them now: the checkbox rows, and the header summary that
+  // has to name the checked option when the rows are hidden (DCH-47).
+  const statusFacetOptions = [
+    { value: "active", label: "Active", count: facetCounts.status.active },
+    { value: "ended", label: "Ended", count: facetCounts.status.ended },
+    {
+      value: "archived",
+      label: "Archived",
+      count: facetCounts.status.archived,
+    },
+  ];
+  const matchFacetOptions = [
+    {
+      value: "confirmed",
+      label: "Confirmed",
+      count: facetCounts.match.confirmed,
+    },
+    {
+      value: "unconfirmed",
+      label: "Unconfirmed",
+      count: facetCounts.match.unconfirmed,
+    },
+    {
+      value: "unmatched",
+      label: "Unmatched",
+      count: facetCounts.match.unmatched,
+    },
+  ];
+  const offerFacetOptions = [
+    {
+      value: "unresponded",
+      label: "Unresponded",
+      count: facetCounts.offer.unresponded,
+    },
+    { value: "with", label: "Any offer", count: facetCounts.offer.with },
+    { value: "without", label: "No offer", count: facetCounts.offer.without },
+  ];
+  const typeFacetOptions = [
+    { value: "auction", label: "Auction", count: facetCounts.type.auction },
+    { value: "bin", label: "Buy It Now only", count: facetCounts.type.bin },
+    {
+      value: "offers",
+      label: "Accepts offers",
+      count: facetCounts.type.offers,
+    },
+  ];
+
+  /** Display name behind a group-id filter value, for the Group section's
+   *  collapsed summary. Null while the groups list is still loading — the
+   *  summary says "1 group" rather than going blank. */
+  const groupFilterName = useMemo(() => {
+    if (groupFilter === "all" || groupFilter === "none") return null;
+    return groups.find((g) => String(g.id) === groupFilter)?.name ?? null;
+  }, [groupFilter, groups]);
+
+  // Height of the filter panel, and which of its edges have content past
+  // them. Both are measured rather than assumed: the panel sticks inside
+  // EditorPane's scrollport, which is shorter than the window (see
+  // `useStickyMaxHeight`).
+  const [setPanelEl, panelMaxHeight] = useStickyMaxHeight(16);
+  const [setPanelScrollEl, panelEdges] = useScrollEdges();
+
   function clearAllFilters() {
     setSearchText("");
     setStatusFilter(defaultStatusFilter());
@@ -1154,23 +1226,22 @@ export function Listings() {
                 )}
               </button>
             ) : (
-              // space-y-3, not -4: the panel is sticky, so height it can't
-              // afford is height the user can never scroll to (DCH-43). The
-              // Seller section (DCH-44) costs about what the tighter rhythm
-              // gives back across ten sections.
-              <aside className="w-52 shrink-0 card !p-3 space-y-3 sticky top-4">
-                {/* Clear filters lives in the header, not at the foot of the
-                    panel: on a short window the foot is the part that falls
-                    off, and the way out of an over-narrowed list is the last
-                    control that should be unreachable. */}
-                <div className="flex items-center justify-between gap-1">
-                  <span className="text-[10px] uppercase tracking-wide text-fg-subtle">
-                    Filters
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    {activeFilterCount > 0 && (
-                      <ClearFiltersButton onClear={clearAllFilters} />
-                    )}
+              // A flex column capped at the scrollport, not a stack that
+              // grows without bound (DCH-47). Sticky positioning pins the top
+              // edge, so any height past the fold is height nobody can ever
+              // scroll to — which is why the search box and Clear filters sit
+              // *outside* the scrolling middle rather than at either end of
+              // one long list.
+              <aside
+                ref={setPanelEl}
+                className="w-52 shrink-0 card !p-0 sticky top-4 flex flex-col overflow-hidden"
+                style={{ maxHeight: `${panelMaxHeight}px` }}
+              >
+                <div className="shrink-0 px-3 pt-3 pb-2 space-y-2">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-[10px] uppercase tracking-wide text-fg-subtle">
+                      Filters
+                    </span>
                     <button
                       type="button"
                       className="text-fg-subtle hover:text-fg"
@@ -1182,223 +1253,230 @@ export function Listings() {
                       <PanelChevronIcon direction="left" />
                     </button>
                   </div>
-                </div>
-                <input
-                  type="text"
-                  className="input !py-1 !text-xs"
-                  placeholder="Search title, driver, scheme, seller…"
-                  value={searchText}
-                  onChange={(e) => setSearchText(e.target.value)}
-                />
-                <FacetList
-                  facet={facetSection(LISTING_FACETS, "status")}
-                  selected={statusFilter}
-                  options={[
-                    {
-                      value: "active",
-                      label: "Active",
-                      count: facetCounts.status.active,
-                    },
-                    {
-                      value: "ended",
-                      label: "Ended",
-                      count: facetCounts.status.ended,
-                    },
-                    {
-                      value: "archived",
-                      label: "Archived",
-                      count: facetCounts.status.archived,
-                    },
-                  ]}
-                  onToggle={(v) =>
-                    setStatusFilter((prev) => toggled(prev, v as StatusOption))
-                  }
-                />
-                <FacetList
-                  facet={facetSection(LISTING_FACETS, "match")}
-                  selected={matchFilter}
-                  options={[
-                    {
-                      value: "confirmed",
-                      label: "Confirmed",
-                      count: facetCounts.match.confirmed,
-                    },
-                    {
-                      value: "unconfirmed",
-                      label: "Unconfirmed",
-                      count: facetCounts.match.unconfirmed,
-                    },
-                    {
-                      value: "unmatched",
-                      label: "Unmatched",
-                      count: facetCounts.match.unmatched,
-                    },
-                  ]}
-                  onToggle={(v) =>
-                    setMatchFilter((prev) => toggled(prev, v as MatchOption))
-                  }
-                />
-                <FacetList
-                  facet={facetSection(LISTING_FACETS, "offer")}
-                  selected={offerFilter}
-                  options={[
-                    {
-                      value: "unresponded",
-                      label: "Unresponded",
-                      count: facetCounts.offer.unresponded,
-                    },
-                    {
-                      value: "with",
-                      label: "Any offer",
-                      count: facetCounts.offer.with,
-                    },
-                    {
-                      value: "without",
-                      label: "No offer",
-                      count: facetCounts.offer.without,
-                    },
-                  ]}
-                  onToggle={(v) =>
-                    setOfferFilter((prev) => toggled(prev, v as OfferOption))
-                  }
-                />
-                <FacetList
-                  facet={facetSection(LISTING_FACETS, "type")}
-                  selected={typeFilter}
-                  options={[
-                    {
-                      value: "auction",
-                      label: "Auction",
-                      count: facetCounts.type.auction,
-                    },
-                    {
-                      value: "bin",
-                      label: "Buy It Now only",
-                      count: facetCounts.type.bin,
-                    },
-                    {
-                      value: "offers",
-                      label: "Accepts offers",
-                      count: facetCounts.type.offers,
-                    },
-                  ]}
-                  onToggle={(v) =>
-                    setTypeFilter((prev) => toggled(prev, v as TypeOption))
-                  }
-                />
-                <div>
-                  <div className="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
-                    Driver
-                  </div>
-                  <DriverFilterSelect
-                    value={driverFilter}
-                    label={driverFilterLabel}
-                    options={driverOptions.options}
-                    allCount={driverOptions.allCount}
-                    noneCount={driverOptions.noneCount}
-                    onChange={setDriverFilter}
+                  <input
+                    type="text"
+                    className="input !py-1 !text-xs"
+                    placeholder="Search title, driver, scheme, seller…"
+                    value={searchText}
+                    onChange={(e) => setSearchText(e.target.value)}
                   />
                 </div>
-                {/* One seller means filtering by it is a no-op. The second
-                    clause keeps the control on screen when a selection is
-                    still narrowing — a filter you can't see is the thing
-                    DCH-35 forbids. */}
-                {(sellerFilterOptions.length > 1 || sellerFilter.size > 0) && (
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
-                      Seller
-                    </div>
-                    <SellerFilterSelect
-                      options={sellerFilterOptions}
-                      selected={sellerFilter}
-                      onToggle={(key) =>
-                        setSellerFilter((prev) => toggled(prev, key))
+
+                {/* The sections scroll here, and this element is both the
+                    flex item and the scroller. Splitting those in two — a
+                    `flex-1` box with an `h-full` scroller inside — looks
+                    tidier and silently doesn't work: the outer box has no
+                    specified height, so the inner percentage height is
+                    indefinite and collapses to the content's own height,
+                    producing a scroller exactly as tall as its contents. */}
+                <div
+                  ref={setPanelScrollEl}
+                  className="flex-1 min-h-0 overflow-y-auto px-3 py-1"
+                >
+                  {/* Scroll shadows, pinned to the scrollport with `sticky`
+                      and pulled back out of the flow with a negative margin
+                      so they overlay the content rather than spacing it.
+                      Hidden (not unmounted) for an edge with nothing past
+                      it: a fade that is always on dims content that isn't
+                      cut, and a scroller with no fade at all is why nobody
+                      notices it scrolls. */}
+                  <div
+                    aria-hidden="true"
+                    className={`sticky top-0 z-30 -mx-3 -mb-4 h-4 pointer-events-none bg-gradient-to-b from-bg-panel to-transparent ${
+                      panelEdges.atTop ? "invisible" : ""
+                    }`}
+                  />
+                  <div className="space-y-2">
+                    <FacetList
+                      facet={facetSection(LISTING_FACETS, "status")}
+                      selected={statusFilter}
+                      options={statusFacetOptions}
+                      onToggle={(v) =>
+                        setStatusFilter((prev) =>
+                          toggled(prev, v as StatusOption),
+                        )
                       }
-                      onClear={() => setSellerFilter(new Set())}
                     />
-                  </div>
-                )}
-                {yearFilterOptions.length > 0 && (
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
-                      Year
-                    </div>
-                    <YearRangeFilter
-                      id="listings-year"
-                      years={yearFilterOptions}
-                      value={yearFilter}
-                      onChange={setYearFilter}
-                      compact
-                    />
-                  </div>
-                )}
-                <div>
-                  <div className="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
-                    Group
-                  </div>
-                  <select
-                    className="input !py-1 !text-xs"
-                    value={groupFilter}
-                    onChange={(e) => setGroupFilter(e.target.value)}
-                    title="Filter listings by group membership"
-                  >
-                    <option value="all">All</option>
-                    <option value="none">Ungrouped</option>
-                    {(() => {
-                      const { drivers, noDriver, archived } =
-                        clusterGroupsByDriver(groups);
-                      return (
-                        <>
-                          {drivers.map((d) => (
-                            <optgroup key={`d-${d.id}`} label={d.name}>
-                              {d.groups.map((g) => (
-                                <option
-                                  key={`${d.id}-${g.id}`}
-                                  value={String(g.id)}
-                                >
-                                  {g.name} ({g.member_count})
-                                </option>
-                              ))}
-                            </optgroup>
-                          ))}
-                          {noDriver.length > 0 && (
-                            <optgroup label="Other (no driver)">
-                              {noDriver.map((g) => (
-                                <option key={g.id} value={String(g.id)}>
-                                  {g.name} ({g.member_count})
-                                </option>
-                              ))}
-                            </optgroup>
-                          )}
-                          {archived.length > 0 && (
-                            <optgroup label="Archived">
-                              {archived.map((g) => (
-                                <option key={g.id} value={String(g.id)}>
-                                  {g.name} ({g.member_count})
-                                </option>
-                              ))}
-                            </optgroup>
-                          )}
-                        </>
-                      );
-                    })()}
-                  </select>
-                  <div className="mt-1.5">
-                    <ExcludeGroupsMenu
-                      groups={groups}
-                      excluded={excludedGroupIds}
-                      onToggle={(id) =>
-                        setExcludedGroupIds((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(id)) next.delete(id);
-                          else next.add(id);
-                          return next;
-                        })
+                    <FacetList
+                      facet={facetSection(LISTING_FACETS, "match")}
+                      selected={matchFilter}
+                      options={matchFacetOptions}
+                      onToggle={(v) =>
+                        setMatchFilter((prev) =>
+                          toggled(prev, v as MatchOption),
+                        )
                       }
-                      onClear={() => setExcludedGroupIds(new Set())}
                     />
+                    <FacetList
+                      facet={facetSection(LISTING_FACETS, "offer")}
+                      selected={offerFilter}
+                      options={offerFacetOptions}
+                      onToggle={(v) =>
+                        setOfferFilter((prev) =>
+                          toggled(prev, v as OfferOption),
+                        )
+                      }
+                    />
+                    <FacetList
+                      facet={facetSection(LISTING_FACETS, "type")}
+                      selected={typeFilter}
+                      options={typeFacetOptions}
+                      onToggle={(v) =>
+                        setTypeFilter((prev) => toggled(prev, v as TypeOption))
+                      }
+                    />
+                    <ControlSection
+                      sectionKey="driver"
+                      summary={{
+                        text: driverFilterLabel,
+                        active: driverFilter !== "all",
+                      }}
+                    >
+                      <DriverFilterSelect
+                        value={driverFilter}
+                        label={driverFilterLabel}
+                        options={driverOptions.options}
+                        allCount={driverOptions.allCount}
+                        noneCount={driverOptions.noneCount}
+                        onChange={setDriverFilter}
+                      />
+                    </ControlSection>
+                    {/* One seller means filtering by it is a no-op. The
+                          second clause keeps the control on screen when a
+                          selection is still narrowing — a filter you can't
+                          see is the thing DCH-35 forbids. */}
+                    {(sellerFilterOptions.length > 1 ||
+                      sellerFilter.size > 0) && (
+                      <ControlSection
+                        sectionKey="seller"
+                        summary={{
+                          text: sellerFilterLabel(
+                            sellerFilter,
+                            sellerFilterOptions,
+                          ),
+                          active: sellerFilter.size > 0,
+                        }}
+                      >
+                        <SellerFilterSelect
+                          options={sellerFilterOptions}
+                          selected={sellerFilter}
+                          onToggle={(key) =>
+                            setSellerFilter((prev) => toggled(prev, key))
+                          }
+                          onClear={() => setSellerFilter(new Set())}
+                        />
+                      </ControlSection>
+                    )}
+                    {yearFilterOptions.length > 0 && (
+                      <ControlSection
+                        sectionKey="year"
+                        summary={yearSummary(yearFilter)}
+                      >
+                        <YearRangeFilter
+                          id="listings-year"
+                          years={yearFilterOptions}
+                          value={yearFilter}
+                          onChange={setYearFilter}
+                          compact
+                        />
+                      </ControlSection>
+                    )}
+                    <ControlSection
+                      sectionKey="group"
+                      summary={groupSummary(
+                        groupFilter,
+                        groupFilterName,
+                        excludedGroupIds.size,
+                      )}
+                    >
+                      <select
+                        className="input !py-1 !text-xs"
+                        value={groupFilter}
+                        onChange={(e) => setGroupFilter(e.target.value)}
+                        title="Filter listings by group membership"
+                      >
+                        <option value="all">All</option>
+                        <option value="none">Ungrouped</option>
+                        {(() => {
+                          const { drivers, noDriver, archived } =
+                            clusterGroupsByDriver(groups);
+                          return (
+                            <>
+                              {drivers.map((d) => (
+                                <optgroup key={`d-${d.id}`} label={d.name}>
+                                  {d.groups.map((g) => (
+                                    <option
+                                      key={`${d.id}-${g.id}`}
+                                      value={String(g.id)}
+                                    >
+                                      {g.name} ({g.member_count})
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              ))}
+                              {noDriver.length > 0 && (
+                                <optgroup label="Other (no driver)">
+                                  {noDriver.map((g) => (
+                                    <option key={g.id} value={String(g.id)}>
+                                      {g.name} ({g.member_count})
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              )}
+                              {archived.length > 0 && (
+                                <optgroup label="Archived">
+                                  {archived.map((g) => (
+                                    <option key={g.id} value={String(g.id)}>
+                                      {g.name} ({g.member_count})
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </select>
+                      <div className="mt-1.5">
+                        <ExcludeGroupsMenu
+                          groups={groups}
+                          excluded={excludedGroupIds}
+                          onToggle={(id) =>
+                            setExcludedGroupIds((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(id)) next.delete(id);
+                              else next.add(id);
+                              return next;
+                            })
+                          }
+                          onClear={() => setExcludedGroupIds(new Set())}
+                        />
+                      </div>
+                    </ControlSection>
                   </div>
+                  <div
+                    aria-hidden="true"
+                    className={`sticky bottom-0 z-30 -mx-3 -mt-4 h-4 pointer-events-none bg-gradient-to-t from-bg-panel to-transparent ${
+                      panelEdges.atBottom ? "invisible" : ""
+                    }`}
+                  />
                 </div>
+
+                {/* Pinned below the scroll region, not at the end of it: the
+                    foot of a too-tall panel is the part that falls off, and
+                    the way out of an over-narrowed list is the last control
+                    that should be unreachable. Hidden rather than disabled
+                    when nothing is set, per DCH-35. */}
+                {activeFilterCount > 0 && (
+                  <div className="shrink-0 flex items-center justify-between gap-2 border-t border-border px-3 py-2">
+                    <span
+                      className="rounded-full bg-accent/15 text-accent text-[10px] font-medium px-1.5 py-0.5 tabular-nums"
+                      title={`${activeFilterCount} filter${activeFilterCount === 1 ? "" : "s"} active`}
+                    >
+                      {activeFilterCount}
+                    </span>
+                    <ClearFiltersButton onClear={clearAllFilters} />
+                  </div>
+                )}
               </aside>
             )}
 
@@ -5446,6 +5524,7 @@ function ExcludeGroupsMenu({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return groups;
@@ -5477,8 +5556,9 @@ function ExcludeGroupsMenu({
     </label>
   );
   return (
-    <div className="relative">
+    <>
       <button
+        ref={triggerRef}
         type="button"
         className={`px-2 py-0.5 rounded border text-[11px] ${
           excluded.size > 0
@@ -5493,69 +5573,73 @@ function ExcludeGroupsMenu({
       >
         Exclude{excluded.size > 0 ? ` (${excluded.size})` : ""} ▾
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute z-40 top-full mt-1 left-0 min-w-[14rem] rounded border border-border bg-bg-elevated shadow-lg py-1">
-            {groups.length > 0 && (
-              <div className="px-2 pb-1">
-                <input
-                  type="text"
-                  className="input !py-1 !text-xs"
-                  placeholder="Search groups…"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  autoFocus
-                />
-              </div>
-            )}
-            <div className="max-h-64 overflow-y-auto">
-              {groups.length === 0 ? (
-                <div className="px-2 py-1 text-xs text-fg-subtle">
-                  No groups yet.
-                </div>
-              ) : filtered.length === 0 ? (
-                <div className="px-2 py-1 text-xs text-fg-subtle">
-                  No groups match “{query.trim()}”.
-                </div>
-              ) : (
+      {/* The trigger is a ~70px chip and the list under it is grouped by
+          driver, so this is the one menu that has to be much wider than what
+          it hangs from. */}
+      <AnchoredMenu
+        anchorRef={triggerRef}
+        open={open}
+        onClose={() => setOpen(false)}
+        minWidth={224}
+        label="Groups to exclude"
+      >
+        {groups.length > 0 && (
+          <div className="shrink-0 px-2 pb-1">
+            <input
+              type="text"
+              className="input !py-1 !text-xs"
+              placeholder="Search groups…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              autoFocus
+            />
+          </div>
+        )}
+        <AnchoredMenuList>
+          {groups.length === 0 ? (
+            <div className="px-2 py-1 text-xs text-fg-subtle">
+              No groups yet.
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="px-2 py-1 text-xs text-fg-subtle">
+              No groups match “{query.trim()}”.
+            </div>
+          ) : (
+            <>
+              {drivers.map((d) => (
+                <Fragment key={`d-${d.id}`}>
+                  {sectionHeader(d.name)}
+                  {d.groups.map((g) => renderOption(g, `${d.id}-${g.id}`))}
+                </Fragment>
+              ))}
+              {noDriver.length > 0 && (
                 <>
-                  {drivers.map((d) => (
-                    <Fragment key={`d-${d.id}`}>
-                      {sectionHeader(d.name)}
-                      {d.groups.map((g) => renderOption(g, `${d.id}-${g.id}`))}
-                    </Fragment>
-                  ))}
-                  {noDriver.length > 0 && (
-                    <>
-                      {sectionHeader("Other (no driver)")}
-                      {noDriver.map((g) => renderOption(g, `n-${g.id}`))}
-                    </>
-                  )}
-                  {archived.length > 0 && (
-                    <>
-                      {sectionHeader("Archived")}
-                      {archived.map((g) => renderOption(g, `a-${g.id}`))}
-                    </>
-                  )}
+                  {sectionHeader("Other (no driver)")}
+                  {noDriver.map((g) => renderOption(g, `n-${g.id}`))}
                 </>
               )}
-            </div>
-            {excluded.size > 0 && (
-              <div className="border-t border-border mt-1 pt-1 px-2">
-                <button
-                  type="button"
-                  className="text-xs text-fg-subtle hover:text-fg underline decoration-dotted underline-offset-2"
-                  onClick={onClear}
-                >
-                  Clear exclusions
-                </button>
-              </div>
-            )}
+              {archived.length > 0 && (
+                <>
+                  {sectionHeader("Archived")}
+                  {archived.map((g) => renderOption(g, `a-${g.id}`))}
+                </>
+              )}
+            </>
+          )}
+        </AnchoredMenuList>
+        {excluded.size > 0 && (
+          <div className="shrink-0 border-t border-border mt-1 pt-1 px-2">
+            <button
+              type="button"
+              className="text-xs text-fg-subtle hover:text-fg underline decoration-dotted underline-offset-2"
+              onClick={onClear}
+            >
+              Clear exclusions
+            </button>
           </div>
-        </>
-      )}
-    </div>
+        )}
+      </AnchoredMenu>
+    </>
   );
 }
 
@@ -5577,12 +5661,6 @@ function SellerFilterSelect({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  // Whether to hang the popover above the trigger. Sitting near the bottom
-  // of the filter panel, a downward menu is clipped by the pane's scrollport
-  // — and because the panel is sticky, scrolling doesn't reveal the tail.
-  // Measured at open time against the viewport, which is where the pane's
-  // scrollport ends.
-  const [flipUp, setFlipUp] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -5590,12 +5668,8 @@ function SellerFilterSelect({
     return options.filter((o) => o.label.toLowerCase().includes(q));
   }, [options, query]);
 
-  /** Worst case: the search box plus a full-height scrolling list plus the
-   *  Clear row. Overestimating only flips the menu upward a little early. */
-  const MAX_POPOVER_PX = 330;
-
   return (
-    <div className="relative">
+    <>
       <button
         ref={triggerRef}
         type="button"
@@ -5603,13 +5677,6 @@ function SellerFilterSelect({
           selected.size > 0 ? "!border-accent text-accent" : ""
         }`}
         onClick={() => {
-          const rect = triggerRef.current?.getBoundingClientRect();
-          if (rect) {
-            const below = window.innerHeight - rect.bottom;
-            // Only flip when going up actually buys room; on a very short
-            // window neither direction fits and down is the familiar one.
-            setFlipUp(below < MAX_POPOVER_PX && rect.top > below);
-          }
           setOpen((v) => !v);
           setQuery("");
         }}
@@ -5618,68 +5685,69 @@ function SellerFilterSelect({
         <span className="truncate">{sellerFilterLabel(selected, options)}</span>
         <span className="text-fg-subtle shrink-0">▾</span>
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div
-            className={`absolute z-40 left-0 right-0 min-w-[12rem] rounded border border-border bg-bg-elevated shadow-lg py-1 ${
-              flipUp ? "bottom-full mb-1" : "top-full mt-1"
-            }`}
-          >
-            {options.length > 6 && (
-              <div className="px-2 pb-1">
-                <input
-                  type="text"
-                  className="input !py-1 !text-xs"
-                  placeholder="Search sellers…"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  autoFocus
-                />
-              </div>
-            )}
-            <div className="max-h-64 overflow-y-auto">
-              {filtered.length === 0 ? (
-                <div className="px-2 py-1 text-xs text-fg-subtle">
-                  No sellers match “{query.trim()}”.
-                </div>
-              ) : (
-                filtered.map((o) => (
-                  <label
-                    // Keys are trimmed usernames, so a leading space can never
-                    // collide with the no-seller bucket.
-                    key={o.key ?? " no-seller"}
-                    className="flex items-center gap-2 px-2 py-1 text-xs cursor-pointer hover:bg-bg"
-                  >
-                    <input
-                      type="checkbox"
-                      className="accent-current"
-                      checked={selected.has(o.key)}
-                      onChange={() => onToggle(o.key)}
-                    />
-                    <span className="truncate">{o.label}</span>
-                    <span className="ml-auto text-fg-subtle tabular-nums">
-                      {o.count}
-                    </span>
-                  </label>
-                ))
-              )}
-            </div>
-            {selected.size > 0 && (
-              <div className="border-t border-border mt-1 pt-1 px-2">
-                <button
-                  type="button"
-                  className="text-xs text-fg-subtle hover:text-fg underline decoration-dotted underline-offset-2"
-                  onClick={onClear}
-                >
-                  Clear sellers
-                </button>
-              </div>
-            )}
+      {/* DCH-44 hand-rolled a flip-above-the-trigger rule here, against a
+          guessed worst-case popover height. `AnchoredMenu` measures the real
+          room on both sides instead, so the guess — and the copy of it that
+          the other two menus never had — is gone. */}
+      <AnchoredMenu
+        anchorRef={triggerRef}
+        open={open}
+        onClose={() => setOpen(false)}
+        minWidth={192}
+        label="Sellers"
+      >
+        {options.length > 6 && (
+          <div className="shrink-0 px-2 pb-1">
+            <input
+              type="text"
+              className="input !py-1 !text-xs"
+              placeholder="Search sellers…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              autoFocus
+            />
           </div>
-        </>
-      )}
-    </div>
+        )}
+        <AnchoredMenuList>
+          {filtered.length === 0 ? (
+            <div className="px-2 py-1 text-xs text-fg-subtle">
+              No sellers match “{query.trim()}”.
+            </div>
+          ) : (
+            filtered.map((o) => (
+              <label
+                // Keys are trimmed usernames, so a leading space can never
+                // collide with the no-seller bucket.
+                key={o.key ?? " no-seller"}
+                className="flex items-center gap-2 px-2 py-1 text-xs cursor-pointer hover:bg-bg"
+              >
+                <input
+                  type="checkbox"
+                  className="accent-current"
+                  checked={selected.has(o.key)}
+                  onChange={() => onToggle(o.key)}
+                />
+                <span className="truncate">{o.label}</span>
+                <span className="ml-auto text-fg-subtle tabular-nums">
+                  {o.count}
+                </span>
+              </label>
+            ))
+          )}
+        </AnchoredMenuList>
+        {selected.size > 0 && (
+          <div className="shrink-0 border-t border-border mt-1 pt-1 px-2">
+            <button
+              type="button"
+              className="text-xs text-fg-subtle hover:text-fg underline decoration-dotted underline-offset-2"
+              onClick={onClear}
+            >
+              Clear sellers
+            </button>
+          </div>
+        )}
+      </AnchoredMenu>
+    </>
   );
 }
 
@@ -5714,6 +5782,102 @@ function PanelChevronIcon({ direction }: { direction: "left" | "right" }) {
  *  panel a user shaped stays that shape. A collapsed facet with checked
  *  options wears a count badge — the DCH-35 contract holds whether or not
  *  the checkboxes are on screen. */
+/**
+ * One collapsible section of the filter panel (DCH-47): a chevron, the
+ * section's name, and — on the right — what it is currently filtering to.
+ *
+ * The whole header is the toggle rather than just the chevron. Every section
+ * has one now, so a row of 10×10 glyphs would be ten small targets stacked
+ * an inch apart; the label and summary are dead space otherwise.
+ *
+ * The chevron is drawn here rather than reusing `MinimizeToggle` because
+ * that component is itself a `<button>`, and a button inside a button is
+ * invalid HTML that browsers resolve by dropping one of them.
+ */
+function FilterSection({
+  sectionKey,
+  label,
+  defaultCollapsed,
+  summary,
+  hint,
+  children,
+}: {
+  /** Facet key; namespaced into the shared collapse store by
+   *  `facetSectionKey`, so DCH-43's persisted choices carry over unchanged. */
+  sectionKey: string;
+  label: string;
+  defaultCollapsed: boolean;
+  summary: FilterSummary;
+  /** Tooltip for the section body, where one helps. */
+  hint?: string;
+  children: ReactNode;
+}) {
+  const [collapsed, toggleCollapsed] = useMinimized(
+    facetSectionKey("listings", sectionKey),
+    defaultCollapsed,
+  );
+  return (
+    <div title={hint}>
+      <button
+        type="button"
+        className="w-full flex items-center gap-1 py-0.5 rounded text-left hover:bg-bg-elevated"
+        onClick={toggleCollapsed}
+        aria-expanded={!collapsed}
+        title={`${collapsed ? "Expand" : "Collapse"} ${label} — ${summary.text}`}
+      >
+        <span
+          className={`shrink-0 w-3 text-[8px] leading-none text-fg-subtle transition-transform ${
+            collapsed ? "" : "rotate-90"
+          }`}
+          aria-hidden="true"
+        >
+          ▶
+        </span>
+        <span className="text-[10px] uppercase tracking-wide text-fg-subtle">
+          {label}
+        </span>
+        {/* The DCH-35 contract for a section whose control is out of sight:
+            accent whenever it is narrowing the list, so nothing that is
+            filtering can be silent. `min-w-0` is what lets it truncate
+            instead of shoving the label out of the panel. */}
+        <span
+          className={`ml-auto min-w-0 truncate text-[11px] ${
+            summary.active ? "text-accent" : "text-fg-subtle"
+          }`}
+        >
+          {summary.text}
+        </span>
+      </button>
+      <div className={collapsed ? "hidden" : "mt-1"}>{children}</div>
+    </div>
+  );
+}
+
+/** A section holding one control, looked up in `LISTING_CONTROL_SECTIONS` so
+ *  its label and default collapse state live in the table with the facets'
+ *  rather than at the call site. */
+function ControlSection({
+  sectionKey,
+  summary,
+  children,
+}: {
+  sectionKey: string;
+  summary: FilterSummary;
+  children: ReactNode;
+}) {
+  const section = controlSection(sectionKey);
+  return (
+    <FilterSection
+      sectionKey={section.key}
+      label={section.label}
+      defaultCollapsed={section.defaultCollapsed}
+      summary={summary}
+    >
+      {children}
+    </FilterSection>
+  );
+}
+
 function FacetList({
   facet,
   selected,
@@ -5725,33 +5889,15 @@ function FacetList({
   options: { value: string; label: string; count: number }[];
   onToggle: (v: string) => void;
 }) {
-  const [collapsed, toggleCollapsed] = useMinimized(
-    facetSectionKey("listings", facet.key),
-    facet.defaultCollapsed,
-  );
-  const badge = facetBadgeCount(collapsed, selected);
   return (
-    <div title="Check any combination — no boxes checked shows everything">
-      <div className="flex items-center gap-1 mb-1">
-        <MinimizeToggle
-          minimized={collapsed}
-          onToggle={toggleCollapsed}
-          label={facet.label}
-          className="!w-4 !h-4"
-        />
-        <span className="text-[10px] uppercase tracking-wide text-fg-subtle">
-          {facet.label}
-        </span>
-        {badge !== null && (
-          <span
-            className="ml-auto rounded-full bg-accent/15 text-accent text-[10px] font-medium px-1.5 tabular-nums"
-            title={`${badge} option${badge === 1 ? "" : "s"} checked`}
-          >
-            {badge}
-          </span>
-        )}
-      </div>
-      <div className={`space-y-0.5 ${collapsed ? "hidden" : ""}`}>
+    <FilterSection
+      sectionKey={facet.key}
+      label={facet.label}
+      defaultCollapsed={facet.defaultCollapsed}
+      summary={facetSummary(options, selected, facet.defaultSelected)}
+      hint="Check any combination — no boxes checked shows everything"
+    >
+      <div className="space-y-0.5">
         {options.map((opt) => {
           const active = selected.has(opt.value);
           return (
@@ -5797,7 +5943,7 @@ function FacetList({
           );
         })}
       </div>
-    </div>
+    </FilterSection>
   );
 }
 
@@ -5820,6 +5966,7 @@ function DriverFilterSelect({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return options;
@@ -5853,8 +6000,9 @@ function DriverFilterSelect({
   };
 
   return (
-    <div className="relative">
+    <>
       <button
+        ref={triggerRef}
         type="button"
         className="input !py-1 !text-xs flex items-center justify-between gap-2 text-left"
         onClick={() => {
@@ -5866,34 +6014,35 @@ function DriverFilterSelect({
         <span className="truncate">{label}</span>
         <span className="text-fg-subtle shrink-0">▾</span>
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute z-40 top-full mt-1 left-0 right-0 min-w-[12rem] rounded border border-border bg-bg-elevated shadow-lg py-1">
-            <div className="px-2 pb-1">
-              <input
-                type="text"
-                className="input !py-1 !text-xs"
-                placeholder="Search drivers…"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                autoFocus
-              />
+      <AnchoredMenu
+        anchorRef={triggerRef}
+        open={open}
+        onClose={() => setOpen(false)}
+        minWidth={192}
+        label="Drivers"
+      >
+        <div className="shrink-0 px-2 pb-1">
+          <input
+            type="text"
+            className="input !py-1 !text-xs"
+            placeholder="Search drivers…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            autoFocus
+          />
+        </div>
+        <AnchoredMenuList>
+          {!query.trim() && optionRow("all", "All drivers", allCount)}
+          {!query.trim() && optionRow("none", "No driver", noneCount)}
+          {filtered.map((o) => optionRow(o.value, o.name, o.count))}
+          {filtered.length === 0 && query.trim() && (
+            <div className="px-2 py-1 text-xs text-fg-subtle">
+              No drivers match “{query.trim()}”.
             </div>
-            <div className="max-h-64 overflow-y-auto">
-              {!query.trim() && optionRow("all", "All drivers", allCount)}
-              {!query.trim() && optionRow("none", "No driver", noneCount)}
-              {filtered.map((o) => optionRow(o.value, o.name, o.count))}
-              {filtered.length === 0 && query.trim() && (
-                <div className="px-2 py-1 text-xs text-fg-subtle">
-                  No drivers match “{query.trim()}”.
-                </div>
-              )}
-            </div>
-          </div>
-        </>
-      )}
-    </div>
+          )}
+        </AnchoredMenuList>
+      </AnchoredMenu>
+    </>
   );
 }
 

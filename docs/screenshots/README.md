@@ -24,7 +24,9 @@ google-chrome --headless=new --disable-gpu --window-size=1280,700 \
 Capture every state at the **same window size** — a layout fix is only legible
 next to the layout it fixed. Short windows (700px and under) are where sticky
 panels and tall filter cards actually break, so prefer one of those over a tall
-window that hides the problem.
+window that hides the problem. `filter-pane/short-window.png` is the exception
+and says so in the table below: it is shot at 520px because that is where the
+current panel's remaining failure modes live.
 
 To shoot a different page or state, edit the harness: swap the imported page,
 add a `preset` branch for the state, and seed store-backed state through the
@@ -40,7 +42,8 @@ underneath it and does nothing).
 | `danger-actions/` | DCH-33 | `.btn-danger` / `.link-danger` at rest |
 | `error-messages/` | DCH-18 | `ErrorBanner` titles and the details disclosure |
 | `extension-match-verdicts/` | — | The eBay extension's in-page verdict |
-| `facet-collapse/` | DCH-43 | Saved Listings' collapsible filter facets |
+| `facet-collapse/` | DCH-43 | Saved Listings' collapsible filter facets — **superseded by `filter-pane/`**; kept as the record of that PR, and its `expanded` / `badges` presets are gone |
+| `filter-pane/` | DCH-47 | The filter sidebar as a scrolling accordion: at rest, collapsed summaries, mid-scroll, a menu escaping the scroll region, and (at 520px) the pinned footer |
 | `filter-parity/` | DCH-35 | Clear filters, filtered-empty, result counts |
 | `helper-adoption/` | DCH-34 | Shared formatters on the list screens |
 | `listing-panel/` | DCH-20 | Listing cards collapsed by default |

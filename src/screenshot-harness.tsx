@@ -10,9 +10,9 @@
  * point when the bug being photographed is a `sticky` panel outgrowing it.
  *
  * `?preset=` selects the state, so a capture is a URL rather than a sequence
- * of clicks someone has to reproduce. Presets here are DCH-43's: the filter
- * sidebar at rest, with every facet expanded, and collapsed over live
- * selections.
+ * of clicks someone has to reproduce. The `filter-*` presets are the filter
+ * sidebar (DCH-43/44/47); `seller-*`, `wishlist-*` and `share*` cover the
+ * facet popover, bulk add and sharing.
  */
 import React from "react";
 import ReactDOM from "react-dom/client";
@@ -315,13 +315,32 @@ localStorage.clear();
 // The minimized store snapshots localStorage at import time, so seed it
 // through its own API rather than writing the key underneath it.
 resetMinimized();
-const ALL_FACETS = ["status", "match", "offer", "type"].map((k) =>
-  facetSectionKey("listings", k),
-);
-// "badges" starts open too: the option rows have to exist to be clicked,
-// and the effect below collapses them once the boxes are checked.
-if (preset === "expanded" || preset === "badges") {
-  setManyMinimized(ALL_FACETS, false);
+/** Every section in the panel, checkbox facets and single-control sections
+ *  alike — DCH-47 made the second kind collapsible too. */
+const ALL_SECTIONS = [
+  "status",
+  "match",
+  "offer",
+  "type",
+  "driver",
+  "seller",
+  "year",
+  "group",
+].map((k) => facetSectionKey("listings", k));
+// The filter presets start fully expanded: an option row has to exist to be
+// clicked, and the effects below re-collapse the sections once the boxes are
+// checked. DCH-43's "expanded" and "badges" presets were the same idea for
+// the four checkbox facets alone, and are gone — DCH-47 made every section
+// collapsible and replaced the count badge with a summary, so neither shot
+// depicts a UI that exists.
+if (preset.startsWith("filter-")) {
+  setManyMinimized(ALL_SECTIONS, false);
+}
+// Seller now starts collapsed (DCH-47). Its control has to be on screen
+// before the popover presets can drive it — clicking a `display: none`
+// trigger opens a menu anchored to a zero-sized rect.
+if (preset.startsWith("seller")) {
+  setManyMinimized([facetSectionKey("listings", "seller")], false);
 }
 
 /** Click a control by its visible text. The seller popover has no stable
@@ -348,17 +367,77 @@ function clickOption(label: string) {
   }
 }
 
+/** The filter panel's own scroll region (DCH-47). Identified by shape rather
+ *  than by a test id: the panel is the only scroller inside the aside, and
+ *  putting a hook in the page for the harness's benefit is how the harness
+ *  starts dictating the app. */
+function panelScroller(): HTMLElement | null {
+  return document.querySelector<HTMLElement>("aside .overflow-y-auto");
+}
+
 function Harness() {
   React.useEffect(() => {
-    if (preset === "badges") {
-      const t = setTimeout(() => {
-        clickOption("Ended");
-        clickOption("Unconfirmed");
-        clickOption("Unmatched");
-        clickOption("Auction");
-        setManyMinimized(ALL_FACETS, true);
-      }, 400);
-      return () => clearTimeout(t);
+    // DCH-47's three panel states. Each drives the real controls, so a shot
+    // is evidence the UI can reach the state, not just that it can paint it.
+    if (preset.startsWith("filter-")) {
+      let cancelled = false;
+      void (async () => {
+        const step = async (fn: () => void, ms = 150) => {
+          await new Promise((r) => setTimeout(r, ms));
+          if (!cancelled) fn();
+        };
+        await step(() => {}, 400);
+        if (preset === "filter-active" || preset === "filter-short") {
+          await step(() => {
+            clickOption("Ended");
+            clickOption("Unmatched");
+            clickOption("Auction");
+          });
+          await step(() => clickByText("button", "Exclude"));
+          await step(() => clickByText("label", "Watch closely"));
+          await step(() =>
+            document
+              .querySelector<HTMLElement>("div.fixed.inset-0.z-30")
+              ?.click(),
+          );
+          // `filter-short` is the acceptance criterion itself, shot in a
+          // window too short for the panel: everything stays expanded, so
+          // the middle has to scroll and Clear filters has to stay pinned
+          // below it. Collapsing would be cheating the test.
+          if (preset === "filter-short") return;
+          // Collapsed, every one of those has to announce itself in the
+          // header or it is a filter with no way to discover it.
+          await step(() => setManyMinimized(ALL_SECTIONS, true));
+          return;
+        }
+        if (preset === "filter-scrolled") {
+          // Parked mid-scroll so both edge fades are showing at once.
+          await step(() => {
+            const el = panelScroller();
+            if (el) el.scrollTop = (el.scrollHeight - el.clientHeight) / 2;
+          });
+          return;
+        }
+        if (preset === "filter-menu") {
+          // The gotcha the ticket called out: a menu opened from the foot of
+          // the scroll region used to be clipped by it.
+          await step(() => {
+            const el = panelScroller();
+            if (el) el.scrollTop = el.scrollHeight;
+          });
+          // Twice: the panel's measured cap settles a frame after mount, and
+          // the first assignment clamps against the pre-settle height.
+          await step(() => {
+            const el = panelScroller();
+            if (el) el.scrollTop = el.scrollHeight;
+          });
+          await step(() => clickByText("button", "Exclude"));
+          return;
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
     }
     // The seller presets drive the real control rather than seeding state:
     // the filter lives in the page's own useState, and a screenshot of a

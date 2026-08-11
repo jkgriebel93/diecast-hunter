@@ -8,17 +8,25 @@
  * can never be brought into view. Four facets stacked at full height is what
  * pushed it over on a short window.
  *
- * The fix is to keep the panel's resting height small by collapsing the
- * facets that are off by default. An internal scroller was the other
- * candidate and is deliberately not used: the driver picker and the exclude
- * menu are absolutely-positioned popovers anchored inside the panel, and an
- * `overflow` on their scroll parent would clip them.
+ * The first fix (DCH-43) was to keep the panel's resting height small by
+ * collapsing the facets that are off by default. An internal scroller was
+ * the other candidate and was passed over then, because the driver picker
+ * and the exclude menu were absolutely-positioned popovers anchored inside
+ * the panel and an `overflow` on their scroll parent would have clipped
+ * them.
  *
- * The constraint that makes this safe is the DCH-35 filter contract — a
- * filter that is narrowing the list must say so. A collapsed facet hides its
- * checkboxes, so its header carries a count badge instead; and a facet is
- * only allowed to start collapsed if it starts empty, which
- * {@link dishonestFacetDefaults} pins down.
+ * DCH-47 took the scroller anyway, after moving those menus onto
+ * `position: fixed` (see `anchoredMenu.ts`) so nothing anchors inside the
+ * panel any more. Collapsing is no longer load-bearing for reachability —
+ * it is now about the panel's resting *legibility*, and the height budget is
+ * enforced by the scroll region in `filterPanel.ts`.
+ *
+ * The constraint that survives both is the DCH-35 filter contract — a filter
+ * that is narrowing the list must say so. A collapsed facet hides its
+ * checkboxes, so its header carries a `FilterSummary` instead (which
+ * replaced DCH-43's bare count badge: "1" said that something was filtering
+ * but not what to). {@link dishonestFacetDefaults} keeps the weaker
+ * first-visit promise: nothing starts both collapsed and already narrowing.
  */
 
 export interface FacetSection {
@@ -82,18 +90,6 @@ export function facetDefaultSelection<T extends string>(
   key: string,
 ): Set<T> {
   return new Set(facetSection(facets, key).defaultSelected as readonly T[]);
-}
-
-/**
- * What a collapsed facet header must show so a hidden facet still announces
- * that it is narrowing the list. `null` means "show nothing": either the
- * checkboxes are visible anyway, or none of them are checked.
- */
-export function facetBadgeCount(
-  collapsed: boolean,
-  selected: ReadonlySet<string>,
-): number | null {
-  return collapsed && selected.size > 0 ? selected.size : null;
 }
 
 /**

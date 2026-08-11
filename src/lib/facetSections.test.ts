@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   LISTING_FACETS,
   dishonestFacetDefaults,
-  facetBadgeCount,
   facetDefaultSelection,
   facetSection,
   facetSectionKey,
@@ -56,28 +55,12 @@ describe("facetDefaultSelection", () => {
   });
 });
 
-describe("facetBadgeCount", () => {
-  it("shows the checked count on a collapsed facet", () => {
-    expect(facetBadgeCount(true, new Set(["a", "b"]))).toBe(2);
-  });
-
-  it("shows nothing on a collapsed facet that is checking nothing", () => {
-    expect(facetBadgeCount(true, new Set())).toBeNull();
-  });
-
-  it("shows nothing while the checkboxes are on screen", () => {
-    // Expanded, the checkmarks are the indicator; a badge beside them would
-    // be a second way to say the same thing.
-    expect(facetBadgeCount(false, new Set(["a"]))).toBeNull();
-    expect(facetBadgeCount(false, new Set())).toBeNull();
-  });
-});
-
 describe("default collapse state stays honest (DCH-35)", () => {
   it("never starts a facet collapsed while it is already narrowing", () => {
-    // On first visit there is no badge to read yet — the user has expressed
-    // no collapse opinion, so a section that both hides itself and filters
-    // is a filter with no way to discover it.
+    // A collapsed section does summarize its selection (DCH-47), so this is
+    // no longer the only thing standing between a user and an invisible
+    // filter — but a facet that filters before it has been touched is still
+    // a filter nobody chose, and the panel shouldn't ship one.
     expect(dishonestFacetDefaults(LISTING_FACETS)).toEqual([]);
   });
 
