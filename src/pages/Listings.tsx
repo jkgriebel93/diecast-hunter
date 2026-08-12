@@ -34,7 +34,7 @@ import {
   type ReceivedOffer,
   type WishlistInfo,
 } from "@/lib/tauri";
-import { useImageSize, type ImageSize } from "@/lib/imageSize";
+import { useImageSize, IMG_CLASS } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
@@ -77,12 +77,6 @@ import {
   yearsInRange,
   type YearRange,
 } from "@/lib/yearRange";
-
-const IMG_CLASS: Record<ImageSize, string> = {
-  sm: "w-24 h-24",
-  md: "w-48 h-48",
-  lg: "w-72 h-72",
-};
 
 type ViewMode = "flat" | "byDriver" | "byGroup";
 // The checkbox facets (status, match, offer, type) hold the set of checked

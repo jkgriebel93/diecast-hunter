@@ -25,12 +25,16 @@ import { Wishlist } from "./pages/Wishlist";
 // once a second page was photographed.
 import { WorkspaceProvider } from "./lib/workspace";
 import { Settings } from "./pages/Settings";
+import { SellerFeed } from "./pages/SellerFeed";
 import { resetMinimized, setManyMinimized } from "./lib/minimized";
 import { facetSectionKey } from "./lib/facetSections";
 import type {
   DriverOption,
+  EbaySearchItem,
+  EbaySearchPage,
   ListingGroup,
   ListingRow,
+  SavedSeller,
   ShareRecord,
   ShareStatus,
   WishlistBulkAddResult,
@@ -290,8 +294,71 @@ const SHARE_RECORDS: ShareRecord[] = [
   },
 ];
 
+/** DCH-49's subject is the image itself, so unlike the other fixtures these
+ *  rows need pictures that actually render: an inline SVG per item, colored
+ *  and numbered so the grid reads as distinct listings offline. Item 6 has
+ *  no image on purpose — the placeholder box shares the size classes and
+ *  has to survive the same layouts. */
+function feedImage(i: number): string {
+  const hues = [210, 0, 120, 30, 275, 160, 45, 330];
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400">` +
+    `<rect width="400" height="400" fill="hsl(${hues[i % hues.length]},45%,42%)"/>` +
+    `<text x="200" y="230" font-family="sans-serif" font-size="120" ` +
+    `font-weight="bold" fill="white" text-anchor="middle">#${5 + i}</text>` +
+    `</svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+const SAVED_SELLERS: SavedSeller[] = [
+  "diecast_depot",
+  "raceday_collectibles",
+  "victorylane_1_24",
+].map((username, i) => ({
+  id: i + 1,
+  seller_code: "ebay",
+  username,
+  display_name: null,
+  notes: null,
+  created_at: NOW - DAY * 30,
+  ebay_origin: false,
+  last_synced_at: NOW - DAY,
+}));
+
+function feedItem(i: number): EbaySearchItem {
+  const driver = DRIVERS[i % DRIVERS.length];
+  // Every fourth id collides with a LISTINGS row on purpose, so a couple of
+  // cards render the watched state instead of the Watch button.
+  const id = i % 4 === 0 ? 200000000 + i : 210000000 + i;
+  return {
+    item_id: `v1|1${id}|0`,
+    legacy_item_id: `1${id}`,
+    title: `${2020 + (i % 5)} ${driver} #${5 + i} Diecast 1/24 Elite`,
+    price_cents: 4500 + i * 1150,
+    shipping_cents: i % 4 === 0 ? null : 1295,
+    currency: "USD",
+    condition: "New",
+    listing_type: i % 3 === 0 ? "auction" : "fixed",
+    seller_username: SAVED_SELLERS[i % SAVED_SELLERS.length].username,
+    seller_rating: 99.2,
+    image_url: i === 6 ? null : feedImage(i),
+    web_url: "https://www.ebay.com/itm/1",
+    end_time: NOW + DAY * (1 + (i % 6)),
+  };
+}
+
+const FEED_PAGE: EbaySearchPage = {
+  items: Array.from({ length: 8 }, (_, i) => feedItem(i + 1)),
+  total: 8,
+  limit: 50,
+  offset: 0,
+  has_more: false,
+};
+
 const RESULTS: Record<string, unknown> = {
   list_listings: LISTINGS,
+  list_saved_sellers: SAVED_SELLERS,
+  saved_sellers_feed: FEED_PAGE,
   list_wishlists: WISHLISTS,
   create_wishlist: {
     wishlist_id: 3,
@@ -368,6 +435,15 @@ localStorage.clear();
 // The minimized store snapshots localStorage at import time, so seed it
 // through its own API rather than writing the key underneath it.
 resetMinimized();
+// DCH-49's presets photograph the same feed at each image size. Seeded
+// before mount because `useImageSize` reads localStorage once, at state
+// init, so a post-mount write wouldn't take until a reload.
+if (preset.startsWith("feed-")) {
+  const size = preset.slice("feed-".length);
+  if (size === "sm" || size === "md" || size === "lg") {
+    localStorage.setItem("image-size:sellerFeed", size);
+  }
+}
 /** Every section in the panel, checkbox facets and single-control sections
  *  alike — DCH-47 made the second kind collapsible too. */
 const ALL_SECTIONS = [
@@ -529,6 +605,15 @@ function Harness() {
       }, 300);
       return () => clearTimeout(t);
     }
+    // The feed's cards sit below the filter panel and seller management, so
+    // an unscrolled capture shows everything except the subject (DCH-49).
+    if (preset.startsWith("feed-")) {
+      const t = setTimeout(() => {
+        const port = document.querySelector(".absolute.inset-0.overflow-auto");
+        if (port) port.scrollTop = port.scrollHeight;
+      }, 400);
+      return () => clearTimeout(t);
+    }
     if (preset === "settings-share" || preset === "settings-links") {
       // The sharing cards are last in the Accounts tab, so a viewport-sized
       // capture at scroll 0 would miss them entirely.
@@ -614,7 +699,9 @@ function Harness() {
             ? "Settings"
             : preset.startsWith("share")
               ? "Wishlist"
-              : "Saved Listings"}
+              : preset.startsWith("feed")
+                ? "Seller Feed"
+                : "Saved Listings"}
         </div>
       </div>
       <div className="relative flex-1 min-h-0">
@@ -623,6 +710,8 @@ function Harness() {
             <Settings />
           ) : preset.startsWith("share") ? (
             <Wishlist />
+          ) : preset.startsWith("feed") ? (
+            <SellerFeed />
           ) : (
             <Listings />
           )}
