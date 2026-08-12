@@ -14,18 +14,12 @@ import {
   type SavedSellerInput,
   type SavedSyncSummary,
 } from "@/lib/tauri";
-import { useImageSize, type ImageSize } from "@/lib/imageSize";
+import { useImageSize, IMG_CLASS, GALLERY_GRID_CLASS } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { NoticeBanner } from "@/components/NoticeBanner";
 import { Modal } from "@/components/Modal";
-
-const IMG_CLASS: Record<ImageSize, string> = {
-  sm: "w-24 h-24",
-  md: "w-48 h-48",
-  lg: "w-72 h-72",
-};
 
 const PAGE_SIZE = 50;
 
@@ -597,7 +591,7 @@ export function SellerFeed() {
             </div>
           </div>
 
-          <ul className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,19rem),1fr))] gap-3">
+          <ul className={GALLERY_GRID_CLASS[imgSize]}>
             {page.items.map((item) => (
               <FeedCard
                 key={item.item_id}
