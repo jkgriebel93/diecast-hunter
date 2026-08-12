@@ -107,6 +107,12 @@ read-only projection.
 
 ## Things worth not rediscovering
 
+**A 30-day refresh TTL turns every bulk import into a recurring bulk import.** The July
+prewarm walks wrote 46k entries in two single-day cohorts, so the enrichment queue is quiet
+for a month and then owes the whole cohort at once, forever (DCH-53). When adding any
+"refresh if older than N" behaviour, either cap the per-run batch or jitter the initial
+timestamps so cohorts don't expire as a block.
+
 **Verify a ticket's numbers before planning against them.** Five for five during the UI
 track: DCH-34's counts were inflated (its "21 hand-rolled error divs" were mostly
 destructive-button hovers, i.e. DCH-33's subject), DCH-32's were slightly pessimistic, DCH-35
