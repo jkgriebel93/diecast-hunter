@@ -16,6 +16,8 @@ import {
 } from "@/lib/tauri";
 import { useImageSize, IMG_CLASS, GALLERY_GRID_CLASS } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
+import { useViewMode } from "@/lib/viewMode";
+import { ViewModeToggle } from "@/components/ViewModeToggle";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { NoticeBanner } from "@/components/NoticeBanner";
@@ -59,6 +61,7 @@ export function SellerFeed() {
    *  failure, which is what `error` carries. */
   const [notice, setNotice] = useState<string | null>(null);
   const [imgSize, setImgSize] = useImageSize("sellerFeed");
+  const [viewMode, setViewMode] = useViewMode("sellerFeed");
 
   const [query, setQuery] = useState("");
   /** Snapshot of `query` at the time of the last submit. Used for paging so
@@ -520,6 +523,7 @@ export function SellerFeed() {
               results
             </div>
             <div className="flex items-center gap-2">
+              <ViewModeToggle mode={viewMode} onChange={setViewMode} />
               <ImageSizeToggle size={imgSize} onChange={setImgSize} />
               <Pager
                 offset={offset}
@@ -530,7 +534,16 @@ export function SellerFeed() {
             </div>
           </div>
 
-          <ul className={GALLERY_GRID_CLASS[imgSize]}>
+          {/* List view is Saved Listings' arrangement (DCH-50): the same
+              rows at full width instead of packed into grid columns. The
+              cards themselves don't change, so switching never re-fetches,
+              and the image-size toggle keeps working in both — Saved
+              Listings' rows honor it too. */}
+          <ul
+            className={
+              viewMode === "list" ? "space-y-2" : GALLERY_GRID_CLASS[imgSize]
+            }
+          >
             {page.items.map((item) => (
               <FeedCard
                 key={item.item_id}

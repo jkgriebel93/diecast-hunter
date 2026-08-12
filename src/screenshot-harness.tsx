@@ -455,6 +455,13 @@ if (preset.startsWith("feed-")) {
     localStorage.setItem("image-size:sellerFeed", size);
   }
 }
+// DCH-50: the list presets photograph the same feed as full-width rows —
+// `feed-list` scrolled to the rows, `feed-list-top` holding on the toolbar
+// so the toggle itself is in frame. Seeded pre-mount for the same reason
+// as the image size above.
+if (preset.startsWith("feed-list")) {
+  localStorage.setItem("view-mode:sellerFeed", "list");
+}
 /** Every section in the panel, checkbox facets and single-control sections
  *  alike — DCH-47 made the second kind collapsible too. */
 const ALL_SECTIONS = [
@@ -619,7 +626,7 @@ function Harness() {
     // The feed's cards sit below the filter panel, so an unscrolled capture
     // of the size presets shows everything except the subject (DCH-49).
     // Only those scroll — DCH-16's presets photograph the top of the page.
-    if (["feed-sm", "feed-md", "feed-lg"].includes(preset)) {
+    if (["feed-sm", "feed-md", "feed-lg", "feed-list"].includes(preset)) {
       const t = setTimeout(() => {
         const port = document.querySelector(".absolute.inset-0.overflow-auto");
         if (port) port.scrollTop = port.scrollHeight;
