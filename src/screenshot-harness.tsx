@@ -358,7 +358,18 @@ const FEED_PAGE: EbaySearchPage = {
 const RESULTS: Record<string, unknown> = {
   list_listings: LISTINGS,
   list_saved_sellers: SAVED_SELLERS,
-  saved_sellers_feed: FEED_PAGE,
+  // DCH-16's filtered-empty preset needs a feed the filters can "exclude":
+  // an empty page plus one clicked chip is the FilteredEmpty state.
+  saved_sellers_feed:
+    preset === "feed-filtered-empty"
+      ? { items: [], total: 0, limit: 50, offset: 0, has_more: false }
+      : FEED_PAGE,
+  sync_ebay_saved: {
+    sellers_seen: 4,
+    sellers_created: 1,
+    sellers_updated: 3,
+    sellers_pruned: 0,
+  },
   list_wishlists: WISHLISTS,
   create_wishlist: {
     wishlist_id: 3,
@@ -605,12 +616,29 @@ function Harness() {
       }, 300);
       return () => clearTimeout(t);
     }
-    // The feed's cards sit below the filter panel and seller management, so
-    // an unscrolled capture shows everything except the subject (DCH-49).
-    if (preset.startsWith("feed-")) {
+    // The feed's cards sit below the filter panel, so an unscrolled capture
+    // of the size presets shows everything except the subject (DCH-49).
+    // Only those scroll — DCH-16's presets photograph the top of the page.
+    if (["feed-sm", "feed-md", "feed-lg"].includes(preset)) {
       const t = setTimeout(() => {
         const port = document.querySelector(".absolute.inset-0.overflow-auto");
         if (port) port.scrollTop = port.scrollHeight;
+      }, 400);
+      return () => clearTimeout(t);
+    }
+    // DCH-16: the manage dialog and the active-filters row, driven through
+    // the real controls so each shot is a state the UI can reach.
+    if (preset === "feed-manage") {
+      const t = setTimeout(
+        () => clickByText("button", "Manage Saved Sellers"),
+        400,
+      );
+      return () => clearTimeout(t);
+    }
+    if (preset === "feed-filters" || preset === "feed-filtered-empty") {
+      const t = setTimeout(() => {
+        clickByText("button", "New"); // condition chip → filters active
+        if (preset === "feed-filters") clickByText("button", "Auction");
       }, 400);
       return () => clearTimeout(t);
     }

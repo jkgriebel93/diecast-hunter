@@ -49,6 +49,7 @@ underneath it and does nothing).
 | `helper-adoption/` | DCH-34 | Shared formatters on the list screens |
 | `listing-panel/` | DCH-20 | Listing cards collapsed by default |
 | `manual-collection-entry/` | DCH-12 | Adding a car DCR doesn't list |
+| `seller-feed-chrome/` | DCH-16 | The reworked Seller Feed: Browse-shaped filter card with the shared Clear filters control, Manage Saved Sellers as a modal, FilteredEmpty, and the bottom pager |
 | `seller-feed-image-sizes/` | DCH-49 | The feed's gallery grid before (fixed 19rem columns crushing the md/lg cards) and after (columns sized to the image) |
 | `seller-filter/` | DCH-44 | Saved Listings' Seller facet, open / picked / empty |
 | `wishlist-bulk-add/` | DCH-45 | Select mode → Add to wishlist, and its notices |
