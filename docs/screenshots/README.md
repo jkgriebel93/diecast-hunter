@@ -51,6 +51,7 @@ underneath it and does nothing).
 | `manual-collection-entry/` | DCH-12 | Adding a car DCR doesn't list |
 | `seller-feed-chrome/` | DCH-16 | The reworked Seller Feed: Browse-shaped filter card with the shared Clear filters control, Manage Saved Sellers as a modal, FilteredEmpty, and the bottom pager |
 | `seller-feed-image-sizes/` | DCH-49 | The feed's gallery grid before (fixed 19rem columns crushing the md/lg cards) and after (columns sized to the image) |
+| `seller-feed-list-view/` | DCH-50 | The cards/list toggle in the toolbar, the list view's full-width rows, and the card grid beside it |
 | `seller-filter/` | DCH-44 | Saved Listings' Seller facet, open / picked / empty |
 | `wishlist-bulk-add/` | DCH-45 | Select mode → Add to wishlist, and its notices |
 | `wishlist-sharing/` | DCH-46 | Share dialog (unconfigured / ready / live) and its settings |
