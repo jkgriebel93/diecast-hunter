@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { ViewLink } from "@/components/ViewLink";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
@@ -20,6 +20,7 @@ import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { NoticeBanner } from "@/components/NoticeBanner";
 import { Modal } from "@/components/Modal";
+import { ClearFiltersButton, FilteredEmpty } from "@/components/FilterCard";
 
 const PAGE_SIZE = 50;
 
@@ -41,8 +42,6 @@ const BUYING_OPTIONS = [
   { value: "FIXED_PRICE", label: "Buy It Now" },
   { value: "AUCTION", label: "Auction" },
 ];
-
-const MANAGE_STORAGE_KEY = "sellerFeed.manageOpen";
 
 export function SellerFeed() {
   const [sellers, setSellers] = useState<SavedSeller[] | null>(null);
@@ -74,17 +73,11 @@ export function SellerFeed() {
    *  saved sellers. */
   const [sellerSubset, setSellerSubset] = useState<Set<string>>(new Set());
 
-  const [manageOpen, setManageOpen] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem(MANAGE_STORAGE_KEY) === "1";
-  });
+  // Plain dialog state (DCH-16): the old inline panel persisted its expanded
+  // state to localStorage, but a modal that re-opens itself on page load
+  // would be a trap, so the persistence went with the panel.
+  const [manageOpen, setManageOpen] = useState(false);
   const [editing, setEditing] = useState<SavedSeller | "new" | null>(null);
-  const [syncing, setSyncing] = useState(false);
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
-
-  useEffect(() => {
-    window.localStorage.setItem(MANAGE_STORAGE_KEY, manageOpen ? "1" : "0");
-  }, [manageOpen]);
 
   useEffect(() => {
     void initialLoad();
@@ -113,8 +106,6 @@ export function SellerFeed() {
       setSellers(s);
       setPage(p);
       setOffset(0);
-      // Expand the management panel by default when there are no sellers yet.
-      if (s.length === 0) setManageOpen(true);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -275,38 +266,15 @@ export function SellerFeed() {
     }
   }
 
-  async function onSyncSellers() {
-    setSyncing(true);
-    setSyncMessage(null);
-    setError(null);
-    try {
-      const summary: SavedSyncSummary = await api.syncEbaySaved();
-      setSyncMessage(
-        `Sellers: +${summary.sellers_created} new, ~${summary.sellers_updated} updated, -${summary.sellers_pruned} pruned (of ${summary.sellers_seen}).`,
-      );
-      await reloadSellers();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setSyncing(false);
-    }
-  }
-
-  async function onDeleteSeller(s: SavedSeller) {
-    if (!window.confirm(`Remove saved seller "${s.username}"?`)) return;
-    setError(null);
-    try {
-      await api.removeSavedSeller(s.id);
-      // Drop from filter subset if it was there.
-      setSellerSubset((prev) => {
-        const next = new Set(prev);
-        next.delete(s.username.toLowerCase());
-        return next;
-      });
-      await reloadSellers();
-    } catch (e) {
-      setError(String(e));
-    }
+  /** Called by the manage dialog after a successful remove — the deleted
+   *  seller may be narrowing the feed, so it comes out of the subset too. */
+  async function onSellerRemoved(s: SavedSeller) {
+    setSellerSubset((prev) => {
+      const next = new Set(prev);
+      next.delete(s.username.toLowerCase());
+      return next;
+    });
+    await reloadSellers();
   }
 
   async function onSubmitSeller(
@@ -349,28 +317,6 @@ export function SellerFeed() {
     });
   }
 
-  const filterSummary = useMemo(() => {
-    const parts: string[] = [];
-    if (activeQuery) parts.push(`"${activeQuery}"`);
-    if (conditions.length) parts.push(`cond: ${conditions.join(", ")}`);
-    if (buyingOptions.length) parts.push(`format: ${buyingOptions.join(", ")}`);
-    if (priceMin || priceMax)
-      parts.push(`price: ${priceMin || "—"} – ${priceMax || "—"}`);
-    if (sellerSubset.size > 0)
-      parts.push(`sellers: ${sellerSubset.size} of ${sellers?.length ?? "—"}`);
-    if (sort) parts.push(`sort: ${sort}`);
-    return parts.length ? parts.join(" · ") : "no filters";
-  }, [
-    activeQuery,
-    conditions,
-    buyingOptions,
-    priceMin,
-    priceMax,
-    sellerSubset,
-    sort,
-    sellers,
-  ]);
-
   const showingFrom = page && page.items.length > 0 ? offset + 1 : 0;
   const showingTo = page ? offset + page.items.length : 0;
 
@@ -383,21 +329,34 @@ export function SellerFeed() {
             Recent diecast listings across your saved sellers.
           </p>
         </div>
-        <button
-          type="button"
-          className="btn-secondary"
-          onClick={() => loadFeed(offset)}
-          disabled={loading}
-          title="Refresh the current page"
-        >
-          {loading ? "Refreshing…" : "Refresh"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => setManageOpen(true)}
+          >
+            Manage Saved Sellers…
+          </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => loadFeed(offset)}
+            disabled={loading}
+            title="Refresh the current page"
+          >
+            {loading ? "Refreshing…" : "Refresh"}
+          </button>
+        </div>
       </header>
 
+      {/* Same shape as Browse's filter card (DCH-35): search row with the
+          submit and the conditional Clear control, then one grid of labeled
+          filters. Search submits query + filters together, so the old
+          duplicate "Apply filters" button and the summary footer are gone. */}
       <form onSubmit={onApplyFilters} className="card space-y-3">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <input
-            className="input flex-1"
+            className="input flex-1 min-w-[12rem]"
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -411,6 +370,12 @@ export function SellerFeed() {
           >
             {loading ? "Searching…" : "Search"}
           </button>
+          {filtersActive && (
+            <ClearFiltersButton
+              onClear={() => void onResetFilters()}
+              className="shrink-0"
+            />
+          )}
         </div>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,15rem),1fr))] gap-3">
           <FilterChips
@@ -465,78 +430,46 @@ export function SellerFeed() {
               placeholder="e.g. 100"
             />
           </div>
-          <div>
-            <label className="label">Sellers</label>
-            {sellers === null || sellers.length === 0 ? (
-              <div className="text-xs text-fg-subtle">
-                No saved sellers yet.
-              </div>
-            ) : (
-              <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto">
-                {sellers.map((s) => {
-                  const key = s.username.toLowerCase();
-                  const active = sellerSubset.has(key);
-                  return (
-                    <button
-                      key={s.id}
-                      type="button"
-                      className={`px-2 py-1 rounded border text-xs ${
-                        active
-                          ? "border-accent text-accent bg-accent/10"
-                          : "border-border text-fg-muted hover:text-fg"
-                      }`}
-                      onClick={() => toggleSubsetUsername(s.username)}
-                      title={
-                        active
-                          ? `Showing ${s.username}`
-                          : `Add ${s.username} to subset`
-                      }
-                    >
-                      {s.username}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            <p className="text-xs text-fg-faint mt-1">
-              Empty = all saved sellers.
-            </p>
-          </div>
         </div>
-        <div className="flex items-center justify-between text-xs text-fg-subtle">
-          <span>{filterSummary}</span>
-          <div className="flex gap-2">
-            {filtersActive && (
-              <button
-                type="button"
-                className="btn-secondary text-xs"
-                onClick={() => void onResetFilters()}
-              >
-                Clear filters
-              </button>
-            )}
-            <button
-              type="submit"
-              className="btn-primary text-xs"
-              disabled={loading}
-            >
-              Apply filters
-            </button>
-          </div>
+        {/* Sellers get a full-width row: the chip list grows with every
+            saved seller, and boxing it into one grid cell was most of what
+            made the old panel feel cramped. */}
+        <div>
+          <label className="label">Sellers</label>
+          {sellers === null || sellers.length === 0 ? (
+            <div className="text-xs text-fg-subtle">No saved sellers yet.</div>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {sellers.map((s) => {
+                const key = s.username.toLowerCase();
+                const active = sellerSubset.has(key);
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    className={`px-2 py-1 rounded border text-xs ${
+                      active
+                        ? "border-accent text-accent bg-accent/10"
+                        : "border-border text-fg-muted hover:text-fg"
+                    }`}
+                    onClick={() => toggleSubsetUsername(s.username)}
+                    title={
+                      active
+                        ? `Showing ${s.username}`
+                        : `Add ${s.username} to subset`
+                    }
+                  >
+                    {s.username}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <p className="text-xs text-fg-faint mt-1">
+            Empty = all saved sellers. Filters apply on Search.
+          </p>
         </div>
       </form>
-
-      <ManageSellersPanel
-        open={manageOpen}
-        onToggle={() => setManageOpen((o) => !o)}
-        sellers={sellers}
-        syncing={syncing}
-        syncMessage={syncMessage}
-        onSync={onSyncSellers}
-        onAdd={() => setEditing("new")}
-        onEdit={setEditing}
-        onDelete={onDeleteSeller}
-      />
 
       {error && <ErrorBanner error={error} />}
       <NoticeBanner message={notice} tone="warning" />
@@ -546,8 +479,15 @@ export function SellerFeed() {
 
       {sellers !== null && sellers.length === 0 ? (
         <div className="card text-sm text-fg-muted">
-          No saved sellers yet — add a few in the management panel above, or
-          save them from a listing on the{" "}
+          No saved sellers yet — add a few via{" "}
+          <button
+            type="button"
+            className="text-accent hover:underline"
+            onClick={() => setManageOpen(true)}
+          >
+            Manage Saved Sellers
+          </button>
+          , or save them from a listing on the{" "}
           <ViewLink to="/browse" className="text-accent hover:underline">
             Browse eBay
           </ViewLink>{" "}
@@ -560,9 +500,18 @@ export function SellerFeed() {
           <div className="card text-sm text-fg-muted">Loading…</div>
         )
       ) : page.items.length === 0 ? (
-        <div className="card text-sm text-fg-muted">
-          No recent listings match the current filters.
-        </div>
+        // Two different messages (DCH-35): filters excluding everything
+        // offers the way out; an unfiltered feed with nothing in it doesn't.
+        filtersActive ? (
+          <FilteredEmpty
+            onClear={() => void onResetFilters()}
+            noun="listings"
+          />
+        ) : (
+          <div className="card text-sm text-fg-muted">
+            No recent listings from your saved sellers.
+          </div>
+        )
       ) : (
         <>
           <div className="flex items-center justify-between text-xs text-fg-subtle">
@@ -572,22 +521,12 @@ export function SellerFeed() {
             </div>
             <div className="flex items-center gap-2">
               <ImageSizeToggle size={imgSize} onChange={setImgSize} />
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => loadFeed(Math.max(0, offset - PAGE_SIZE))}
-                disabled={offset === 0 || loading}
-              >
-                ← Previous
-              </button>
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => loadFeed(offset + PAGE_SIZE)}
-                disabled={!page.has_more || loading}
-              >
-                Next →
-              </button>
+              <Pager
+                offset={offset}
+                hasMore={page.has_more}
+                loading={loading}
+                onPage={loadFeed}
+              />
             </div>
           </div>
 
@@ -604,7 +543,33 @@ export function SellerFeed() {
               />
             ))}
           </ul>
+
+          {/* Repeated below the grid (DCH-16): a page of large cards used to
+              end with nowhere to go but back up to the toolbar. */}
+          <div className="flex items-center justify-between text-xs text-fg-subtle">
+            <div>
+              Showing {showingFrom}–{showingTo} of {formatCount(page.total)}{" "}
+              results
+            </div>
+            <Pager
+              offset={offset}
+              hasMore={page.has_more}
+              loading={loading}
+              onPage={loadFeed}
+            />
+          </div>
         </>
+      )}
+
+      {manageOpen && (
+        <ManageSellersDialog
+          sellers={sellers}
+          onClose={() => setManageOpen(false)}
+          onChanged={reloadSellers}
+          onRemoved={onSellerRemoved}
+          onAdd={() => setEditing("new")}
+          onEdit={setEditing}
+        />
       )}
 
       {editing && (
@@ -618,155 +583,209 @@ export function SellerFeed() {
   );
 }
 
-function ManageSellersPanel({
-  open,
-  onToggle,
-  sellers,
-  syncing,
-  syncMessage,
-  onSync,
-  onAdd,
-  onEdit,
-  onDelete,
+function Pager({
+  offset,
+  hasMore,
+  loading,
+  onPage,
 }: {
-  open: boolean;
-  onToggle: () => void;
-  sellers: SavedSeller[] | null;
-  syncing: boolean;
-  syncMessage: string | null;
-  onSync: () => void;
-  onAdd: () => void;
-  onEdit: (s: SavedSeller) => void;
-  onDelete: (s: SavedSeller) => void;
+  offset: number;
+  hasMore: boolean;
+  loading: boolean;
+  onPage: (nextOffset: number) => Promise<void>;
 }) {
-  const count = sellers?.length ?? 0;
   return (
-    <section className="card !p-0 overflow-hidden">
+    <div className="flex items-center gap-2">
       <button
         type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-bg-elevated transition-colors"
+        className="btn-secondary"
+        onClick={() => void onPage(Math.max(0, offset - PAGE_SIZE))}
+        disabled={offset === 0 || loading}
       >
-        <div>
-          <h3 className="text-sm font-medium">Manage saved sellers</h3>
-          <p className="text-xs text-fg-subtle mt-0.5">
-            {sellers === null
-              ? "Loading…"
-              : count === 0
-                ? "Nothing here yet — click to add or sync from eBay."
-                : `${count} saved seller${count === 1 ? "" : "s"}`}
-          </p>
-        </div>
-        <Chevron direction={open ? "down" : "right"} />
+        ← Previous
       </button>
-      {open && (
-        <div className="border-t border-border px-4 py-3 space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="text-xs text-fg-subtle">
-              Bookmark eBay sellers you trust — their recent listings show up in
-              the feed.
-            </div>
-            <div className="flex gap-2">
-              <button
-                className="btn-secondary text-xs"
-                type="button"
-                onClick={onSync}
-                disabled={syncing}
-                title="Pull your eBay favorite sellers and prune ones removed there"
-              >
-                {syncing ? "Syncing…" : "Sync from eBay"}
-              </button>
-              <button
-                className="btn-primary text-xs"
-                type="button"
-                onClick={onAdd}
-              >
-                Add seller
-              </button>
-            </div>
+      <button
+        type="button"
+        className="btn-secondary"
+        onClick={() => void onPage(offset + PAGE_SIZE)}
+        disabled={!hasMore || loading}
+      >
+        Next →
+      </button>
+    </div>
+  );
+}
+
+/** Seller management as a dialog (DCH-16), mirroring Manage Groups on Saved
+ *  Listings: the shared `Modal`, action buttons in the footer, its own
+ *  inline error so a failed sync or remove surfaces where the user is
+ *  looking. Add/Edit open `SellerEditor` on top — same stacked-dialog
+ *  arrangement as GroupEditorDialog over ManageGroupsDialog. */
+function ManageSellersDialog({
+  sellers,
+  onClose,
+  onChanged,
+  onRemoved,
+  onAdd,
+  onEdit,
+}: {
+  sellers: SavedSeller[] | null;
+  onClose: () => void;
+  onChanged: () => Promise<void>;
+  onRemoved: (s: SavedSeller) => Promise<void>;
+  onAdd: () => void;
+  onEdit: (s: SavedSeller) => void;
+}) {
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onSync() {
+    setSyncing(true);
+    setSyncMessage(null);
+    setError(null);
+    try {
+      const summary: SavedSyncSummary = await api.syncEbaySaved();
+      setSyncMessage(
+        `Sellers: +${summary.sellers_created} new, ~${summary.sellers_updated} updated, -${summary.sellers_pruned} pruned (of ${summary.sellers_seen}).`,
+      );
+      await onChanged();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function onDelete(s: SavedSeller) {
+    if (!window.confirm(`Remove saved seller "${s.username}"?`)) return;
+    setError(null);
+    try {
+      await api.removeSavedSeller(s.id);
+      await onRemoved(s);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  return (
+    <Modal
+      title="Manage Saved Sellers"
+      description="Bookmark eBay sellers you trust — their recent listings show up in the feed."
+      onClose={onClose}
+      size="max-w-2xl"
+      scroll="none"
+      panelClassName="max-h-[85vh] flex flex-col"
+      busy={syncing}
+      footer={
+        <>
+          <div className="flex-1 flex items-center gap-2">
+            <button
+              className="btn-secondary"
+              type="button"
+              onClick={() => void onSync()}
+              disabled={syncing}
+              title="Pull your eBay favorite sellers and prune ones removed there"
+            >
+              {syncing ? "Syncing…" : "Sync from eBay"}
+            </button>
+            <button
+              className="btn-primary"
+              type="button"
+              onClick={onAdd}
+              disabled={syncing}
+            >
+              Add seller
+            </button>
           </div>
-          {syncMessage && (
-            <div className="text-xs text-emerald-400">{syncMessage}</div>
-          )}
-          {sellers === null ? null : sellers.length === 0 ? (
-            <div className="text-xs text-fg-muted">No saved sellers yet.</div>
-          ) : (
-            <ul className="space-y-2 max-h-72 overflow-y-auto">
-              {sellers.map((s) => (
-                <li
-                  key={s.id}
-                  className="flex items-start gap-3 border border-border rounded px-3 py-2"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium flex items-center gap-2">
-                      <span className="truncate">
-                        {s.display_name ? (
-                          <>
-                            {s.display_name}{" "}
-                            <span className="text-fg-subtle">
-                              ({s.username})
-                            </span>
-                          </>
-                        ) : (
-                          s.username
-                        )}
-                      </span>
-                      {s.ebay_origin && (
-                        <span
-                          className="text-[10px] px-1.5 py-0.5 rounded border border-border text-fg-subtle"
-                          title="Synced from eBay favorites. Removed there → pruned here on next sync."
-                        >
-                          from eBay
-                        </span>
-                      )}
-                    </div>
-                    {s.notes && (
-                      <div className="text-xs text-fg-muted mt-0.5 whitespace-pre-wrap">
-                        {s.notes}
-                      </div>
-                    )}
-                    <div className="text-xs text-fg-faint mt-1">
-                      Saved {formatDateTime(s.created_at)}
-                    </div>
-                  </div>
-                  <div className="flex flex-col items-end gap-1 shrink-0 text-xs">
-                    <a
-                      className="text-accent hover:underline"
-                      href={`https://www.ebay.com/usr/${encodeURIComponent(s.username)}`}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        void openExternal(
-                          `https://www.ebay.com/usr/${encodeURIComponent(s.username)}`,
-                        );
-                      }}
-                    >
-                      View on eBay →
-                    </a>
-                    <div className="flex gap-2">
-                      <button
-                        className="text-fg-muted hover:text-fg"
-                        type="button"
-                        onClick={() => onEdit(s)}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        className="link-danger"
-                        type="button"
-                        onClick={() => onDelete(s)}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+          <button type="button" className="btn-secondary" onClick={onClose}>
+            Close
+          </button>
+        </>
+      }
+    >
+      {error && <ErrorBanner error={error} variant="inline" className="mb-2" />}
+      {syncMessage && (
+        <div className="text-xs text-emerald-400 mb-2">{syncMessage}</div>
       )}
-    </section>
+      {sellers === null ? (
+        <div className="text-xs text-fg-subtle">Loading…</div>
+      ) : sellers.length === 0 ? (
+        <div className="text-xs text-fg-muted">
+          No saved sellers yet — add one, or sync your eBay favorites.
+        </div>
+      ) : (
+        <ul className="space-y-2 overflow-y-auto min-h-0">
+          {sellers.map((s) => (
+            <li
+              key={s.id}
+              className="flex items-start gap-3 border border-border rounded px-3 py-2"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium flex items-center gap-2">
+                  <span className="truncate">
+                    {s.display_name ? (
+                      <>
+                        {s.display_name}{" "}
+                        <span className="text-fg-subtle">({s.username})</span>
+                      </>
+                    ) : (
+                      s.username
+                    )}
+                  </span>
+                  {s.ebay_origin && (
+                    <span
+                      className="text-[10px] px-1.5 py-0.5 rounded border border-border text-fg-subtle"
+                      title="Synced from eBay favorites. Removed there → pruned here on next sync."
+                    >
+                      from eBay
+                    </span>
+                  )}
+                </div>
+                {s.notes && (
+                  <div className="text-xs text-fg-muted mt-0.5 whitespace-pre-wrap">
+                    {s.notes}
+                  </div>
+                )}
+                <div className="text-xs text-fg-faint mt-1">
+                  Saved {formatDateTime(s.created_at)}
+                </div>
+              </div>
+              <div className="flex flex-col items-end gap-1 shrink-0 text-xs">
+                <a
+                  className="text-accent hover:underline"
+                  href={`https://www.ebay.com/usr/${encodeURIComponent(s.username)}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    void openExternal(
+                      `https://www.ebay.com/usr/${encodeURIComponent(s.username)}`,
+                    );
+                  }}
+                >
+                  View on eBay →
+                </a>
+                <div className="flex gap-2">
+                  <button
+                    className="text-fg-muted hover:text-fg"
+                    type="button"
+                    onClick={() => onEdit(s)}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    className="link-danger"
+                    type="button"
+                    onClick={() => onDelete(s)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Modal>
   );
 }
 
@@ -1010,30 +1029,6 @@ function SellerEditor({
         </div>
       </div>
     </Modal>
-  );
-}
-
-function Chevron({ direction }: { direction: "right" | "down" }) {
-  const rotate = direction === "down" ? 270 : 180;
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      className="text-fg-subtle shrink-0"
-      style={{
-        transform: `rotate(${rotate}deg)`,
-        transition: "transform 150ms ease",
-      }}
-    >
-      <polyline points="15 18 9 12 15 6" />
-    </svg>
   );
 }
 
