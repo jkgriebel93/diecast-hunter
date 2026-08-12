@@ -2194,6 +2194,34 @@ pub async fn list_saved_sellers(state: State<'_, AppState>) -> AppResult<Vec<sav
 }
 
 #[tauri::command]
+pub async fn list_hidden_feed_listings(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<crate::hidden_feed::HiddenFeedListing>> {
+    crate::hidden_feed::list(&state.db.pool).await
+}
+
+#[tauri::command]
+pub async fn hide_feed_listing(
+    state: State<'_, AppState>,
+    item_id: String,
+    title: Option<String>,
+    seller_username: Option<String>,
+) -> AppResult<crate::hidden_feed::HiddenFeedListing> {
+    crate::hidden_feed::hide(
+        &state.db.pool,
+        &item_id,
+        title.as_deref(),
+        seller_username.as_deref(),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn unhide_feed_listing(state: State<'_, AppState>, item_id: String) -> AppResult<()> {
+    crate::hidden_feed::unhide(&state.db.pool, &item_id).await
+}
+
+#[tauri::command]
 pub async fn add_saved_seller(
     state: State<'_, AppState>,
     input: saved::SavedSellerInput,

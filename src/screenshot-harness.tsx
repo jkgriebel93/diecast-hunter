@@ -32,6 +32,7 @@ import type {
   DriverOption,
   EbaySearchItem,
   EbaySearchPage,
+  HiddenFeedListing,
   ListingGroup,
   ListingRow,
   SavedSeller,
@@ -355,6 +356,15 @@ const FEED_PAGE: EbaySearchPage = {
   has_more: false,
 };
 
+/** DCH-51: two of the feed items above, pre-dismissed, so the hidden
+ *  presets show the exclusion and the "2 hidden" review affordance. */
+const HIDDEN_FEED: HiddenFeedListing[] = [2, 3].map((i) => ({
+  item_id: `v1|1${210000000 + i}|0`,
+  title: `${2020 + (i % 5)} ${DRIVERS[i % DRIVERS.length]} #${5 + i} Diecast 1/24 Elite`,
+  seller_username: SAVED_SELLERS[i % SAVED_SELLERS.length].username,
+  hidden_at: NOW - DAY,
+}));
+
 const RESULTS: Record<string, unknown> = {
   list_listings: LISTINGS,
   list_saved_sellers: SAVED_SELLERS,
@@ -370,6 +380,11 @@ const RESULTS: Record<string, unknown> = {
     sellers_updated: 3,
     sellers_pruned: 0,
   },
+  list_hidden_feed_listings: preset.startsWith("feed-hidden")
+    ? HIDDEN_FEED
+    : [],
+  hide_feed_listing: HIDDEN_FEED[0],
+  unhide_feed_listing: null,
   list_wishlists: WISHLISTS,
   create_wishlist: {
     wishlist_id: 3,
@@ -640,6 +655,10 @@ function Harness() {
         () => clickByText("button", "Manage Saved Sellers"),
         400,
       );
+      return () => clearTimeout(t);
+    }
+    if (preset === "feed-hidden-dialog") {
+      const t = setTimeout(() => clickByText("button", "2 hidden"), 400);
       return () => clearTimeout(t);
     }
     if (preset === "feed-filters" || preset === "feed-filtered-empty") {

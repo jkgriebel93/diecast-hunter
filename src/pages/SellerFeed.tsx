@@ -10,6 +10,7 @@ import {
   type EbaySearchFilters,
   type EbaySearchItem,
   type EbaySearchPage,
+  type HiddenFeedListing,
   type SavedSeller,
   type SavedSellerInput,
   type SavedSyncSummary,
@@ -82,6 +83,13 @@ export function SellerFeed() {
   const [manageOpen, setManageOpen] = useState(false);
   const [editing, setEditing] = useState<SavedSeller | "new" | null>(null);
 
+  /** "Not interested" dismissals (DCH-51), applied as a client-side
+   *  exclusion after every fetch — the feed is a live Browse search, so
+   *  the ids have to be subtracted from each page or dismissed listings
+   *  reappear on the next refresh. */
+  const [hidden, setHidden] = useState<HiddenFeedListing[]>([]);
+  const [hiddenOpen, setHiddenOpen] = useState(false);
+
   useEffect(() => {
     void initialLoad();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -115,6 +123,15 @@ export function SellerFeed() {
       setLoading(false);
     }
     void loadWatched();
+    void loadHidden();
+  }
+
+  async function loadHidden() {
+    try {
+      setHidden(await api.listHiddenFeedListings());
+    } catch {
+      // Non-fatal: dismissed listings temporarily reappear, nothing worse.
+    }
   }
 
   async function loadFeed(nextOffset: number, q = activeQuery) {
@@ -269,6 +286,45 @@ export function SellerFeed() {
     }
   }
 
+  /** Optimistic (DCH-51): the card vanishes on click, and the row is put
+   *  back if the write fails. No confirmation — dismissing is one click to
+   *  undo from the hidden-listings dialog, which is exactly the reversible
+   *  case the DCH-33 conventions exempt from `window.confirm`. */
+  async function onDismiss(item: EbaySearchItem) {
+    setError(null);
+    const prev = hidden;
+    setHidden((h) => [
+      {
+        item_id: item.item_id,
+        title: item.title,
+        seller_username: item.seller_username,
+        hidden_at: Math.floor(Date.now() / 1000),
+      },
+      ...h.filter((x) => x.item_id !== item.item_id),
+    ]);
+    try {
+      const saved = await api.hideFeedListing(
+        item.item_id,
+        item.title,
+        item.seller_username,
+      );
+      setHidden((h) => h.map((x) => (x.item_id === saved.item_id ? saved : x)));
+    } catch (e) {
+      setHidden(prev);
+      setError(String(e));
+    }
+  }
+
+  async function onUnhide(itemId: string) {
+    setError(null);
+    try {
+      await api.unhideFeedListing(itemId);
+      setHidden((h) => h.filter((x) => x.item_id !== itemId));
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   /** Called by the manage dialog after a successful remove — the deleted
    *  seller may be narrowing the feed, so it comes out of the subset too. */
   async function onSellerRemoved(s: SavedSeller) {
@@ -322,6 +378,11 @@ export function SellerFeed() {
 
   const showingFrom = page && page.items.length > 0 ? offset + 1 : 0;
   const showingTo = page ? offset + page.items.length : 0;
+
+  const hiddenIds = new Set(hidden.map((h) => h.item_id));
+  const visibleItems = page
+    ? page.items.filter((i) => !hiddenIds.has(i.item_id))
+    : [];
 
   return (
     <div className="p-6 space-y-4">
@@ -521,6 +582,19 @@ export function SellerFeed() {
             <div>
               Showing {showingFrom}–{showingTo} of {formatCount(page.total)}{" "}
               results
+              {hidden.length > 0 && (
+                <>
+                  {" · "}
+                  <button
+                    type="button"
+                    className="underline-offset-2 hover:underline hover:text-fg"
+                    onClick={() => setHiddenOpen(true)}
+                    title="Review listings you marked not interested"
+                  >
+                    {formatCount(hidden.length)} hidden
+                  </button>
+                </>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <ViewModeToggle mode={viewMode} onChange={setViewMode} />
@@ -539,23 +613,43 @@ export function SellerFeed() {
               cards themselves don't change, so switching never re-fetches,
               and the image-size toggle keeps working in both — Saved
               Listings' rows honor it too. */}
-          <ul
-            className={
-              viewMode === "list" ? "space-y-2" : GALLERY_GRID_CLASS[imgSize]
-            }
-          >
-            {page.items.map((item) => (
-              <FeedCard
-                key={item.item_id}
-                item={item}
-                busy={busyItemId === item.item_id}
-                watched={watchedByItemId.has(item.item_id)}
-                onWatch={() => onWatch(item)}
-                onUnwatch={() => onUnwatch(item)}
-                imgSizeClass={IMG_CLASS[imgSize]}
-              />
-            ))}
-          </ul>
+          {visibleItems.length === 0 ? (
+            // Every listing on this page was dismissed — a distinct state
+            // from an empty page, and the one place the review affordance
+            // is the whole message.
+            <div className="card text-sm text-fg-muted flex items-center justify-between gap-4">
+              <span>
+                All {formatCount(page.items.length)} listings on this page are
+                hidden.
+              </span>
+              <button
+                type="button"
+                className="text-xs text-fg-subtle hover:text-fg underline-offset-2 hover:underline shrink-0"
+                onClick={() => setHiddenOpen(true)}
+              >
+                Review hidden listings
+              </button>
+            </div>
+          ) : (
+            <ul
+              className={
+                viewMode === "list" ? "space-y-2" : GALLERY_GRID_CLASS[imgSize]
+              }
+            >
+              {visibleItems.map((item) => (
+                <FeedCard
+                  key={item.item_id}
+                  item={item}
+                  busy={busyItemId === item.item_id}
+                  watched={watchedByItemId.has(item.item_id)}
+                  onWatch={() => onWatch(item)}
+                  onUnwatch={() => onUnwatch(item)}
+                  onDismiss={() => onDismiss(item)}
+                  imgSizeClass={IMG_CLASS[imgSize]}
+                />
+              ))}
+            </ul>
+          )}
 
           {/* Repeated below the grid (DCH-16): a page of large cards used to
               end with nowhere to go but back up to the toolbar. */}
@@ -572,6 +666,14 @@ export function SellerFeed() {
             />
           </div>
         </>
+      )}
+
+      {hiddenOpen && (
+        <HiddenListingsDialog
+          hidden={hidden}
+          onClose={() => setHiddenOpen(false)}
+          onUnhide={onUnhide}
+        />
       )}
 
       {manageOpen && (
@@ -626,6 +728,69 @@ function Pager({
         Next →
       </button>
     </div>
+  );
+}
+
+/** Review and un-hide "not interested" dismissals (DCH-51). Un-hide is a
+ *  plain restore action, not a destructive one, so it wears the same muted
+ *  text style as Edit rather than a danger class. */
+function HiddenListingsDialog({
+  hidden,
+  onClose,
+  onUnhide,
+}: {
+  hidden: HiddenFeedListing[];
+  onClose: () => void;
+  onUnhide: (itemId: string) => Promise<void>;
+}) {
+  return (
+    <Modal
+      title="Hidden listings"
+      description="Listings you marked not interested. Un-hiding puts one back in the feed on its next appearance."
+      onClose={onClose}
+      size="max-w-2xl"
+      scroll="none"
+      panelClassName="max-h-[85vh] flex flex-col"
+      footer={
+        <button type="button" className="btn-secondary" onClick={onClose}>
+          Close
+        </button>
+      }
+    >
+      {hidden.length === 0 ? (
+        <div className="text-xs text-fg-muted">Nothing hidden.</div>
+      ) : (
+        <ul className="space-y-2 overflow-y-auto min-h-0">
+          {hidden.map((h) => (
+            <li
+              key={h.item_id}
+              className="flex items-start gap-3 border border-border rounded px-3 py-2"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate">
+                  {h.title ?? h.item_id}
+                </div>
+                <div className="text-xs text-fg-subtle mt-0.5">
+                  {[
+                    h.seller_username && `seller: ${h.seller_username}`,
+                    `hidden ${formatDateTime(h.hidden_at)}`,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="text-xs text-fg-muted hover:text-fg shrink-0"
+                onClick={() => void onUnhide(h.item_id)}
+              >
+                Un-hide
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Modal>
   );
 }
 
@@ -845,6 +1010,7 @@ function FeedCard({
   watched,
   onWatch,
   onUnwatch,
+  onDismiss,
   imgSizeClass,
 }: {
   item: EbaySearchItem;
@@ -852,6 +1018,7 @@ function FeedCard({
   watched: boolean;
   onWatch: () => void;
   onUnwatch: () => void;
+  onDismiss: () => void;
   imgSizeClass: string;
 }) {
   const total =
@@ -926,6 +1093,18 @@ function FeedCard({
               <div className="text-fg-muted">total {formatCents(total)}</div>
             )}
         </div>
+        {/* Upper right of the card, far right of a list row (DCH-51).
+            `link-danger` so it reads as destructive at rest; no confirm —
+            un-hiding is one click in the hidden-listings dialog. */}
+        <button
+          type="button"
+          className="link-danger self-start -mt-0.5 shrink-0 leading-none"
+          aria-label={`Not interested: ${item.title}`}
+          title="Not interested — hide from the feed"
+          onClick={onDismiss}
+        >
+          ✕
+        </button>
       </div>
       {!minimized && (
         <div className="flex items-center justify-end gap-3 text-xs">

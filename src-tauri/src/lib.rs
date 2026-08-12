@@ -5,6 +5,7 @@ mod dcr;
 mod ebay;
 mod error;
 mod export;
+mod hidden_feed;
 mod listing_groups;
 mod listing_receiver;
 mod local_collection;
@@ -286,6 +287,9 @@ pub fn run() {
             commands::delete_saved_search,
             commands::run_saved_search,
             commands::list_saved_sellers,
+            commands::list_hidden_feed_listings,
+            commands::hide_feed_listing,
+            commands::unhide_feed_listing,
             commands::add_saved_seller,
             commands::update_saved_seller,
             commands::remove_saved_seller,

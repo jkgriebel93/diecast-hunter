@@ -338,6 +338,20 @@ export const api = {
       offset,
     }),
   syncEbaySaved: () => invoke<SavedSyncSummary>("sync_ebay_saved"),
+  listHiddenFeedListings: () =>
+    invoke<HiddenFeedListing[]>("list_hidden_feed_listings"),
+  hideFeedListing: (
+    itemId: string,
+    title: string | null,
+    sellerUsername: string | null,
+  ) =>
+    invoke<HiddenFeedListing>("hide_feed_listing", {
+      itemId,
+      title,
+      sellerUsername,
+    }),
+  unhideFeedListing: (itemId: string) =>
+    invoke<void>("unhide_feed_listing", { itemId }),
   syncEbayAll: () => invoke<EbaySyncAllSummary>("sync_ebay_all"),
   listListingGroups: () => invoke<ListingGroup[]>("list_listing_groups"),
   createListingGroup: (input: ListingGroupInput) =>
@@ -656,6 +670,16 @@ export interface SavedSellerInput {
   username: string;
   display_name: string | null;
   notes: string | null;
+}
+
+/** A Seller Feed "not interested" dismissal (DCH-51). Title and seller are
+ *  snapshots taken at dismissal time for the review list — the listing may
+ *  be gone from eBay by then. */
+export interface HiddenFeedListing {
+  item_id: string;
+  title: string | null;
+  seller_username: string | null;
+  hidden_at: number;
 }
 
 export interface CleanupSummary {
