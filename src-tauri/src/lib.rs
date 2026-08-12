@@ -233,6 +233,7 @@ pub fn run() {
             commands::search_ebay_listings,
             commands::watch_ebay_listing,
             commands::unwatch_ebay_listing,
+            commands::feed_item_detail,
             commands::list_ebay_offers,
             commands::refresh_ebay_listing,
             commands::refresh_all_ebay_listings,

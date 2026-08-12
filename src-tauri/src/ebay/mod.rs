@@ -5,6 +5,7 @@
 pub mod browse;
 pub mod category;
 pub mod client;
+pub mod item_detail;
 pub mod oauth;
 pub mod offers;
 pub mod parse;
@@ -16,6 +17,7 @@ pub use category::is_diecast;
 
 pub use browse::{fetch_item_by_legacy_id, EbayItem};
 pub use client::{EbayClient, EbayEnvironment};
+pub use item_detail::{detail_from_raw, FeedItemDetail};
 pub use oauth::{
     authorize_url, disconnect, exchange_code, invalidate_user_token_cache,
     is_iaf_token_expired_error, status, user_iaf_token, OauthStatus, DEFAULT_SCOPES,

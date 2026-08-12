@@ -352,6 +352,8 @@ export const api = {
     }),
   unhideFeedListing: (itemId: string) =>
     invoke<void>("unhide_feed_listing", { itemId }),
+  feedItemDetail: (itemId: string) =>
+    invoke<FeedItemDetail>("feed_item_detail", { itemId }),
   syncEbayAll: () => invoke<EbaySyncAllSummary>("sync_ebay_all"),
   listListingGroups: () => invoke<ListingGroup[]>("list_listing_groups"),
   createListingGroup: (input: ListingGroupInput) =>
@@ -680,6 +682,22 @@ export interface HiddenFeedListing {
   title: string | null;
   seller_username: string | null;
   hidden_at: number;
+}
+
+export interface ItemAspect {
+  name: string;
+  value: string;
+}
+
+/** On-demand card detail for the Seller Feed (DCH-52): the full image set,
+ *  eBay "Item specifics", and a plain-text description (the backend strips
+ *  the seller HTML). Backed by `listings.raw_json` when the item is
+ *  watched, a Browse getItem call otherwise. */
+export interface FeedItemDetail {
+  item_id: string;
+  image_urls: string[];
+  aspects: ItemAspect[];
+  description: string | null;
 }
 
 export interface CleanupSummary {

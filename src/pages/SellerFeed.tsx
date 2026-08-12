@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { Fragment, FormEvent, useEffect, useState } from "react";
 import { ViewLink } from "@/components/ViewLink";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
@@ -10,6 +10,7 @@ import {
   type EbaySearchFilters,
   type EbaySearchItem,
   type EbaySearchPage,
+  type FeedItemDetail,
   type HiddenFeedListing,
   type SavedSeller,
   type SavedSellerInput,
@@ -89,6 +90,40 @@ export function SellerFeed() {
    *  reappear on the next refresh. */
   const [hidden, setHidden] = useState<HiddenFeedListing[]>([]);
   const [hiddenOpen, setHiddenOpen] = useState(false);
+
+  /** Per-item detail (DCH-52), cached for the session so a card expanded
+   *  twice never costs a second Browse call. Errors are per-card so one
+   *  failed fetch (RateLimited, offline) leaves the rest of the feed
+   *  usable, and are cleared on the next attempt so re-expanding retries. */
+  const [details, setDetails] = useState<Map<string, FeedItemDetail>>(
+    new Map(),
+  );
+  const [detailErrors, setDetailErrors] = useState<Map<string, string>>(
+    new Map(),
+  );
+  const [detailLoading, setDetailLoading] = useState<Set<string>>(new Set());
+
+  async function loadDetail(item: EbaySearchItem) {
+    if (details.has(item.item_id)) return;
+    setDetailErrors((prev) => {
+      const next = new Map(prev);
+      next.delete(item.item_id);
+      return next;
+    });
+    setDetailLoading((prev) => new Set(prev).add(item.item_id));
+    try {
+      const d = await api.feedItemDetail(item.item_id);
+      setDetails((prev) => new Map(prev).set(item.item_id, d));
+    } catch (e) {
+      setDetailErrors((prev) => new Map(prev).set(item.item_id, String(e)));
+    } finally {
+      setDetailLoading((prev) => {
+        const next = new Set(prev);
+        next.delete(item.item_id);
+        return next;
+      });
+    }
+  }
 
   useEffect(() => {
     void initialLoad();
@@ -645,6 +680,10 @@ export function SellerFeed() {
                   onWatch={() => onWatch(item)}
                   onUnwatch={() => onUnwatch(item)}
                   onDismiss={() => onDismiss(item)}
+                  detail={details.get(item.item_id)}
+                  detailLoading={detailLoading.has(item.item_id)}
+                  detailError={detailErrors.get(item.item_id)}
+                  onLoadDetail={() => void loadDetail(item)}
                   imgSizeClass={IMG_CLASS[imgSize]}
                 />
               ))}
@@ -1011,6 +1050,10 @@ function FeedCard({
   onWatch,
   onUnwatch,
   onDismiss,
+  detail,
+  detailLoading,
+  detailError,
+  onLoadDetail,
   imgSizeClass,
 }: {
   item: EbaySearchItem;
@@ -1019,6 +1062,10 @@ function FeedCard({
   onWatch: () => void;
   onUnwatch: () => void;
   onDismiss: () => void;
+  detail: FeedItemDetail | undefined;
+  detailLoading: boolean;
+  detailError: string | undefined;
+  onLoadDetail: () => void;
   imgSizeClass: string;
 }) {
   const total =
@@ -1028,6 +1075,28 @@ function FeedCard({
   const [minimized, toggleMinimized] = useMinimized(
     `ebay-item:${item.item_id}`,
   );
+  const [expanded, setExpanded] = useState(false);
+  const [imgIndex, setImgIndex] = useState(0);
+
+  // The search response carries one image; the full set arrives with the
+  // detail (DCH-52). Until then — and for single-image listings — there is
+  // nothing to cycle, so no carousel controls render.
+  const images =
+    expanded && detail && detail.image_urls.length > 0
+      ? detail.image_urls
+      : item.image_url
+        ? [item.image_url]
+        : [];
+  const shownImage =
+    images.length > 0 ? images[imgIndex % images.length] : null;
+
+  function onToggleDetails() {
+    const opening = !expanded;
+    setExpanded(opening);
+    // Cached details make this a no-op; a previous error retries.
+    if (opening) onLoadDetail();
+  }
+
   return (
     <li className={`card flex flex-col gap-2 ${minimized ? "!py-2" : ""}`}>
       <div className="flex gap-3">
@@ -1036,19 +1105,45 @@ function FeedCard({
           onToggle={toggleMinimized}
           className="self-start -mt-0.5"
         />
-        {!minimized &&
-          (item.image_url ? (
-            <img
-              src={item.image_url}
-              alt=""
-              loading="lazy"
-              className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
-            />
-          ) : (
-            <div
-              className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`}
-            />
-          ))}
+        {!minimized && (
+          <div className="shrink-0 space-y-1">
+            {shownImage ? (
+              <img
+                src={shownImage}
+                alt=""
+                loading="lazy"
+                className={`${imgSizeClass} object-cover rounded border border-border`}
+              />
+            ) : (
+              <div
+                className={`${imgSizeClass} rounded border border-border bg-bg-elevated`}
+              />
+            )}
+            {expanded && images.length > 1 && (
+              <div className="flex items-center justify-center gap-2 text-xs text-fg-subtle tabular-nums">
+                <button
+                  type="button"
+                  className="px-1.5 hover:text-fg"
+                  aria-label="Previous image"
+                  onClick={() =>
+                    setImgIndex((i) => (i - 1 + images.length) % images.length)
+                  }
+                >
+                  ‹
+                </button>
+                {(imgIndex % images.length) + 1} / {images.length}
+                <button
+                  type="button"
+                  className="px-1.5 hover:text-fg"
+                  aria-label="Next image"
+                  onClick={() => setImgIndex((i) => (i + 1) % images.length)}
+                >
+                  ›
+                </button>
+              </div>
+            )}
+          </div>
+        )}
         <div className="min-w-0 flex-1">
           <div
             className={`text-sm font-medium ${minimized ? "truncate" : "line-clamp-2"}`}
@@ -1108,6 +1203,14 @@ function FeedCard({
       </div>
       {!minimized && (
         <div className="flex items-center justify-end gap-3 text-xs">
+          <button
+            type="button"
+            className="text-fg-muted hover:text-fg"
+            onClick={onToggleDetails}
+            aria-expanded={expanded}
+          >
+            {expanded ? "Hide details" : "Details"}
+          </button>
           <a
             className="text-accent hover:underline"
             href={item.web_url}
@@ -1136,6 +1239,43 @@ function FeedCard({
             >
               {busy ? "Watching…" : "Watch"}
             </button>
+          )}
+        </div>
+      )}
+      {!minimized && expanded && (
+        <div className="border-t border-border pt-2 space-y-2 text-xs">
+          {detailError ? (
+            <ErrorBanner error={detailError} variant="inline" />
+          ) : detailLoading || !detail ? (
+            <div className="text-fg-subtle">Loading details…</div>
+          ) : (
+            <>
+              <div>
+                <div className="label">Item specifics</div>
+                {detail.aspects.length === 0 ? (
+                  <span className="text-fg-subtle">—</span>
+                ) : (
+                  <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+                    {detail.aspects.map((a) => (
+                      <Fragment key={`${a.name}:${a.value}`}>
+                        <div className="text-fg-subtle">{a.name}</div>
+                        <div className="min-w-0 break-words">{a.value}</div>
+                      </Fragment>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <div className="label">Description</div>
+                {detail.description ? (
+                  <div className="whitespace-pre-wrap text-fg-muted max-h-40 overflow-y-auto">
+                    {detail.description}
+                  </div>
+                ) : (
+                  <span className="text-fg-subtle">—</span>
+                )}
+              </div>
+            </>
           )}
         </div>
       )}

@@ -385,6 +385,25 @@ const RESULTS: Record<string, unknown> = {
     : [],
   hide_feed_listing: HIDDEN_FEED[0],
   unhide_feed_listing: null,
+  // DCH-52: `feed-details-error` leaves this command unstubbed on purpose —
+  // the rejected invoke is the real error path the shot documents.
+  ...(preset === "feed-details-error"
+    ? {}
+    : {
+        feed_item_detail: {
+          item_id: "v1|1210000001|0",
+          image_urls: [feedImage(21), feedImage(22), feedImage(23)],
+          aspects: [
+            { name: "Scale", value: "1:24" },
+            { name: "Driver", value: "Chase Elliott" },
+            { name: "Brand", value: "Action Racing Collectables" },
+            { name: "Year", value: "2021" },
+            { name: "Series", value: "Elite" },
+          ],
+          description:
+            "Mint in box, never displayed. Includes the original certificate of authenticity.\n1 of 5,004 produced.",
+        },
+      }),
   list_wishlists: WISHLISTS,
   create_wishlist: {
     wishlist_id: 3,
@@ -660,6 +679,31 @@ function Harness() {
     if (preset === "feed-hidden-dialog") {
       const t = setTimeout(() => clickByText("button", "2 hidden"), 400);
       return () => clearTimeout(t);
+    }
+    // DCH-52: expand the first card's details; the success preset also
+    // advances the carousel once so the controls and counter are visibly
+    // live rather than decorative.
+    if (preset === "feed-details" || preset === "feed-details-error") {
+      let cancelled = false;
+      void (async () => {
+        const step = async (fn: () => void, ms = 150) => {
+          await new Promise((r) => setTimeout(r, ms));
+          if (!cancelled) fn();
+        };
+        await step(() => clickByText("button", "Details"), 400);
+        if (preset === "feed-details") {
+          await step(() => {
+            document
+              .querySelector<HTMLButtonElement>(
+                'button[aria-label="Next image"]',
+              )
+              ?.click();
+          });
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
     }
     if (preset === "feed-filters" || preset === "feed-filtered-empty") {
       const t = setTimeout(() => {

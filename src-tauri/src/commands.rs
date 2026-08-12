@@ -468,6 +468,38 @@ pub async fn unwatch_ebay_listing(state: State<'_, AppState>, listing_id: i64) -
     sync::unwatch_and_delete(&state.db.pool, listing_id).await
 }
 
+/// Item detail for a Seller Feed card (DCH-52): full image set, item
+/// specifics, description. A watched listing's `raw_json` is the same
+/// Browse `getItem` payload, so the local copy is preferred and only
+/// unknown items cost a Browse call — the frontend additionally caches
+/// per session, so each expansion is at most one request ever.
+#[tauri::command]
+pub async fn feed_item_detail(
+    state: State<'_, AppState>,
+    item_id: String,
+) -> AppResult<crate::ebay::FeedItemDetail> {
+    let local: Option<String> = sqlx::query_scalar(
+        "SELECT raw_json FROM listings WHERE seller_code = 'ebay' AND external_id = ?1",
+    )
+    .bind(&item_id)
+    .fetch_optional(&state.db.pool)
+    .await?;
+    if let Some(raw) = local {
+        // An unparseable stored payload falls through to a fresh fetch
+        // rather than failing the expansion.
+        if let Ok(detail) = crate::ebay::detail_from_raw(&item_id, &raw) {
+            return Ok(detail);
+        }
+    }
+
+    let legacy = crate::ebay::legacy_id_from_v1(&item_id).ok_or_else(|| {
+        crate::error::AppError::Parse(format!("not a v1 eBay item id: {item_id}"))
+    })?;
+    let client = crate::ebay::EbayClient::from_settings(state.db.pool.clone()).await?;
+    let item = crate::ebay::fetch_item_by_legacy_id(&client, &legacy).await?;
+    crate::ebay::detail_from_raw(&item.item_id, &item.raw_json)
+}
+
 #[tauri::command]
 pub async fn list_ebay_offers(
     state: State<'_, AppState>,

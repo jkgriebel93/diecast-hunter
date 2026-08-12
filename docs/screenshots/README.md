@@ -51,6 +51,7 @@ underneath it and does nothing).
 | `manual-collection-entry/` | DCH-12 | Adding a car DCR doesn't list |
 | `seller-feed-chrome/` | DCH-16 | The reworked Seller Feed: Browse-shaped filter card with the shared Clear filters control, Manage Saved Sellers as a modal, FilteredEmpty, and the bottom pager |
 | `seller-feed-image-sizes/` | DCH-49 | The feed's gallery grid before (fixed 19rem columns crushing the md/lg cards) and after (columns sized to the image) |
+| `seller-feed-details/` | DCH-52 | An expanded card: live image carousel (2/3), Item specifics grid, plain-text description — and the per-card inline error state |
 | `seller-feed-dismiss/` | DCH-51 | The "not interested" ✕ on each card, the "N hidden" count with two items excluded from the feed, and the review/un-hide dialog |
 | `seller-feed-list-view/` | DCH-50 | The cards/list toggle in the toolbar, the list view's full-width rows, and the card grid beside it |
 | `seller-filter/` | DCH-44 | Saved Listings' Seller facet, open / picked / empty |
