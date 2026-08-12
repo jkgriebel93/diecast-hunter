@@ -338,6 +338,22 @@ export const api = {
       offset,
     }),
   syncEbaySaved: () => invoke<SavedSyncSummary>("sync_ebay_saved"),
+  listHiddenFeedListings: () =>
+    invoke<HiddenFeedListing[]>("list_hidden_feed_listings"),
+  hideFeedListing: (
+    itemId: string,
+    title: string | null,
+    sellerUsername: string | null,
+  ) =>
+    invoke<HiddenFeedListing>("hide_feed_listing", {
+      itemId,
+      title,
+      sellerUsername,
+    }),
+  unhideFeedListing: (itemId: string) =>
+    invoke<void>("unhide_feed_listing", { itemId }),
+  feedItemDetail: (itemId: string) =>
+    invoke<FeedItemDetail>("feed_item_detail", { itemId }),
   syncEbayAll: () => invoke<EbaySyncAllSummary>("sync_ebay_all"),
   listListingGroups: () => invoke<ListingGroup[]>("list_listing_groups"),
   createListingGroup: (input: ListingGroupInput) =>
@@ -656,6 +672,32 @@ export interface SavedSellerInput {
   username: string;
   display_name: string | null;
   notes: string | null;
+}
+
+/** A Seller Feed "not interested" dismissal (DCH-51). Title and seller are
+ *  snapshots taken at dismissal time for the review list — the listing may
+ *  be gone from eBay by then. */
+export interface HiddenFeedListing {
+  item_id: string;
+  title: string | null;
+  seller_username: string | null;
+  hidden_at: number;
+}
+
+export interface ItemAspect {
+  name: string;
+  value: string;
+}
+
+/** On-demand card detail for the Seller Feed (DCH-52): the full image set,
+ *  eBay "Item specifics", and a plain-text description (the backend strips
+ *  the seller HTML). Backed by `listings.raw_json` when the item is
+ *  watched, a Browse getItem call otherwise. */
+export interface FeedItemDetail {
+  item_id: string;
+  image_urls: string[];
+  aspects: ItemAspect[];
+  description: string | null;
 }
 
 export interface CleanupSummary {

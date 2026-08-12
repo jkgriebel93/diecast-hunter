@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { Fragment, FormEvent, useEffect, useState } from "react";
 import { ViewLink } from "@/components/ViewLink";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
@@ -10,6 +10,8 @@ import {
   type EbaySearchFilters,
   type EbaySearchItem,
   type EbaySearchPage,
+  type FeedItemDetail,
+  type HiddenFeedListing,
   type SavedSeller,
   type SavedSellerInput,
   type SavedSyncSummary,
@@ -82,6 +84,47 @@ export function SellerFeed() {
   const [manageOpen, setManageOpen] = useState(false);
   const [editing, setEditing] = useState<SavedSeller | "new" | null>(null);
 
+  /** "Not interested" dismissals (DCH-51), applied as a client-side
+   *  exclusion after every fetch — the feed is a live Browse search, so
+   *  the ids have to be subtracted from each page or dismissed listings
+   *  reappear on the next refresh. */
+  const [hidden, setHidden] = useState<HiddenFeedListing[]>([]);
+  const [hiddenOpen, setHiddenOpen] = useState(false);
+
+  /** Per-item detail (DCH-52), cached for the session so a card expanded
+   *  twice never costs a second Browse call. Errors are per-card so one
+   *  failed fetch (RateLimited, offline) leaves the rest of the feed
+   *  usable, and are cleared on the next attempt so re-expanding retries. */
+  const [details, setDetails] = useState<Map<string, FeedItemDetail>>(
+    new Map(),
+  );
+  const [detailErrors, setDetailErrors] = useState<Map<string, string>>(
+    new Map(),
+  );
+  const [detailLoading, setDetailLoading] = useState<Set<string>>(new Set());
+
+  async function loadDetail(item: EbaySearchItem) {
+    if (details.has(item.item_id)) return;
+    setDetailErrors((prev) => {
+      const next = new Map(prev);
+      next.delete(item.item_id);
+      return next;
+    });
+    setDetailLoading((prev) => new Set(prev).add(item.item_id));
+    try {
+      const d = await api.feedItemDetail(item.item_id);
+      setDetails((prev) => new Map(prev).set(item.item_id, d));
+    } catch (e) {
+      setDetailErrors((prev) => new Map(prev).set(item.item_id, String(e)));
+    } finally {
+      setDetailLoading((prev) => {
+        const next = new Set(prev);
+        next.delete(item.item_id);
+        return next;
+      });
+    }
+  }
+
   useEffect(() => {
     void initialLoad();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -115,6 +158,15 @@ export function SellerFeed() {
       setLoading(false);
     }
     void loadWatched();
+    void loadHidden();
+  }
+
+  async function loadHidden() {
+    try {
+      setHidden(await api.listHiddenFeedListings());
+    } catch {
+      // Non-fatal: dismissed listings temporarily reappear, nothing worse.
+    }
   }
 
   async function loadFeed(nextOffset: number, q = activeQuery) {
@@ -269,6 +321,45 @@ export function SellerFeed() {
     }
   }
 
+  /** Optimistic (DCH-51): the card vanishes on click, and the row is put
+   *  back if the write fails. No confirmation — dismissing is one click to
+   *  undo from the hidden-listings dialog, which is exactly the reversible
+   *  case the DCH-33 conventions exempt from `window.confirm`. */
+  async function onDismiss(item: EbaySearchItem) {
+    setError(null);
+    const prev = hidden;
+    setHidden((h) => [
+      {
+        item_id: item.item_id,
+        title: item.title,
+        seller_username: item.seller_username,
+        hidden_at: Math.floor(Date.now() / 1000),
+      },
+      ...h.filter((x) => x.item_id !== item.item_id),
+    ]);
+    try {
+      const saved = await api.hideFeedListing(
+        item.item_id,
+        item.title,
+        item.seller_username,
+      );
+      setHidden((h) => h.map((x) => (x.item_id === saved.item_id ? saved : x)));
+    } catch (e) {
+      setHidden(prev);
+      setError(String(e));
+    }
+  }
+
+  async function onUnhide(itemId: string) {
+    setError(null);
+    try {
+      await api.unhideFeedListing(itemId);
+      setHidden((h) => h.filter((x) => x.item_id !== itemId));
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   /** Called by the manage dialog after a successful remove — the deleted
    *  seller may be narrowing the feed, so it comes out of the subset too. */
   async function onSellerRemoved(s: SavedSeller) {
@@ -322,6 +413,11 @@ export function SellerFeed() {
 
   const showingFrom = page && page.items.length > 0 ? offset + 1 : 0;
   const showingTo = page ? offset + page.items.length : 0;
+
+  const hiddenIds = new Set(hidden.map((h) => h.item_id));
+  const visibleItems = page
+    ? page.items.filter((i) => !hiddenIds.has(i.item_id))
+    : [];
 
   return (
     <div className="p-6 space-y-4">
@@ -521,6 +617,19 @@ export function SellerFeed() {
             <div>
               Showing {showingFrom}–{showingTo} of {formatCount(page.total)}{" "}
               results
+              {hidden.length > 0 && (
+                <>
+                  {" · "}
+                  <button
+                    type="button"
+                    className="underline-offset-2 hover:underline hover:text-fg"
+                    onClick={() => setHiddenOpen(true)}
+                    title="Review listings you marked not interested"
+                  >
+                    {formatCount(hidden.length)} hidden
+                  </button>
+                </>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <ViewModeToggle mode={viewMode} onChange={setViewMode} />
@@ -539,23 +648,47 @@ export function SellerFeed() {
               cards themselves don't change, so switching never re-fetches,
               and the image-size toggle keeps working in both — Saved
               Listings' rows honor it too. */}
-          <ul
-            className={
-              viewMode === "list" ? "space-y-2" : GALLERY_GRID_CLASS[imgSize]
-            }
-          >
-            {page.items.map((item) => (
-              <FeedCard
-                key={item.item_id}
-                item={item}
-                busy={busyItemId === item.item_id}
-                watched={watchedByItemId.has(item.item_id)}
-                onWatch={() => onWatch(item)}
-                onUnwatch={() => onUnwatch(item)}
-                imgSizeClass={IMG_CLASS[imgSize]}
-              />
-            ))}
-          </ul>
+          {visibleItems.length === 0 ? (
+            // Every listing on this page was dismissed — a distinct state
+            // from an empty page, and the one place the review affordance
+            // is the whole message.
+            <div className="card text-sm text-fg-muted flex items-center justify-between gap-4">
+              <span>
+                All {formatCount(page.items.length)} listings on this page are
+                hidden.
+              </span>
+              <button
+                type="button"
+                className="text-xs text-fg-subtle hover:text-fg underline-offset-2 hover:underline shrink-0"
+                onClick={() => setHiddenOpen(true)}
+              >
+                Review hidden listings
+              </button>
+            </div>
+          ) : (
+            <ul
+              className={
+                viewMode === "list" ? "space-y-2" : GALLERY_GRID_CLASS[imgSize]
+              }
+            >
+              {visibleItems.map((item) => (
+                <FeedCard
+                  key={item.item_id}
+                  item={item}
+                  busy={busyItemId === item.item_id}
+                  watched={watchedByItemId.has(item.item_id)}
+                  onWatch={() => onWatch(item)}
+                  onUnwatch={() => onUnwatch(item)}
+                  onDismiss={() => onDismiss(item)}
+                  detail={details.get(item.item_id)}
+                  detailLoading={detailLoading.has(item.item_id)}
+                  detailError={detailErrors.get(item.item_id)}
+                  onLoadDetail={() => void loadDetail(item)}
+                  imgSizeClass={IMG_CLASS[imgSize]}
+                />
+              ))}
+            </ul>
+          )}
 
           {/* Repeated below the grid (DCH-16): a page of large cards used to
               end with nowhere to go but back up to the toolbar. */}
@@ -572,6 +705,14 @@ export function SellerFeed() {
             />
           </div>
         </>
+      )}
+
+      {hiddenOpen && (
+        <HiddenListingsDialog
+          hidden={hidden}
+          onClose={() => setHiddenOpen(false)}
+          onUnhide={onUnhide}
+        />
       )}
 
       {manageOpen && (
@@ -626,6 +767,69 @@ function Pager({
         Next →
       </button>
     </div>
+  );
+}
+
+/** Review and un-hide "not interested" dismissals (DCH-51). Un-hide is a
+ *  plain restore action, not a destructive one, so it wears the same muted
+ *  text style as Edit rather than a danger class. */
+function HiddenListingsDialog({
+  hidden,
+  onClose,
+  onUnhide,
+}: {
+  hidden: HiddenFeedListing[];
+  onClose: () => void;
+  onUnhide: (itemId: string) => Promise<void>;
+}) {
+  return (
+    <Modal
+      title="Hidden listings"
+      description="Listings you marked not interested. Un-hiding puts one back in the feed on its next appearance."
+      onClose={onClose}
+      size="max-w-2xl"
+      scroll="none"
+      panelClassName="max-h-[85vh] flex flex-col"
+      footer={
+        <button type="button" className="btn-secondary" onClick={onClose}>
+          Close
+        </button>
+      }
+    >
+      {hidden.length === 0 ? (
+        <div className="text-xs text-fg-muted">Nothing hidden.</div>
+      ) : (
+        <ul className="space-y-2 overflow-y-auto min-h-0">
+          {hidden.map((h) => (
+            <li
+              key={h.item_id}
+              className="flex items-start gap-3 border border-border rounded px-3 py-2"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate">
+                  {h.title ?? h.item_id}
+                </div>
+                <div className="text-xs text-fg-subtle mt-0.5">
+                  {[
+                    h.seller_username && `seller: ${h.seller_username}`,
+                    `hidden ${formatDateTime(h.hidden_at)}`,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="text-xs text-fg-muted hover:text-fg shrink-0"
+                onClick={() => void onUnhide(h.item_id)}
+              >
+                Un-hide
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Modal>
   );
 }
 
@@ -845,6 +1049,11 @@ function FeedCard({
   watched,
   onWatch,
   onUnwatch,
+  onDismiss,
+  detail,
+  detailLoading,
+  detailError,
+  onLoadDetail,
   imgSizeClass,
 }: {
   item: EbaySearchItem;
@@ -852,6 +1061,11 @@ function FeedCard({
   watched: boolean;
   onWatch: () => void;
   onUnwatch: () => void;
+  onDismiss: () => void;
+  detail: FeedItemDetail | undefined;
+  detailLoading: boolean;
+  detailError: string | undefined;
+  onLoadDetail: () => void;
   imgSizeClass: string;
 }) {
   const total =
@@ -861,6 +1075,28 @@ function FeedCard({
   const [minimized, toggleMinimized] = useMinimized(
     `ebay-item:${item.item_id}`,
   );
+  const [expanded, setExpanded] = useState(false);
+  const [imgIndex, setImgIndex] = useState(0);
+
+  // The search response carries one image; the full set arrives with the
+  // detail (DCH-52). Until then — and for single-image listings — there is
+  // nothing to cycle, so no carousel controls render.
+  const images =
+    expanded && detail && detail.image_urls.length > 0
+      ? detail.image_urls
+      : item.image_url
+        ? [item.image_url]
+        : [];
+  const shownImage =
+    images.length > 0 ? images[imgIndex % images.length] : null;
+
+  function onToggleDetails() {
+    const opening = !expanded;
+    setExpanded(opening);
+    // Cached details make this a no-op; a previous error retries.
+    if (opening) onLoadDetail();
+  }
+
   return (
     <li className={`card flex flex-col gap-2 ${minimized ? "!py-2" : ""}`}>
       <div className="flex gap-3">
@@ -869,19 +1105,45 @@ function FeedCard({
           onToggle={toggleMinimized}
           className="self-start -mt-0.5"
         />
-        {!minimized &&
-          (item.image_url ? (
-            <img
-              src={item.image_url}
-              alt=""
-              loading="lazy"
-              className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
-            />
-          ) : (
-            <div
-              className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`}
-            />
-          ))}
+        {!minimized && (
+          <div className="shrink-0 space-y-1">
+            {shownImage ? (
+              <img
+                src={shownImage}
+                alt=""
+                loading="lazy"
+                className={`${imgSizeClass} object-cover rounded border border-border`}
+              />
+            ) : (
+              <div
+                className={`${imgSizeClass} rounded border border-border bg-bg-elevated`}
+              />
+            )}
+            {expanded && images.length > 1 && (
+              <div className="flex items-center justify-center gap-2 text-xs text-fg-subtle tabular-nums">
+                <button
+                  type="button"
+                  className="px-1.5 hover:text-fg"
+                  aria-label="Previous image"
+                  onClick={() =>
+                    setImgIndex((i) => (i - 1 + images.length) % images.length)
+                  }
+                >
+                  ‹
+                </button>
+                {(imgIndex % images.length) + 1} / {images.length}
+                <button
+                  type="button"
+                  className="px-1.5 hover:text-fg"
+                  aria-label="Next image"
+                  onClick={() => setImgIndex((i) => (i + 1) % images.length)}
+                >
+                  ›
+                </button>
+              </div>
+            )}
+          </div>
+        )}
         <div className="min-w-0 flex-1">
           <div
             className={`text-sm font-medium ${minimized ? "truncate" : "line-clamp-2"}`}
@@ -926,9 +1188,29 @@ function FeedCard({
               <div className="text-fg-muted">total {formatCents(total)}</div>
             )}
         </div>
+        {/* Upper right of the card, far right of a list row (DCH-51).
+            `link-danger` so it reads as destructive at rest; no confirm —
+            un-hiding is one click in the hidden-listings dialog. */}
+        <button
+          type="button"
+          className="link-danger self-start -mt-0.5 shrink-0 leading-none"
+          aria-label={`Not interested: ${item.title}`}
+          title="Not interested — hide from the feed"
+          onClick={onDismiss}
+        >
+          ✕
+        </button>
       </div>
       {!minimized && (
         <div className="flex items-center justify-end gap-3 text-xs">
+          <button
+            type="button"
+            className="text-fg-muted hover:text-fg"
+            onClick={onToggleDetails}
+            aria-expanded={expanded}
+          >
+            {expanded ? "Hide details" : "Details"}
+          </button>
           <a
             className="text-accent hover:underline"
             href={item.web_url}
@@ -957,6 +1239,43 @@ function FeedCard({
             >
               {busy ? "Watching…" : "Watch"}
             </button>
+          )}
+        </div>
+      )}
+      {!minimized && expanded && (
+        <div className="border-t border-border pt-2 space-y-2 text-xs">
+          {detailError ? (
+            <ErrorBanner error={detailError} variant="inline" />
+          ) : detailLoading || !detail ? (
+            <div className="text-fg-subtle">Loading details…</div>
+          ) : (
+            <>
+              <div>
+                <div className="label">Item specifics</div>
+                {detail.aspects.length === 0 ? (
+                  <span className="text-fg-subtle">—</span>
+                ) : (
+                  <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+                    {detail.aspects.map((a) => (
+                      <Fragment key={`${a.name}:${a.value}`}>
+                        <div className="text-fg-subtle">{a.name}</div>
+                        <div className="min-w-0 break-words">{a.value}</div>
+                      </Fragment>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <div className="label">Description</div>
+                {detail.description ? (
+                  <div className="whitespace-pre-wrap text-fg-muted max-h-40 overflow-y-auto">
+                    {detail.description}
+                  </div>
+                ) : (
+                  <span className="text-fg-subtle">—</span>
+                )}
+              </div>
+            </>
           )}
         </div>
       )}
