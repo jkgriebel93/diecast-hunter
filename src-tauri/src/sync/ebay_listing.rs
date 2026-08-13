@@ -261,20 +261,67 @@ async fn upsert_listing(pool: &SqlitePool, item: &EbayItem) -> AppResult<(i64, b
 }
 
 async fn insert_history(pool: &SqlitePool, listing_id: i64, item: &EbayItem) -> AppResult<()> {
-    let now = Utc::now().timestamp();
+    insert_history_if_changed(
+        pool,
+        listing_id,
+        item.price_cents,
+        item.shipping_cents,
+        &item.status,
+    )
+    .await?;
+    Ok(())
+}
+
+/// Append a history observation only when it differs from the listing's
+/// most recent one (DCH-56). Unconditional appends made 97.4% of the table
+/// redundant — `listing_history` is only meaningful when something changed,
+/// and the listing's *current* state is already on the `listings` row
+/// (`price_cents`/`status`/`last_seen_at`), so a skipped no-change row
+/// loses nothing derivable. The first observation for a listing always
+/// writes; a change back to earlier values writes too, because the
+/// comparison is against the latest row only.
+///
+/// Returns whether a row was written.
+async fn insert_history_if_changed(
+    pool: &SqlitePool,
+    listing_id: i64,
+    price_cents: Option<i64>,
+    shipping_cents: Option<i64>,
+    status: &str,
+) -> AppResult<bool> {
+    let last: Option<(Option<i64>, Option<i64>, Option<String>)> = sqlx::query_as(
+        "SELECT price_cents, shipping_cents, status
+         FROM listing_history
+         WHERE listing_id = ?
+         ORDER BY observed_at DESC, id DESC
+         LIMIT 1",
+    )
+    .bind(listing_id)
+    .fetch_optional(pool)
+    .await?;
+
+    if let Some((last_price, last_shipping, last_status)) = last {
+        if last_price == price_cents
+            && last_shipping == shipping_cents
+            && last_status.as_deref() == Some(status)
+        {
+            return Ok(false);
+        }
+    }
+
     sqlx::query(
         "INSERT INTO listing_history
             (listing_id, observed_at, price_cents, shipping_cents, status)
          VALUES (?, ?, ?, ?, ?)",
     )
     .bind(listing_id)
-    .bind(now)
-    .bind(item.price_cents)
-    .bind(item.shipping_cents)
-    .bind(&item.status)
+    .bind(Utc::now().timestamp())
+    .bind(price_cents)
+    .bind(shipping_cents)
+    .bind(status)
     .execute(pool)
     .await?;
-    Ok(())
+    Ok(true)
 }
 
 async fn ebay_seller_id(pool: &SqlitePool) -> AppResult<i64> {
@@ -282,4 +329,169 @@ async fn ebay_seller_id(pool: &SqlitePool) -> AppResult<i64> {
         .fetch_one(pool)
         .await?;
     Ok(row.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+    use std::str::FromStr;
+
+    async fn migrated_pool() -> SqlitePool {
+        let opts = SqliteConnectOptions::from_str("sqlite::memory:")
+            .unwrap()
+            .foreign_keys(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(opts)
+            .await
+            .expect("open in-memory db");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+        pool
+    }
+
+    async fn insert_listing(pool: &SqlitePool, external_id: &str) -> i64 {
+        sqlx::query(
+            "INSERT INTO listings (seller_id, external_id, url, title, saved_at, last_seen_at)
+             VALUES (1, ?, 'https://example.com', 'a listing', 1, 1)",
+        )
+        .bind(external_id)
+        .execute(pool)
+        .await
+        .unwrap()
+        .last_insert_rowid()
+    }
+
+    async fn history(pool: &SqlitePool, listing_id: i64) -> Vec<(Option<i64>, Option<String>)> {
+        sqlx::query_as(
+            "SELECT price_cents, status FROM listing_history
+             WHERE listing_id = ? ORDER BY observed_at, id",
+        )
+        .bind(listing_id)
+        .fetch_all(pool)
+        .await
+        .unwrap()
+    }
+
+    /// The DCH-56 contract in sequence: a first observation writes, a
+    /// repeat is skipped, a change writes, and a revert to earlier values
+    /// writes again — the comparison is against the latest row, not the
+    /// whole history.
+    #[tokio::test]
+    async fn history_skips_no_change_and_records_transitions() {
+        let pool = migrated_pool().await;
+        let id = insert_listing(&pool, "lst-1").await;
+
+        // Brand-new listing: first row always lands.
+        assert!(
+            insert_history_if_changed(&pool, id, Some(4500), Some(800), "active")
+                .await
+                .unwrap()
+        );
+        // Same tuple again (the 97.4% case): skipped.
+        assert!(
+            !insert_history_if_changed(&pool, id, Some(4500), Some(800), "active")
+                .await
+                .unwrap()
+        );
+        assert!(
+            !insert_history_if_changed(&pool, id, Some(4500), Some(800), "active")
+                .await
+                .unwrap()
+        );
+        // Price change: exactly one new row with the new values.
+        assert!(
+            insert_history_if_changed(&pool, id, Some(3900), Some(800), "active")
+                .await
+                .unwrap()
+        );
+        // Revert to the original price: still a transition, still recorded.
+        assert!(
+            insert_history_if_changed(&pool, id, Some(4500), Some(800), "active")
+                .await
+                .unwrap()
+        );
+        // Status-only change: recorded even with price and shipping steady.
+        assert!(
+            insert_history_if_changed(&pool, id, Some(4500), Some(800), "ended")
+                .await
+                .unwrap()
+        );
+
+        let rows = history(&pool, id).await;
+        let prices: Vec<Option<i64>> = rows.iter().map(|r| r.0).collect();
+        assert_eq!(prices, vec![Some(4500), Some(3900), Some(4500), Some(4500)]);
+        assert_eq!(rows.last().unwrap().1.as_deref(), Some("ended"));
+    }
+
+    /// NULL prices (some listings expose none) must compare equal to NULL,
+    /// not unequal-to-everything — otherwise every sync of such a listing
+    /// writes a row and the 97.4% problem returns for that subset.
+    #[tokio::test]
+    async fn history_treats_null_as_equal_to_null() {
+        let pool = migrated_pool().await;
+        let id = insert_listing(&pool, "lst-null").await;
+
+        assert!(insert_history_if_changed(&pool, id, None, None, "active")
+            .await
+            .unwrap());
+        assert!(!insert_history_if_changed(&pool, id, None, None, "active")
+            .await
+            .unwrap());
+        assert_eq!(history(&pool, id).await.len(), 1);
+    }
+
+    /// The 0031 cleanup collapses each run of consecutive identical
+    /// observations to its first + last row — the span survives, the
+    /// interior goes. Runs re-executed here against seeded rows because the
+    /// migration itself ran on an empty table.
+    #[tokio::test]
+    async fn cleanup_migration_keeps_first_and_last_of_each_run() {
+        let pool = migrated_pool().await;
+        let id = insert_listing(&pool, "lst-runs").await;
+        // Runs: 100,100,100 | 200,200 | 100. Interior of the first run
+        // (t=2) is the only deletable row.
+        for (t, price) in [(1, 100), (2, 100), (3, 100), (4, 200), (5, 200), (6, 100)] {
+            sqlx::query(
+                "INSERT INTO listing_history
+                    (listing_id, observed_at, price_cents, shipping_cents, status)
+                 VALUES (?, ?, ?, NULL, 'active')",
+            )
+            .bind(id)
+            .bind(t)
+            .bind(price)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        sqlx::raw_sql(include_str!(
+            "../../migrations/0031_collapse_history_duplicates.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let rows: Vec<(i64, Option<i64>)> = sqlx::query_as(
+            "SELECT observed_at, price_cents FROM listing_history
+             WHERE listing_id = ? ORDER BY observed_at",
+        )
+        .bind(id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (1, Some(100)),
+                (3, Some(100)),
+                (4, Some(200)),
+                (5, Some(200)),
+                (6, Some(100)),
+            ]
+        );
+    }
 }

@@ -1,29 +1,28 @@
 # Implementation order for open DCH tickets
 
-Rev 18, 2026-08-13. **DCH-55 shipped** (transactions + `synchronous=NORMAL` + `RETURNING`),
-the epic's compounding ticket: DCH-56, 54 and 60 now build on batched persist paths instead
-of rewriting them, and later sync timings are measured against the fixed baseline. Epic
+Rev 19, 2026-08-13. **DCH-56 shipped**: the watchlist sync now skips no-change
+`listing_history` observations, and a one-time migration collapsed the 97.4% of existing
+rows that recorded nothing (keeping each run's first + last row so spans survive). Epic
 **DCH-62** (from the DCH-23 [findings
 note](https://thistlegrow.atlassian.net/wiki/spaces/DCH/pages/53018626)) remains the front
-of the queue; DCH-53 shipped in rev 17, ahead of its Aug 16 window.
+of the queue; DCH-53 (rev 17) and DCH-55 (rev 18) are already in.
 
 The ordering principle is unchanged: compounding work — anything that makes later tickets
 cheaper or safer — goes before work that only pays off once.
 
-## Performance epic (DCH-62) — the remaining seven
+## Performance epic (DCH-62) — the remaining six
 
 No Jira links between these; the dependencies below are code-level. Three tracks: DCR
-traffic (57, 61), sync efficiency (56, 54), frontend + startup (58, 59, 60).
+traffic (57, 61), sync efficiency (54), frontend + startup (58, 59, 60).
 
 | # | Ticket | What | Why here |
 | --- | --- | --- | --- |
-| 1 | DCH-56 | Skip no-change `listing_history` rows | Small, and every day of delay adds ~90–650 redundant rows (97.4% of the table). Sits in the persist path 55 just batched, so it's a natural follow-on in the same files. |
-| 2 | DCH-54 | One `EbayClient` per watchlist sync | High priority, but sequenced after 55/56 because all three touch `ebay_watchlist`/`ebay_listing` — this completes the eBay-sync work in one contiguous stretch. Its AC asks for before/after timings, which are only meaningful now that 55's commit overhead is gone. |
-| 3 | DCH-57 | Reuse the cached DCR session | Extends the session cache to prewarm, presearch, form-options and the auto-sync — the same `auto_sync.rs` neighborhood DCH-53 just modified. Also fixes the double page-walk on zero-result searches. |
-| 4 | DCH-61 | Loosen the 800 ms DCR rate floor | Deliberately last on the DCR track: it's a politeness-policy decision, not a bug fix, and it reshapes the same `dcr/client.rs` limiter 57 works around. With 53's cap and 57's session reuse in, this is the remaining multiplier on walk time. Low priority — skippable if DCR politeness feels wrong. |
-| 5 | DCH-58 | Listings page: keystroke + mutation work | Biggest frontend payoff (the page everyone lives in), and it establishes the patterns 59 and 60 consume: `memo` + deferred search, mutations returning the updated row, `detail_url` promoted out of `raw_json`. |
-| 6 | DCH-59 | Registry results: bound + memoize | Same medicine as 58 (`useDeferredValue`, `React.memo`, bounded lists) applied to Registry — cheaper done immediately after, while the patterns are fresh and reusable. |
-| 7 | DCH-60 | Startup: defer + scope the backfill | Last because it consumes both sides: 55's batched backfill writes (now in) and 58's shared `list_listings` result are two of its acceptance criteria's building blocks. What remains is the scoping (37 MB `raw_json` scan → only-unattributed rows) and `spawn_blocking` hygiene. |
+| 1 | DCH-54 | One `EbayClient` per watchlist sync | High priority, sequenced after 55/56 because all three touch `ebay_watchlist`/`ebay_listing` — this completes the eBay-sync work in one contiguous stretch. Its AC asks for before/after timings, which are only meaningful now that 55's commit overhead is gone. |
+| 2 | DCH-57 | Reuse the cached DCR session | Extends the session cache to prewarm, presearch, form-options and the auto-sync — the same `auto_sync.rs` neighborhood DCH-53 just modified. Also fixes the double page-walk on zero-result searches. |
+| 3 | DCH-61 | Loosen the 800 ms DCR rate floor | Deliberately last on the DCR track: it's a politeness-policy decision, not a bug fix, and it reshapes the same `dcr/client.rs` limiter 57 works around. With 53's cap and 57's session reuse in, this is the remaining multiplier on walk time. Low priority — skippable if DCR politeness feels wrong. |
+| 4 | DCH-58 | Listings page: keystroke + mutation work | Biggest frontend payoff (the page everyone lives in), and it establishes the patterns 59 and 60 consume: `memo` + deferred search, mutations returning the updated row, `detail_url` promoted out of `raw_json`. |
+| 5 | DCH-59 | Registry results: bound + memoize | Same medicine as 58 (`useDeferredValue`, `React.memo`, bounded lists) applied to Registry — cheaper done immediately after, while the patterns are fresh and reusable. |
+| 6 | DCH-60 | Startup: defer + scope the backfill | Last because it consumes both sides: 55's batched backfill writes (now in) and 58's shared `list_listings` result are two of its acceptance criteria's building blocks. What remains is the scoping (37 MB `raw_json` scan → only-unattributed rows) and `spawn_blocking` hygiene. |
 
 Track note: the two frontend tickets (58, 59) share no files with the backend track, so if a
 backend PR is waiting on review, 58 can start early without rebasing risk.
@@ -96,6 +95,7 @@ read-only projection.
 | DCH-23 | Performance profiling pass against the production DB (2026-08-12). [Findings note](https://thistlegrow.atlassian.net/wiki/spaces/DCH/pages/53018626) records method and measurements; also records what was measured-and-fine (local search SQL, the `list_listings` join, the comps design). Spawned epic DCH-62 (DCH-53…61). |
 | DCH-53 | Capped + prioritized DCR enrichment (`auto_sync.enrich_max_entries`, default 500). Referenced entries (collection, listing match, wishlist) first, oldest first; unreferenced prewarm stubs are enriched once, never re-refreshed — the standing ~47k-requests/month re-walk is gone, not just spread out. Force refresh all remains uncapped. |
 | DCH-55 | `synchronous=NORMAL` under WAL; hot sync loops write in transactions (per garage page, 100-row batches for prewarm/presearch, one tx for watchlist archival, 200-row batches for the driver backfill); the shared `driver_upsert` collapses INSERT+SELECT to `RETURNING id` behind a per-run memo. Cancel checks sit between batches, so no long uncancellable transaction. |
+| DCH-56 | `listing_history` only records change: an observation identical to the listing's latest row (price, shipping, status — NULLs compare equal) is skipped; first observations and reverts still write. Migration 0031 collapsed existing runs to first + last row each. The table is still write-only — nothing reads it yet — so the sparser shape constrains nothing. |
 
 ## Things worth not rediscovering
 
