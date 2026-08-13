@@ -269,7 +269,11 @@ async fn archive_ended_listings(
     .fetch_all(pool)
     .await?;
 
+    // One transaction for the whole flag pass (DCH-55), matching
+    // `prune_missing_listings` below — these are quick local UPDATEs, and
+    // per-row autocommit made each one an fsync.
     let mut archived = 0u32;
+    let mut tx = pool.begin().await?;
     for (id, raw_json, was_archived) in rows {
         let reason = end_reason_from_raw(&raw_json);
         sqlx::query(
@@ -281,12 +285,13 @@ async fn archive_ended_listings(
         .bind(now)
         .bind(reason)
         .bind(id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
         if was_archived == 0 {
             archived += 1;
         }
     }
+    tx.commit().await?;
 
     // Every archived row still on the watchlist — including ones archived in
     // earlier runs whose removal failed then.

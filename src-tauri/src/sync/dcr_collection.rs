@@ -1,16 +1,19 @@
 use chrono::Utc;
 use serde::Serialize;
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 
 use crate::dcr::{CollectionItem, CollectionPage, DcrClient};
 use crate::error::{AppError, AppResult};
 use crate::progress::ProgressEmitter;
 use crate::settings;
 use crate::sync::dcr_registry::{enrich_pending_registry_entries, EnrichSummary};
+use crate::sync::driver_upsert::{upsert_driver, DriverIdCache};
 
 #[derive(Debug, Default, Serialize, Clone)]
 pub struct SyncSummary {
     pub items_seen: u32,
+    /// Distinct drivers written this sync. Driver upserts are memoized per
+    /// run (DCH-55), so this counts drivers, not items-with-a-driver.
     pub drivers_upserted: u32,
     pub registry_entries_upserted: u32,
     pub collection_rows_upserted: u32,
@@ -77,6 +80,7 @@ async fn run_collection_sync(
 ) -> AppResult<SyncSummary> {
     let mut summary = SyncSummary::default();
     let mut seen_asset_guids: Vec<String> = Vec::new();
+    let mut driver_ids = DriverIdCache::new();
     let mut all_pages_fetched = false;
     let mut page_n = 1u32;
     loop {
@@ -96,8 +100,8 @@ async fn run_collection_sync(
         summary.pages_fetched += 1;
         summary.items_seen += page.items.len() as u32;
 
+        persist_page(pool, &page.items, &mut driver_ids, &mut summary).await?;
         for item in &page.items {
-            persist_item(pool, item, &mut summary).await?;
             seen_asset_guids.push(item.asset_guid.clone());
         }
 
@@ -152,9 +156,7 @@ pub(crate) async fn sync_first_page(
     let page: CollectionPage = crate::dcr::collection::parse_collection_page(&html)?;
     summary.pages_fetched = 1;
     summary.items_seen = page.items.len() as u32;
-    for item in &page.items {
-        persist_item(pool, item, &mut summary).await?;
-    }
+    persist_page(pool, &page.items, &mut DriverIdCache::new(), &mut summary).await?;
     Ok(summary)
 }
 
@@ -203,18 +205,40 @@ async fn prune_missing_rows(pool: &SqlitePool, seen: &[String]) -> AppResult<u32
     Ok(result.rows_affected() as u32)
 }
 
-async fn persist_item(
+/// Persist one My Garage page inside a single transaction (DCH-55): ~3
+/// statements per item but one commit — and so one fsync — per page. An
+/// error on any item rolls back this page alone (earlier pages are already
+/// committed) and propagates, which is the sync's existing failure mode.
+async fn persist_page(
     pool: &SqlitePool,
+    items: &[CollectionItem],
+    driver_ids: &mut DriverIdCache,
+    summary: &mut SyncSummary,
+) -> AppResult<()> {
+    let mut tx = pool.begin().await?;
+    for item in items {
+        persist_item(&mut tx, item, driver_ids, summary).await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+async fn persist_item(
+    conn: &mut SqliteConnection,
     item: &CollectionItem,
+    driver_ids: &mut DriverIdCache,
     summary: &mut SyncSummary,
 ) -> AppResult<()> {
     let now = Utc::now().timestamp();
 
-    let driver_id = upsert_driver(pool, &item.driver_name, &item.driver_normalized).await?;
-    summary.drivers_upserted += 1;
+    if !driver_ids.contains_key(&item.driver_normalized) {
+        summary.drivers_upserted += 1;
+    }
+    let driver_id =
+        upsert_driver(conn, driver_ids, &item.driver_name, &item.driver_normalized).await?;
 
     let registry_entry_id = match &item.registry_guid {
-        Some(guid) => Some(upsert_registry_stub(pool, guid, item, driver_id, now).await?),
+        Some(guid) => Some(upsert_registry_stub(conn, guid, item, driver_id, now).await?),
         None => None,
     };
     if registry_entry_id.is_some() {
@@ -255,32 +279,15 @@ async fn persist_item(
     .bind(&item.asset_guid)
     .bind(&raw_json)
     .bind(now)
-    .execute(pool)
+    .execute(conn)
     .await?;
 
     summary.collection_rows_upserted += 1;
     Ok(())
 }
 
-async fn upsert_driver(pool: &SqlitePool, name: &str, normalized: &str) -> AppResult<i64> {
-    sqlx::query(
-        "INSERT INTO drivers (name, normalized_name) VALUES (?, ?)
-         ON CONFLICT(normalized_name) DO UPDATE SET name = excluded.name",
-    )
-    .bind(name)
-    .bind(normalized)
-    .execute(pool)
-    .await?;
-
-    let row: (i64,) = sqlx::query_as("SELECT id FROM drivers WHERE normalized_name = ?")
-        .bind(normalized)
-        .fetch_one(pool)
-        .await?;
-    Ok(row.0)
-}
-
 async fn upsert_registry_stub(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     guid: &str,
     item: &CollectionItem,
     driver_id: i64,
@@ -296,7 +303,7 @@ async fn upsert_registry_stub(
     }))
     .unwrap_or_default();
 
-    sqlx::query(
+    let row: (i64,) = sqlx::query_as(
         "INSERT INTO registry_entries
             (external_id, driver_id, year, oem, brand, scale, make,
              production_qty, retail_value_cents, wholesale_value_cents,
@@ -313,7 +320,8 @@ async fn upsert_registry_stub(
             retail_value_cents = COALESCE(excluded.retail_value_cents, registry_entries.retail_value_cents),
             wholesale_value_cents = COALESCE(excluded.wholesale_value_cents, registry_entries.wholesale_value_cents),
             raw_json = excluded.raw_json,
-            fetched_at = excluded.fetched_at",
+            fetched_at = excluded.fetched_at
+         RETURNING id",
     )
     .bind(guid)
     .bind(driver_id)
@@ -327,13 +335,8 @@ async fn upsert_registry_stub(
     .bind(item.wholesale_value_cents)
     .bind(&raw_json)
     .bind(now)
-    .execute(pool)
+    .fetch_one(conn)
     .await?;
-
-    let row: (i64,) = sqlx::query_as("SELECT id FROM registry_entries WHERE external_id = ?")
-        .bind(guid)
-        .fetch_one(pool)
-        .await?;
     Ok(row.0)
 }
 
@@ -410,5 +413,71 @@ mod tests {
 
         assert_eq!(removed, 1);
         assert_eq!(surviving_external_ids(&pool).await, vec!["local-1"]);
+    }
+
+    fn garage_item(asset: &str, registry: Option<&str>, driver: &str) -> CollectionItem {
+        CollectionItem {
+            asset_guid: asset.to_string(),
+            registry_guid: registry.map(|s| s.to_string()),
+            registry_int_id: None,
+            detail_url: Some("/diecast/x/y/z".to_string()),
+            image_url: None,
+            driver_name: driver.to_string(),
+            driver_normalized: driver.to_lowercase().replace(' ', "-"),
+            year: Some(2002),
+            oem: None,
+            brand: None,
+            scale: Some("1:24".to_string()),
+            make: None,
+            scheme_text: None,
+            seq_produced: Default::default(),
+            retail_value_cents: None,
+            wholesale_value_cents: None,
+        }
+    }
+
+    /// One garage page persists as one unit, and the driver memo spans
+    /// pages: items sharing a driver write that driver once per sync, and
+    /// `drivers_upserted` counts drivers, not items. DCH-55.
+    #[tokio::test]
+    async fn persist_page_upserts_items_and_memoizes_drivers() {
+        let pool = migrated_pool().await;
+        let mut summary = SyncSummary::default();
+        let mut driver_ids = DriverIdCache::new();
+
+        persist_page(
+            &pool,
+            &[
+                garage_item("asset-1", Some("guid-1"), "Jeff Gordon"),
+                garage_item("asset-2", Some("guid-2"), "Jeff Gordon"),
+                garage_item("asset-3", None, "Kyle Busch"),
+            ],
+            &mut driver_ids,
+            &mut summary,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(summary.collection_rows_upserted, 3);
+        assert_eq!(summary.registry_entries_upserted, 2);
+        assert_eq!(summary.drivers_upserted, 2);
+        let (driver_rows,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM drivers")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(driver_rows, 2);
+
+        // A later page reuses the same cache — no new driver write, and the
+        // count stays a count of distinct drivers.
+        persist_page(
+            &pool,
+            &[garage_item("asset-4", None, "Jeff Gordon")],
+            &mut driver_ids,
+            &mut summary,
+        )
+        .await
+        .unwrap();
+        assert_eq!(summary.drivers_upserted, 2);
+        assert_eq!(summary.collection_rows_upserted, 4);
     }
 }

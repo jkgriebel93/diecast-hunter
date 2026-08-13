@@ -8,7 +8,7 @@
 
 use chrono::Utc;
 use serde::Serialize;
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 
 use crate::dcr::{
     search_all_pages_with_progress, DcrClient, ProductionSearchFilter, ProductionSearchResult,
@@ -16,11 +16,17 @@ use crate::dcr::{
 use crate::error::{AppError, AppResult};
 use crate::progress::ProgressEmitter;
 use crate::settings;
+use crate::sync::driver_upsert::{upsert_driver, DriverIdCache};
 
 /// Pre-warmed rows older than this are considered stale and get re-walked by
 /// `refresh_stale_prewarms`. Matches the 30-day detail-page enrichment
 /// cadence in `dcr_registry`.
 const PREWARM_STALE_AFTER_SECONDS: i64 = 30 * 24 * 60 * 60; // 30 days
+
+/// Search-result upserts commit in transactions of this many rows (DCH-55):
+/// commits scale with batches, not with 3× the result count, while a cancel
+/// between batches still lands within ~100 rows of local work.
+const UPSERT_BATCH_SIZE: usize = 100;
 
 #[derive(Debug, Default, Serialize, Clone)]
 pub struct PrewarmSummary {
@@ -225,27 +231,7 @@ pub(crate) async fn prewarm_driver_with_client(
         search_all_pages_with_progress(client, &filter, progress, Some(&driver_name)).await?;
     let results_seen = results.len() as u32;
 
-    let mut upserted = 0u32;
-    for (i, r) in results.iter().enumerate() {
-        progress.check_cancelled()?;
-        if i % 25 == 0 {
-            progress.step(
-                format!(
-                    "Saving {} of {} entries for {}…",
-                    i, results_seen, driver_name
-                ),
-                Some(i as u32),
-                Some(results_seen),
-            );
-        }
-        match upsert_stub_from_search(pool, r).await {
-            Ok(()) => upserted += 1,
-            Err(e) => tracing::warn!(
-                "registry-prewarm: failed to upsert {}: {e}",
-                r.registry_guid
-            ),
-        }
-    }
+    let upserted = upsert_stubs_batched(pool, &results, progress, &driver_name).await?;
 
     settings::set(
         pool,
@@ -262,14 +248,61 @@ pub(crate) async fn prewarm_driver_with_client(
     })
 }
 
-/// Also used by the wishlist add flow so a wish always references a
-/// fully-stubbed registry entry.
+/// Upsert a full walk's results in [`UPSERT_BATCH_SIZE`]-row transactions
+/// (DCH-55). Shared by the pre-warm and pre-search refreshes — the two
+/// flows that land thousands of rows per run. A row that fails to upsert is
+/// logged and skipped (the batch's other rows still commit — SQLite doesn't
+/// poison a transaction on a failed statement); a failed commit loses only
+/// that batch and propagates. Cancellation is honored between batches.
+pub(crate) async fn upsert_stubs_batched(
+    pool: &SqlitePool,
+    results: &[ProductionSearchResult],
+    progress: &ProgressEmitter,
+    label: &str,
+) -> AppResult<u32> {
+    let total = results.len() as u32;
+    let mut upserted = 0u32;
+    let mut driver_ids = DriverIdCache::new();
+    for (batch_idx, batch) in results.chunks(UPSERT_BATCH_SIZE).enumerate() {
+        progress.check_cancelled()?;
+        let done = (batch_idx * UPSERT_BATCH_SIZE) as u32;
+        progress.step(
+            format!("Saving {done} of {total} entries for {label}…"),
+            Some(done),
+            Some(total),
+        );
+        let mut tx = pool.begin().await?;
+        for r in batch {
+            match upsert_stub_on(&mut tx, r, &mut driver_ids).await {
+                Ok(()) => upserted += 1,
+                Err(e) => tracing::warn!(
+                    "registry-prewarm: failed to upsert {}: {e}",
+                    r.registry_guid
+                ),
+            }
+        }
+        tx.commit().await?;
+    }
+    Ok(upserted)
+}
+
+/// Single-result wrapper. Used by the wishlist add flow so a wish always
+/// references a fully-stubbed registry entry.
 pub(crate) async fn upsert_stub_from_search(
     pool: &SqlitePool,
     r: &ProductionSearchResult,
 ) -> AppResult<()> {
+    let mut conn = pool.acquire().await?;
+    upsert_stub_on(&mut conn, r, &mut DriverIdCache::new()).await
+}
+
+async fn upsert_stub_on(
+    conn: &mut SqliteConnection,
+    r: &ProductionSearchResult,
+    driver_ids: &mut DriverIdCache,
+) -> AppResult<()> {
     let now = Utc::now().timestamp();
-    let driver_id = upsert_driver(pool, &r.driver_name, &r.driver_normalized).await?;
+    let driver_id = upsert_driver(conn, driver_ids, &r.driver_name, &r.driver_normalized).await?;
 
     // raw_json carries detail_url so M3 enrichment can find the page later,
     // plus the search-page-only fields we'd otherwise drop.
@@ -330,26 +363,10 @@ pub(crate) async fn upsert_stub_from_search(
     .bind(r.wholesale_value_cents)
     .bind(&raw_json)
     .bind(now)
-    .execute(pool)
+    .execute(conn)
     .await?;
 
     Ok(())
-}
-
-async fn upsert_driver(pool: &SqlitePool, name: &str, normalized: &str) -> AppResult<i64> {
-    sqlx::query(
-        "INSERT INTO drivers (name, normalized_name) VALUES (?, ?)
-         ON CONFLICT(normalized_name) DO UPDATE SET name = excluded.name",
-    )
-    .bind(name)
-    .bind(normalized)
-    .execute(pool)
-    .await?;
-    let row: (i64,) = sqlx::query_as("SELECT id FROM drivers WHERE normalized_name = ?")
-        .bind(normalized)
-        .fetch_one(pool)
-        .await?;
-    Ok(row.0)
 }
 
 #[cfg(test)]
@@ -437,5 +454,57 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(total, 2);
+    }
+
+    /// The batched path (DCH-55) spans multiple transactions on a walk
+    /// bigger than one batch, memoizes the shared driver down to one row,
+    /// and reports every result upserted.
+    #[tokio::test]
+    async fn batched_upsert_lands_every_result_across_batches() {
+        let pool = migrated_pool().await;
+        let results: Vec<ProductionSearchResult> = (0..(UPSERT_BATCH_SIZE * 2 + 50))
+            .map(|i| search_result(&format!("guid-{i}"), "Jeff Gordon"))
+            .collect();
+
+        let progress = crate::progress::ProgressEmitter::null("test");
+        let upserted = upsert_stubs_batched(&pool, &results, &progress, "Jeff Gordon")
+            .await
+            .unwrap();
+
+        assert_eq!(upserted as usize, results.len());
+        let (entries,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM registry_entries")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(entries as usize, results.len());
+        let (drivers,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM drivers")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(drivers, 1);
+    }
+
+    /// Cancellation is checked between batches, before any work: a cancel
+    /// that lands before the walk starts saving means nothing is written —
+    /// there is no multi-minute uncancellable transaction to wait out.
+    #[tokio::test]
+    async fn batched_upsert_honors_cancellation_between_batches() {
+        let pool = migrated_pool().await;
+        let results = vec![search_result("guid-1", "Jeff Gordon")];
+
+        let progress = crate::progress::ProgressEmitter::null("test");
+        progress
+            .cancel_handle()
+            .store(true, std::sync::atomic::Ordering::Release);
+
+        let err = upsert_stubs_batched(&pool, &results, &progress, "Jeff Gordon")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::Cancelled));
+        let (entries,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM registry_entries")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(entries, 0);
     }
 }

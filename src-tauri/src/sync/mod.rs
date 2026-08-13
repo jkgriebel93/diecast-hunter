@@ -8,6 +8,7 @@ pub mod dcr_registry;
 pub mod dcr_remove;
 pub mod detail_url_backfill;
 pub mod driver_assoc;
+pub(crate) mod driver_upsert;
 pub mod ebay_all;
 pub mod ebay_listing;
 pub mod ebay_saved;
