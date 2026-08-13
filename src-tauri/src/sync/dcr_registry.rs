@@ -6,6 +6,7 @@ use crate::dcr::{parse_detail_page, DcrClient, RegistryDetail};
 use crate::error::{AppError, AppResult};
 use crate::progress::ProgressEmitter;
 use crate::settings;
+use crate::sync::driver_upsert::{upsert_driver, DriverIdCache};
 
 /// Re-enrich entries last fetched more than this many seconds ago.
 const REFRESH_AFTER_SECONDS: i64 = 30 * 24 * 60 * 60; // 30 days
@@ -188,7 +189,12 @@ pub(crate) async fn enrich_one(
     }
 
     let driver_id = match (&detail.driver_name, &detail.driver_normalized) {
-        (Some(name), Some(norm)) => Some(upsert_driver(pool, name, norm).await?),
+        (Some(name), Some(norm)) => {
+            // No cache worth threading here: this loop is paced by one
+            // network fetch per entry, so the memo would save microseconds.
+            let mut conn = pool.acquire().await?;
+            Some(upsert_driver(&mut conn, &mut DriverIdCache::new(), name, norm).await?)
+        }
         _ => None,
     };
 
@@ -264,22 +270,6 @@ fn build_raw_json(detail: &RegistryDetail, detail_url: &str) -> String {
         "photos": detail.photos,
     }))
     .unwrap_or_default()
-}
-
-async fn upsert_driver(pool: &SqlitePool, name: &str, normalized: &str) -> AppResult<i64> {
-    sqlx::query(
-        "INSERT INTO drivers (name, normalized_name) VALUES (?, ?)
-         ON CONFLICT(normalized_name) DO UPDATE SET name = excluded.name",
-    )
-    .bind(name)
-    .bind(normalized)
-    .execute(pool)
-    .await?;
-    let row: (i64,) = sqlx::query_as("SELECT id FROM drivers WHERE normalized_name = ?")
-        .bind(normalized)
-        .fetch_one(pool)
-        .await?;
-    Ok(row.0)
 }
 
 #[cfg(test)]

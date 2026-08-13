@@ -6,7 +6,7 @@
 //!
 //! **What gets cached is `registry_entries`, not a result list.** Refreshing a
 //! pre-search runs the DCR production search for its filters and upserts every
-//! hit through the same [`crate::sync::registry_prewarm::upsert_stub_from_search`]
+//! hit through the same [`crate::sync::registry_prewarm::upsert_stubs_batched`]
 //! path the by-driver pre-warm uses. That means:
 //!
 //! - one refresh benefits every pre-search that overlaps it, and the existing
@@ -27,7 +27,7 @@ use sqlx::SqlitePool;
 use crate::dcr::{search_all_pages_with_progress, DcrClient, ProductionSearchFilter};
 use crate::error::{AppError, AppResult};
 use crate::progress::ProgressEmitter;
-use crate::sync::registry_prewarm::{logged_in_client, upsert_stub_from_search};
+use crate::sync::registry_prewarm::{logged_in_client, upsert_stubs_batched};
 
 /// A pre-search whose last refresh is older than this is due for another.
 /// Matches `PREWARM_STALE_AFTER_SECONDS` — both walk the same catalog, which
@@ -241,23 +241,8 @@ async fn refresh_with_client(
     };
 
     let seen = results.len() as u32;
-    let mut upserted = 0u32;
-    for (i, r) in results.iter().enumerate() {
-        progress.check_cancelled()?;
-        if i % 25 == 0 {
-            progress.step(
-                format!("Saving {i} of {seen} entries for \"{}\"…", ps.name),
-                Some(i as u32),
-                Some(seen),
-            );
-        }
-        match upsert_stub_from_search(pool, r).await {
-            Ok(()) => upserted += 1,
-            Err(e) => {
-                tracing::warn!("presearch: failed to upsert {}: {e}", r.registry_guid)
-            }
-        }
-    }
+    let upserted =
+        upsert_stubs_batched(pool, &results, progress, &format!("\"{}\"", ps.name)).await?;
 
     sqlx::query(
         "UPDATE registry_presearches

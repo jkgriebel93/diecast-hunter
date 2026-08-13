@@ -22,10 +22,15 @@
 //! the pin and let auto-detection take over again.
 
 use serde::Serialize;
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 
 use crate::error::AppResult;
 use crate::progress::ProgressEmitter;
+
+/// Batch-path writes commit in transactions of this many rows (DCH-55).
+/// Detection is in-memory and most rows write nothing, so a batch is
+/// milliseconds of work — small enough that cancel stays responsive.
+const ASSOC_BATCH_SIZE: usize = 200;
 
 #[derive(Debug, Default, Serialize, Clone)]
 pub struct AssocSummary {
@@ -93,15 +98,16 @@ pub async fn associate_all_listings(
     // User-pinned rows (driver_id_user_set = 1) are always excluded — the
     // pin is the whole point of the flag. Beyond that, `force` controls
     // whether we re-evaluate rows that already have an auto-detected
-    // driver vs. only filling in the NULLs.
+    // driver vs. only filling in the NULLs. `driver_id` rides along so the
+    // apply step doesn't re-SELECT what this scan already knows (DCH-55).
     let sql = if force {
-        "SELECT id, title FROM listings WHERE driver_id_user_set = 0 ORDER BY id"
+        "SELECT id, title, driver_id FROM listings WHERE driver_id_user_set = 0 ORDER BY id"
     } else {
-        "SELECT id, title FROM listings
+        "SELECT id, title, driver_id FROM listings
          WHERE driver_id_user_set = 0 AND driver_id IS NULL
          ORDER BY id"
     };
-    let rows: Vec<(i64, String)> = sqlx::query_as(sql).fetch_all(pool).await?;
+    let rows: Vec<(i64, String, Option<i64>)> = sqlx::query_as(sql).fetch_all(pool).await?;
 
     let total = rows.len() as u32;
     let mut summary = AssocSummary {
@@ -113,24 +119,33 @@ pub async fn associate_all_listings(
         return Ok(summary);
     }
 
-    for (idx, (id, title)) in rows.into_iter().enumerate() {
+    // Chunked transactions (DCH-55): most rows end up Unchanged/Unmatched
+    // and write nothing, so a batch is a handful of UPDATEs and one commit
+    // rather than one fsync'd commit per matched row. Cancel lands between
+    // batches; a failed batch rolls back alone and propagates.
+    let mut done = 0u32;
+    for batch in rows.chunks(ASSOC_BATCH_SIZE) {
         progress.check_cancelled()?;
-        let done = (idx + 1) as u32;
-        if done == 1 || done.is_multiple_of(50) || done == total {
-            progress.step(
-                format!("Associating driver {done} of {total}…"),
-                Some(done),
-                Some(total),
-            );
+        let mut tx = pool.begin().await?;
+        for (id, title, current) in batch {
+            done += 1;
+            if done == 1 || done.is_multiple_of(50) || done == total {
+                progress.step(
+                    format!("Associating driver {done} of {total}…"),
+                    Some(done),
+                    Some(total),
+                );
+            }
+            let detected = detect_driver(title, &drivers);
+            let outcome = apply_known(&mut tx, *id, *current, detected, force).await?;
+            match outcome {
+                ApplyOutcome::Set => summary.associated += 1,
+                ApplyOutcome::Cleared => summary.cleared += 1,
+                ApplyOutcome::Unmatched => summary.unmatched += 1,
+                ApplyOutcome::Unchanged => {}
+            }
         }
-        let detected = detect_driver(&title, &drivers);
-        let outcome = apply_detail(pool, id, detected, force).await?;
-        match outcome {
-            ApplyOutcome::Set => summary.associated += 1,
-            ApplyOutcome::Cleared => summary.cleared += 1,
-            ApplyOutcome::Unmatched => summary.unmatched += 1,
-            ApplyOutcome::Unchanged => {}
-        }
+        tx.commit().await?;
     }
     progress.done(format!(
         "Driver association: {} matched, {} cleared, {} still unmatched (of {}).",
@@ -157,6 +172,9 @@ async fn apply(
     Ok(())
 }
 
+/// Single-listing path: has to look the row up (it might not exist, or be
+/// user-pinned) before applying. The batch path skips this — its scan
+/// already filtered on the pin and carries `driver_id`.
 async fn apply_detail(
     pool: &SqlitePool,
     listing_id: i64,
@@ -178,20 +196,33 @@ async fn apply_detail(
         return Ok(ApplyOutcome::Unchanged);
     }
 
+    let mut conn = pool.acquire().await?;
+    apply_known(&mut conn, listing_id, current, detected, force).await
+}
+
+/// The write decision, given a current driver the caller already knows.
+/// User-pinned rows must be filtered out before calling this.
+async fn apply_known(
+    conn: &mut SqliteConnection,
+    listing_id: i64,
+    current: Option<i64>,
+    detected: Option<i64>,
+    force: bool,
+) -> AppResult<ApplyOutcome> {
     match (current, detected) {
         (Some(existing), Some(new_id)) if existing == new_id => Ok(ApplyOutcome::Unchanged),
         (_, Some(new_id)) => {
             sqlx::query("UPDATE listings SET driver_id = ? WHERE id = ?")
                 .bind(new_id)
                 .bind(listing_id)
-                .execute(pool)
+                .execute(conn)
                 .await?;
             Ok(ApplyOutcome::Set)
         }
         (Some(_), None) if force => {
             sqlx::query("UPDATE listings SET driver_id = NULL WHERE id = ?")
                 .bind(listing_id)
-                .execute(pool)
+                .execute(conn)
                 .await?;
             Ok(ApplyOutcome::Cleared)
         }
@@ -318,5 +349,83 @@ mod tests {
         // Some drivers go by a single name in the catalog.
         let drivers = vec![drv(1, "Yeley")];
         assert_eq!(detect_driver("Yeley #18 ARC 1:24", &drivers), Some(1));
+    }
+
+    /// The batched backfill (DCH-55) against a real schema: fills NULLs,
+    /// leaves pinned rows alone, and reports the same summary shape the
+    /// per-row version did — across more rows than one batch holds.
+    #[tokio::test]
+    async fn associate_all_listings_batches_and_honors_pins() {
+        let pool = {
+            use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+            use std::str::FromStr;
+            let opts = SqliteConnectOptions::from_str("sqlite::memory:")
+                .unwrap()
+                .foreign_keys(true);
+            let pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(opts)
+                .await
+                .expect("open in-memory db");
+            sqlx::migrate!("./migrations")
+                .run(&pool)
+                .await
+                .expect("run migrations");
+            pool
+        };
+        sqlx::query(
+            "INSERT INTO drivers (name, normalized_name) VALUES ('Jeff Gordon', 'jeff-gordon')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // More rows than one batch, alternating matchable and unmatchable
+        // titles, plus one user-pinned row that must not be touched.
+        for i in 0..(ASSOC_BATCH_SIZE + 10) {
+            let title = if i % 2 == 0 {
+                format!("Jeff Gordon #24 DuPont 1:24 no. {i}")
+            } else {
+                format!("Generic diecast no. {i}")
+            };
+            sqlx::query(
+                "INSERT INTO listings (seller_id, external_id, url, title, saved_at, last_seen_at)
+                 VALUES (1, ?, 'https://example.com', ?, 1, 1)",
+            )
+            .bind(format!("lst-{i}"))
+            .bind(title)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO listings
+                (seller_id, external_id, url, title, saved_at, last_seen_at, driver_id_user_set)
+             VALUES (1, 'pinned', 'https://example.com', 'Jeff Gordon pinned to none', 1, 1, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let progress = crate::progress::ProgressEmitter::null("test");
+        let summary = associate_all_listings(&pool, &progress, false)
+            .await
+            .unwrap();
+
+        let half = (ASSOC_BATCH_SIZE as u32 + 10) / 2;
+        assert_eq!(summary.considered, half * 2); // pinned row never considered
+        assert_eq!(summary.associated, half);
+        assert_eq!(summary.unmatched, half);
+        let (pinned_driver,): (Option<i64>,) =
+            sqlx::query_as("SELECT driver_id FROM listings WHERE external_id = 'pinned'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(pinned_driver, None);
+        let (set_rows,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM listings WHERE driver_id IS NOT NULL")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(set_rows as u32, half);
     }
 }
