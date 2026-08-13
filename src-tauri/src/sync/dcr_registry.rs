@@ -5,6 +5,7 @@ use sqlx::SqlitePool;
 use crate::dcr::{parse_detail_page, DcrClient, RegistryDetail};
 use crate::error::{AppError, AppResult};
 use crate::progress::ProgressEmitter;
+use crate::settings;
 
 /// Re-enrich entries last fetched more than this many seconds ago.
 const REFRESH_AFTER_SECONDS: i64 = 30 * 24 * 60 * 60; // 30 days
@@ -23,6 +24,15 @@ pub struct EnrichSummary {
 /// `client` is expected to already be logged in. The DcrClient's built-in
 /// rate limiter paces each detail-page fetch.
 ///
+/// A non-forced pass is capped and prioritized (DCH-53): at most
+/// `KEY_ENRICH_MAX_ENTRIES` detail pages per run, entries referenced by
+/// the collection, a listing match, or a wishlist first. Each fetch costs
+/// ~1.2 s at the DCR rate floor, so an uncapped pass turns into an
+/// hours-long walk the first time a bulk-prewarmed cohort ages past the
+/// 30-day window — 46k entries did exactly that in July 2026. `force`
+/// still walks everything, uncapped: that's the manual "re-enrich all"
+/// path, chosen deliberately.
+///
 /// Manually-added entries (`source = 'local'`, DCH-12) are excluded. They
 /// have no DCR detail page, so they would be considered on every run,
 /// permanently — they can never gain a `details_fetched_at`. The
@@ -35,8 +45,22 @@ pub async fn enrich_pending_registry_entries(
     force: bool,
     progress: &ProgressEmitter,
 ) -> AppResult<EnrichSummary> {
+    let cap = if force {
+        None
+    } else {
+        let cap = settings::get(pool, settings::KEY_ENRICH_MAX_ENTRIES)
+            .await?
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(settings::DEFAULT_ENRICH_MAX_ENTRIES);
+        if cap == 0 {
+            tracing::info!("registry enrichment disabled (cap = 0) — skipping");
+            return Ok(EnrichSummary::default());
+        }
+        Some(cap as i64)
+    };
+
     let cutoff = Utc::now().timestamp() - REFRESH_AFTER_SECONDS;
-    let rows = select_entries_to_enrich(pool, force, cutoff).await?;
+    let rows = select_entries_to_enrich(pool, force, cutoff, cap).await?;
 
     let total = rows.len() as u32;
     let mut summary = EnrichSummary {
@@ -76,13 +100,31 @@ pub async fn enrich_pending_registry_entries(
     Ok(summary)
 }
 
-/// The candidate set for an enrichment pass, split out so the exclusions can
-/// be tested without a logged-in client. Returns
-/// `(id, external_id, raw_json, details_fetched_at)` ordered by id.
+/// The candidate set for an enrichment pass, split out so the exclusions,
+/// priorities, and cap can be tested without a logged-in client. Returns
+/// `(id, external_id, raw_json, details_fetched_at)`.
+///
+/// The non-forced query encodes the DCH-53 policy:
+///
+/// - Entries referenced by `my_collection`, `listing_matches`, or a
+///   wishlist are refreshed whenever stale (never enriched, or older than
+///   the cutoff), and always sort ahead of everything else.
+/// - Unreferenced entries — prewarm/presearch cache stubs — are enriched
+///   only once (`details_fetched_at IS NULL`), never re-refreshed. Keeping
+///   tens of thousands of unreferenced stubs on a 30-day TTL is what
+///   produced the ~47k requests/month re-walk; a stub that later becomes
+///   referenced joins the first group on the next run.
+/// - Oldest `details_fetched_at` first (NULLs sort first in SQLite ASC),
+///   so a cohort that expired as one block drains oldest-first across runs
+///   instead of blocking everything behind it.
+/// - Rows whose raw_json carries no detail_url are excluded: the fetch
+///   loop can only skip them, and under a cap each would permanently
+///   occupy a slot at the head of the stale queue.
 async fn select_entries_to_enrich(
     pool: &SqlitePool,
     force: bool,
     cutoff: i64,
+    cap: Option<i64>,
 ) -> AppResult<Vec<(i64, String, Option<String>, Option<i64>)>> {
     let rows = if force {
         sqlx::query_as(
@@ -96,14 +138,29 @@ async fn select_entries_to_enrich(
         .await?
     } else {
         sqlx::query_as(
-            "SELECT id, external_id, raw_json, details_fetched_at
-             FROM registry_entries
-             WHERE external_id IS NOT NULL
-               AND source <> 'local'
-               AND (details_fetched_at IS NULL OR details_fetched_at < ?)
-             ORDER BY id",
+            "WITH referenced(entry_id) AS (
+                 SELECT registry_entry_id FROM my_collection
+                 UNION
+                 SELECT registry_entry_id FROM listing_matches
+                 UNION
+                 SELECT registry_entry_id FROM wishlist_entries
+             )
+             SELECT re.id, re.external_id, re.raw_json, re.details_fetched_at
+             FROM registry_entries re
+             LEFT JOIN referenced r ON r.entry_id = re.id
+             WHERE re.external_id IS NOT NULL
+               AND re.source <> 'local'
+               AND json_extract(re.raw_json, '$.detail_url') IS NOT NULL
+               AND (
+                     (r.entry_id IS NOT NULL
+                      AND (re.details_fetched_at IS NULL OR re.details_fetched_at < ?))
+                  OR (r.entry_id IS NULL AND re.details_fetched_at IS NULL)
+               )
+             ORDER BY (r.entry_id IS NOT NULL) DESC, re.details_fetched_at ASC, re.id
+             LIMIT ?",
         )
         .bind(cutoff)
+        .bind(cap.unwrap_or(i64::MAX))
         .fetch_all(pool)
         .await?
     };
@@ -255,35 +312,158 @@ mod tests {
         pool
     }
 
+    /// Stale/fresh in these tests is relative to this cutoff: a
+    /// `details_fetched_at` below it is stale, above it is fresh.
+    const CUTOFF: i64 = 1_000;
+
+    async fn insert_entry(
+        pool: &SqlitePool,
+        external_id: &str,
+        details_fetched_at: Option<i64>,
+        with_detail_url: bool,
+    ) -> i64 {
+        let raw_json =
+            with_detail_url.then(|| format!(r#"{{"detail_url":"/diecast/x/y/{external_id}"}}"#));
+        sqlx::query(
+            "INSERT INTO registry_entries
+                 (external_id, source, fetched_at, details_fetched_at, raw_json)
+             VALUES (?, 'diecastregistry', 1, ?, ?)",
+        )
+        .bind(external_id)
+        .bind(details_fetched_at)
+        .bind(raw_json)
+        .execute(pool)
+        .await
+        .unwrap()
+        .last_insert_rowid()
+    }
+
+    async fn selected_ids(pool: &SqlitePool, force: bool, cap: Option<i64>) -> Vec<String> {
+        select_entries_to_enrich(pool, force, CUTOFF, cap)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| r.1)
+            .collect()
+    }
+
     /// A manually-added entry must never enter an enrichment pass — not even
     /// a forced one, which otherwise sweeps every row on file. DCH-12.
     #[tokio::test]
     async fn local_entries_are_never_candidates_for_enrichment() {
         let pool = migrated_pool().await;
-        sqlx::query(
-            "INSERT INTO registry_entries (external_id, source, fetched_at)
-             VALUES ('dcr-guid', 'diecastregistry', 1)",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        insert_entry(&pool, "dcr-guid", None, true).await;
         // Belt and braces: a local row that somehow *does* carry an
         // external_id still has to be excluded, since the source flag — not
         // the absence of a GUID — is what the guard rests on.
         sqlx::query(
-            "INSERT INTO registry_entries (external_id, source, fetched_at)
-             VALUES ('stray-guid', 'local', 1)",
+            "INSERT INTO registry_entries (external_id, source, fetched_at, raw_json)
+             VALUES ('stray-guid', 'local', 1, '{\"detail_url\":\"/diecast/x/y/stray\"}')",
         )
         .execute(&pool)
         .await
         .unwrap();
 
         for force in [false, true] {
-            let rows = select_entries_to_enrich(&pool, force, i64::MAX)
-                .await
-                .unwrap();
-            let ids: Vec<&str> = rows.iter().map(|r| r.1.as_str()).collect();
+            let ids = selected_ids(&pool, force, None).await;
             assert_eq!(ids, vec!["dcr-guid"], "force = {force}");
         }
+    }
+
+    /// The DCH-53 policy in one scene: referenced entries outrank the
+    /// prewarm stubs, stalest first, and the cap cuts from the back.
+    #[tokio::test]
+    async fn capped_run_selects_referenced_entries_first_oldest_first() {
+        let pool = migrated_pool().await;
+        // Two unreferenced never-enriched stubs: eligible, but last in line.
+        insert_entry(&pool, "stub-a", None, true).await;
+        insert_entry(&pool, "stub-b", None, true).await;
+        // Referenced entries: one never enriched, two stale of different
+        // ages, one fresh.
+        let in_collection = insert_entry(&pool, "in-collection", Some(100), true).await;
+        let on_wishlist = insert_entry(&pool, "on-wishlist", Some(50), true).await;
+        let matched = insert_entry(&pool, "matched", None, true).await;
+        let fresh = insert_entry(&pool, "fresh", Some(CUTOFF + 1), true).await;
+
+        sqlx::query("INSERT INTO my_collection (registry_entry_id, imported_at) VALUES (?, 1)")
+            .bind(in_collection)
+            .execute(&pool)
+            .await
+            .unwrap();
+        // The 0019 migration seeds wishlist id 1.
+        sqlx::query(
+            "INSERT INTO wishlist_entries (wishlist_id, registry_entry_id, added_at)
+             VALUES (1, ?, 1)",
+        )
+        .bind(on_wishlist)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO listings (seller_id, external_id, url, title, saved_at, last_seen_at)
+             VALUES (1, 'lst-1', 'https://example.com', 'a listing', 1, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO listing_matches (listing_id, registry_entry_id, matched_at)
+             VALUES ((SELECT id FROM listings WHERE external_id = 'lst-1'), ?, 1)",
+        )
+        .bind(matched)
+        .execute(&pool)
+        .await
+        .unwrap();
+        // A referenced-but-fresh entry stays out entirely.
+        sqlx::query("INSERT INTO my_collection (registry_entry_id, imported_at) VALUES (?, 1)")
+            .bind(fresh)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // Uncapped: every referenced stale entry (never-enriched first, then
+        // oldest), then the stubs.
+        assert_eq!(
+            selected_ids(&pool, false, None).await,
+            vec![
+                "matched",
+                "on-wishlist",
+                "in-collection",
+                "stub-a",
+                "stub-b"
+            ],
+        );
+        // Capped: same order, truncated — the stubs are what gets left for
+        // later runs.
+        assert_eq!(
+            selected_ids(&pool, false, Some(2)).await,
+            vec!["matched", "on-wishlist"],
+        );
+    }
+
+    /// An unreferenced stub is enriched once and then left alone: aging past
+    /// the 30-day window no longer re-queues it. That standing re-walk of
+    /// the whole prewarm cache is the ~47k-requests/month the ticket exists
+    /// to stop. A forced pass still picks it up.
+    #[tokio::test]
+    async fn unreferenced_enriched_entries_are_not_rerefreshed() {
+        let pool = migrated_pool().await;
+        insert_entry(&pool, "aged-out-stub", Some(100), true).await;
+
+        assert!(selected_ids(&pool, false, None).await.is_empty());
+        assert_eq!(selected_ids(&pool, true, None).await, vec!["aged-out-stub"]);
+    }
+
+    /// A row with no detail_url can only ever be skipped by the fetch loop,
+    /// and it sorts to the head of the stale queue forever (its
+    /// details_fetched_at never advances) — under a cap it would occupy a
+    /// slot on every run. It must not be selected at all.
+    #[tokio::test]
+    async fn rows_without_detail_url_do_not_consume_cap_slots() {
+        let pool = migrated_pool().await;
+        insert_entry(&pool, "no-url", None, false).await;
+        insert_entry(&pool, "has-url", None, true).await;
+
+        assert_eq!(selected_ids(&pool, false, Some(1)).await, vec!["has-url"]);
     }
 }

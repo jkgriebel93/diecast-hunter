@@ -84,6 +84,14 @@ pub const DEFAULT_AUTO_SYNC_INTERVAL_HOURS: u32 = 12;
 /// instead. "0" disables the refresh phase entirely. Unset = default.
 pub const KEY_PREWARM_REFRESH_MAX_ENTRIES: &str = "auto_sync.prewarm_max_entries";
 pub const DEFAULT_PREWARM_REFRESH_MAX_ENTRIES: u32 = 5000;
+/// Cap on how many registry detail pages a non-forced enrichment pass may
+/// fetch in one run (see `sync::dcr_registry`). Each fetch costs ~1.2 s at
+/// the DCR rate floor, so the default keeps a nightly enrichment phase to
+/// ~10 minutes; the backlog drains across runs, referenced entries first.
+/// "0" disables non-forced enrichment entirely. A forced re-enrich ignores
+/// the cap. Unset = default. DCH-53.
+pub const KEY_ENRICH_MAX_ENTRIES: &str = "auto_sync.enrich_max_entries";
+pub const DEFAULT_ENRICH_MAX_ENTRIES: u32 = 500;
 /// Floor on the interval so a typo can't turn the background task into a
 /// tight network loop against DCR / eBay.
 pub const MIN_AUTO_SYNC_INTERVAL_HOURS: u32 = 1;

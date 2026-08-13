@@ -29,8 +29,11 @@ pub async fn run_once(pool: &SqlitePool) -> bool {
 
     let mut ok = true;
 
-    // My Collection (DCR). enrich=true is self-limiting — enrichment skips
-    // entries refreshed within the last 30 days, so most runs enrich nothing.
+    // My Collection (DCR). The enrichment pass is capped and prioritized
+    // (DCH-53): at most `auto_sync.enrich_max_entries` detail pages per run,
+    // referenced entries first, and unreferenced prewarm stubs are enriched
+    // once but never re-refreshed — so a bulk-prewarmed cohort aging past 30
+    // days can't turn this into an hours-long walk.
     match sync::sync_dcr_collection_and_enrich(pool, &progress, true).await {
         Ok(s) => tracing::info!(
             "auto-sync DCR: {} items seen, {} rows upserted, {} removed",

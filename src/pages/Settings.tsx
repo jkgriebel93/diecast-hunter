@@ -122,6 +122,7 @@ export function Settings() {
   const [autoSyncLastRun, setAutoSyncLastRun] = useState<number | null>(null);
   const [autoSyncScheduled, setAutoSyncScheduled] = useState(false);
   const [autoSyncPrewarmMax, setAutoSyncPrewarmMax] = useState("5000");
+  const [autoSyncEnrichMax, setAutoSyncEnrichMax] = useState("500");
   const [autoSyncSaving, setAutoSyncSaving] = useState(false);
   const [autoSyncMessage, setAutoSyncMessage] = useState<string | null>(null);
   const [autoSyncError, setAutoSyncError] = useState<string | null>(null);
@@ -328,6 +329,7 @@ export function Settings() {
         setAutoSyncLastRun(autoSync.last_run);
         setAutoSyncScheduled(autoSync.scheduled);
         setAutoSyncPrewarmMax(String(autoSync.prewarm_max_entries));
+        setAutoSyncEnrichMax(String(autoSync.enrich_max_entries));
       } catch {
         // not fatal — leave defaults
       }
@@ -697,9 +699,19 @@ export function Settings() {
       const prewarmMax = Number.isNaN(parsedPrewarmMax)
         ? 5000
         : Math.max(0, parsedPrewarmMax);
-      await api.setAutoSyncSettings(autoSyncEnabled, hours, prewarmMax);
+      const parsedEnrichMax = parseInt(autoSyncEnrichMax, 10);
+      const enrichMax = Number.isNaN(parsedEnrichMax)
+        ? 500
+        : Math.max(0, parsedEnrichMax);
+      await api.setAutoSyncSettings(
+        autoSyncEnabled,
+        hours,
+        prewarmMax,
+        enrichMax,
+      );
       setAutoSyncInterval(String(hours));
       setAutoSyncPrewarmMax(String(prewarmMax));
+      setAutoSyncEnrichMax(String(enrichMax));
       setAutoSyncMessage(
         autoSyncEnabled
           ? `Automatic sync on — Windows will run it every ${hours} hour${hours === 1 ? "" : "s"}, even when the app is closed.`
@@ -1268,6 +1280,18 @@ export function Settings() {
                     onChange={(e) => setAutoSyncPrewarmMax(e.target.value)}
                   />
                 </div>
+                <div>
+                  <label className="label">Max detail pages per sync</label>
+                  <input
+                    className="input w-32"
+                    type="number"
+                    min={0}
+                    step={100}
+                    value={autoSyncEnrichMax}
+                    disabled={!autoSyncEnabled}
+                    onChange={(e) => setAutoSyncEnrichMax(e.target.value)}
+                  />
+                </div>
                 <button
                   className="btn-primary"
                   type="submit"
@@ -1282,6 +1306,15 @@ export function Settings() {
                 never tries the whole registry at once. Drivers that don't fit
                 are picked up on later runs, oldest first. Set to 0 to skip the
                 registry refresh entirely.
+              </p>
+              <p className="text-xs text-fg-subtle">
+                Detail pages fill in an entry's specifics (finish, values,
+                photos). Each sync fetches at most this many, prioritizing
+                entries in your collection, matched to a saved listing, or on a
+                wishlist; the rest wait for later runs. Entries none of those
+                reference are fetched once and not refreshed.{" "}
+                <em>Force refresh all</em> (under Registry details) ignores this
+                cap. Set to 0 to skip detail fetching entirely.
               </p>
             </form>
 
@@ -1386,7 +1419,8 @@ export function Settings() {
                   <div className="text-sm font-medium">Registry details</div>
                   <div className="text-xs text-fg-subtle">
                     Re-fetch detail pages for cars in your collection. Stale
-                    entries (older than 30 days) refresh automatically.
+                    entries (older than 30 days) refresh automatically,
+                    prioritized and capped like the background sync.
                   </div>
                 </div>
                 <div className="flex gap-2">

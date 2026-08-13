@@ -41,6 +41,9 @@ export interface AutoSyncSettings {
   scheduled: boolean;
   /** Cap on registry entries the pre-warm refresh re-walks per sync run. 0 = disabled. */
   prewarm_max_entries: number;
+  /** Cap on registry detail pages a non-forced enrichment pass fetches per
+   *  run. 0 = disabled. A forced re-enrich ignores it. */
+  enrich_max_entries: number;
 }
 
 export interface RemoveEntrySummary {
@@ -136,11 +139,13 @@ export const api = {
     enabled: boolean,
     intervalHours: number,
     prewarmMaxEntries: number,
+    enrichMaxEntries: number,
   ) =>
     invoke<void>("set_auto_sync_settings", {
       enabled,
       intervalHours,
       prewarmMaxEntries,
+      enrichMaxEntries,
     }),
   syncDcrCollection: (enrich: boolean) =>
     invoke<SyncSummary>("sync_dcr_collection", { enrich }),
