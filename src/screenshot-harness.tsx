@@ -421,10 +421,16 @@ const RESULTS: Record<string, unknown> = {
     ebay_connected: true,
   },
   get_setting: null,
+  // The settings-sync preset (DCH-53) photographs the auto-sync card, so it
+  // gets an enabled, scheduled state with the default caps; the accounts-tab
+  // presets never render these fields.
   get_auto_sync_settings: {
-    enabled: false,
+    enabled: preset === "settings-sync",
     interval_hours: 12,
-    prewarm_max_entries: 25,
+    last_run: preset === "settings-sync" ? 1786600800 : null,
+    scheduled: preset === "settings-sync",
+    prewarm_max_entries: 5000,
+    enrich_max_entries: 500,
   },
   get_ebay_credentials: {
     has_app_id: true,
@@ -495,6 +501,11 @@ if (preset.startsWith("feed-")) {
 // as the image size above.
 if (preset.startsWith("feed-list")) {
   localStorage.setItem("view-mode:sellerFeed", "list");
+}
+// DCH-53: the sync preset opens on the Sync tab. Settings reads its tab
+// from localStorage once, at state init, validated by isSettingsTab.
+if (preset === "settings-sync") {
+  localStorage.setItem("settings.tab", "sync");
 }
 /** Every section in the panel, checkbox facets and single-control sections
  *  alike — DCH-47 made the second kind collapsible too. */

@@ -142,6 +142,9 @@ pub struct AutoSyncSettings {
     /// Cap on registry entries the pre-warm refresh re-walks per sync run.
     /// 0 = refresh disabled.
     pub prewarm_max_entries: u32,
+    /// Cap on registry detail pages a non-forced enrichment pass fetches per
+    /// run. 0 = enrichment disabled. A forced re-enrich ignores it.
+    pub enrich_max_entries: u32,
 }
 
 #[tauri::command]
@@ -162,12 +165,17 @@ pub async fn get_auto_sync_settings(state: State<'_, AppState>) -> AppResult<Aut
         .await?
         .and_then(|v| v.parse::<u32>().ok())
         .unwrap_or(settings::DEFAULT_PREWARM_REFRESH_MAX_ENTRIES);
+    let enrich_max_entries = settings::get(pool, settings::KEY_ENRICH_MAX_ENTRIES)
+        .await?
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(settings::DEFAULT_ENRICH_MAX_ENTRIES);
     Ok(AutoSyncSettings {
         enabled,
         interval_hours,
         last_run,
         scheduled: crate::scheduler::exists(),
         prewarm_max_entries,
+        enrich_max_entries,
     })
 }
 
@@ -177,6 +185,7 @@ pub async fn set_auto_sync_settings(
     enabled: bool,
     interval_hours: u32,
     prewarm_max_entries: u32,
+    enrich_max_entries: u32,
 ) -> AppResult<()> {
     let pool = &state.db.pool;
     let clamped = interval_hours.clamp(
@@ -205,6 +214,12 @@ pub async fn set_auto_sync_settings(
         pool,
         settings::KEY_PREWARM_REFRESH_MAX_ENTRIES,
         &prewarm_max_entries.to_string(),
+    )
+    .await?;
+    settings::set(
+        pool,
+        settings::KEY_ENRICH_MAX_ENTRIES,
+        &enrich_max_entries.to_string(),
     )
     .await?;
     Ok(())
