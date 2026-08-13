@@ -112,6 +112,15 @@ impl EbayClient {
         self.inner.env
     }
 
+    /// The underlying reqwest client, so Trading API calls made alongside
+    /// Browse calls share one connection pool (DCH-54) — both talk to
+    /// api.ebay.com, so pooled connections are actually reused. Trading
+    /// requests don't go through this client's rate limiter or bearer
+    /// token; they carry their own IAF token header.
+    pub(crate) fn http(&self) -> &Client {
+        &self.inner.http
+    }
+
     /// Returns a valid access token, refreshing it if missing or close to
     /// expiry. Tokens are cached in the settings KV.
     pub async fn access_token(&self) -> AppResult<String> {

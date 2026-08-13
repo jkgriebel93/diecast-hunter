@@ -161,13 +161,15 @@ pub async fn sync_saved_from_ebay(
 }
 
 async fn fetch_with_token_retry(pool: &SqlitePool) -> AppResult<MyEbayFavorites> {
+    // One client for the fetch and its potential retry (DCH-54).
+    let http = crate::ebay::standalone_http()?;
     let (env, token) = user_iaf_token(pool).await?;
-    match fetch_my_ebay_favorites(env, &token).await {
+    match fetch_my_ebay_favorites(&http, env, &token).await {
         Err(AppError::Network(msg)) if is_iaf_token_expired_error(&msg) => {
             tracing::info!("saved sync: IAF token rejected ({msg}); refreshing and retrying");
             invalidate_user_token_cache(pool, env).await?;
             let (env2, token2) = user_iaf_token(pool).await?;
-            fetch_my_ebay_favorites(env2, &token2).await
+            fetch_my_ebay_favorites(&http, env2, &token2).await
         }
         other => other,
     }

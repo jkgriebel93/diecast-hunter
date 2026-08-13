@@ -65,28 +65,44 @@ pub fn trading_endpoint(env: EbayEnvironment) -> &'static str {
     }
 }
 
+/// A client for callers that don't already hold one (DCH-54). Every Trading
+/// call takes `&Client` now, so batch flows pass `EbayClient::http()` and
+/// share its connection pool; one-shot flows (a single watch/unwatch) build
+/// this instead — one client per user action, not one per request.
+pub fn standalone_http() -> AppResult<Client> {
+    Client::builder()
+        .timeout(Duration::from_secs(30))
+        .gzip(true)
+        .http1_only()
+        .build()
+        .map_err(map_reqwest)
+}
+
 /// Add a single item to the authenticated user's eBay watchlist.
 /// "Already on watchlist" responses are treated as success.
 pub async fn add_to_watchlist(
+    http: &Client,
     env: EbayEnvironment,
     iaf_token: &str,
     legacy_item_id: &str,
 ) -> AppResult<()> {
-    call_watchlist_mutation(env, iaf_token, "AddToWatchList", legacy_item_id).await
+    call_watchlist_mutation(http, env, iaf_token, "AddToWatchList", legacy_item_id).await
 }
 
 /// Remove a single item from the authenticated user's eBay watchlist.
 /// "Not on watchlist" responses are treated as success so callers can
 /// safely use this on listings that may have been added by URL paste.
 pub async fn remove_from_watchlist(
+    http: &Client,
     env: EbayEnvironment,
     iaf_token: &str,
     legacy_item_id: &str,
 ) -> AppResult<()> {
-    call_watchlist_mutation(env, iaf_token, "RemoveFromWatchList", legacy_item_id).await
+    call_watchlist_mutation(http, env, iaf_token, "RemoveFromWatchList", legacy_item_id).await
 }
 
 async fn call_watchlist_mutation(
+    http: &Client,
     env: EbayEnvironment,
     iaf_token: &str,
     call_name: &str,
@@ -104,14 +120,7 @@ async fn call_watchlist_mutation(
 </{call_name}Request>"#
     );
 
-    let client = Client::builder()
-        .timeout(Duration::from_secs(30))
-        .gzip(true)
-        .http1_only()
-        .build()
-        .map_err(map_reqwest)?;
-
-    let resp = client
+    let resp = http
         .post(trading_endpoint(env))
         .header("X-EBAY-API-CALL-NAME", call_name)
         .header("X-EBAY-API-IAF-TOKEN", iaf_token)
@@ -138,6 +147,7 @@ fn is_safe_item_id(s: &str) -> bool {
 }
 
 pub async fn fetch_watchlist_page(
+    http: &Client,
     env: EbayEnvironment,
     iaf_token: &str,
     page_number: u32,
@@ -157,14 +167,7 @@ pub async fn fetch_watchlist_page(
 </GetMyeBayBuyingRequest>"#
     );
 
-    let client = Client::builder()
-        .timeout(Duration::from_secs(30))
-        .gzip(true)
-        .http1_only()
-        .build()
-        .map_err(map_reqwest)?;
-
-    let resp = client
+    let resp = http
         .post(trading_endpoint(env))
         .header("X-EBAY-API-CALL-NAME", "GetMyeBayBuying")
         .header("X-EBAY-API-IAF-TOKEN", iaf_token)
@@ -283,6 +286,7 @@ pub fn parse_watchlist_response(xml: &str) -> AppResult<WatchlistPage> {
 /// favorite-sellers lists. eBay caps both at modest sizes (typically a few
 /// hundred each), so we don't paginate — we ask for one big page.
 pub async fn fetch_my_ebay_favorites(
+    http: &Client,
     env: EbayEnvironment,
     iaf_token: &str,
 ) -> AppResult<MyEbayFavorites> {
@@ -306,14 +310,7 @@ pub async fn fetch_my_ebay_favorites(
 </GetMyeBayBuyingRequest>"#
         .to_string();
 
-    let client = Client::builder()
-        .timeout(Duration::from_secs(30))
-        .gzip(true)
-        .http1_only()
-        .build()
-        .map_err(map_reqwest)?;
-
-    let resp = client
+    let resp = http
         .post(trading_endpoint(env))
         .header("X-EBAY-API-CALL-NAME", "GetMyeBayBuying")
         .header("X-EBAY-API-IAF-TOKEN", iaf_token)

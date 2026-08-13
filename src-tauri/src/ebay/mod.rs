@@ -20,7 +20,7 @@ pub use client::{EbayClient, EbayEnvironment};
 pub use item_detail::{detail_from_raw, FeedItemDetail};
 pub use oauth::{
     authorize_url, disconnect, exchange_code, invalidate_user_token_cache,
-    is_iaf_token_expired_error, status, user_iaf_token, OauthStatus, DEFAULT_SCOPES,
+    is_iaf_token_expired_error, status, user_iaf_token, EbayUserCreds, OauthStatus, DEFAULT_SCOPES,
 };
 pub use offers::{fetch_received_offers, ReceivedOffer};
 pub use parse::{
@@ -29,5 +29,5 @@ pub use parse::{
 pub use search::{search_diecasts, SearchFilters, SearchPage};
 pub use trading::{
     add_to_watchlist, fetch_my_ebay_favorites, fetch_watchlist_page, remove_from_watchlist,
-    MyEbayFavorites,
+    standalone_http, MyEbayFavorites,
 };

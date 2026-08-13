@@ -155,20 +155,55 @@ pub async fn get_user_access_token(
         .ok_or_else(|| AppError::Config("user access token missing after refresh".into()))
 }
 
+/// The configured environment + app credentials, resolved once. The two
+/// `secret_get` calls behind this are blocking OS-keyring reads, so batch
+/// flows (watchlist sync) build one of these per run and mint tokens from
+/// it (DCH-54), instead of paying the keyring on every `user_iaf_token`
+/// call. Token freshness is unaffected: [`Self::token`] still goes through
+/// the KV-cached `get_user_access_token`, which refreshes near expiry.
+pub struct EbayUserCreds {
+    env: EbayEnvironment,
+    app_id: String,
+    cert_id: String,
+}
+
+impl EbayUserCreds {
+    pub async fn from_settings(pool: &SqlitePool) -> AppResult<Self> {
+        let env_str = settings::get(pool, settings::KEY_EBAY_ENVIRONMENT)
+            .await?
+            .unwrap_or_else(|| "sandbox".to_string());
+        let env = EbayEnvironment::from_str(&env_str);
+        let app_id = settings::secret_get(settings::ENTRY_EBAY_APP_ID)?
+            .ok_or_else(|| AppError::NotConfigured("eBay App ID not set".into()))?;
+        let cert_id = settings::secret_get(settings::ENTRY_EBAY_CERT_ID)?
+            .ok_or_else(|| AppError::NotConfigured("eBay Cert ID not set".into()))?;
+        Ok(Self {
+            env,
+            app_id,
+            cert_id,
+        })
+    }
+
+    pub fn environment(&self) -> EbayEnvironment {
+        self.env
+    }
+
+    /// A valid user IAF token, refreshed through the settings-KV cache when
+    /// missing or near expiry. Safe to call per page / per pass — the cache
+    /// makes the warm path two KV reads, no keyring, no network.
+    pub async fn token(&self, pool: &SqlitePool) -> AppResult<String> {
+        get_user_access_token(pool, self.env, &self.app_id, &self.cert_id, DEFAULT_SCOPES).await
+    }
+}
+
 /// Convenience: resolve the configured environment + app credentials and
 /// return a refreshed user IAF token suitable for Trading API calls.
-/// Centralizes the boilerplate used by every Trading-API entry point.
+/// One-shot flavor for single Trading calls; batch flows hold an
+/// [`EbayUserCreds`] instead so the keyring is read once per run.
 pub async fn user_iaf_token(pool: &SqlitePool) -> AppResult<(EbayEnvironment, String)> {
-    let env_str = settings::get(pool, settings::KEY_EBAY_ENVIRONMENT)
-        .await?
-        .unwrap_or_else(|| "sandbox".to_string());
-    let env = EbayEnvironment::from_str(&env_str);
-    let app_id = settings::secret_get(settings::ENTRY_EBAY_APP_ID)?
-        .ok_or_else(|| AppError::NotConfigured("eBay App ID not set".into()))?;
-    let cert_id = settings::secret_get(settings::ENTRY_EBAY_CERT_ID)?
-        .ok_or_else(|| AppError::NotConfigured("eBay Cert ID not set".into()))?;
-    let token = get_user_access_token(pool, env, &app_id, &cert_id, DEFAULT_SCOPES).await?;
-    Ok((env, token))
+    let creds = EbayUserCreds::from_settings(pool).await?;
+    let token = creds.token(pool).await?;
+    Ok((creds.env, token))
 }
 
 /// Drop the cached access token + expiry so the next `user_iaf_token`
