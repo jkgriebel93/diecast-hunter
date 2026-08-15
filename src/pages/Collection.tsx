@@ -231,9 +231,15 @@ export function Collection() {
     }
   }
 
-  // Distinct driver names / scales / OEMs for filter dropdowns. Scales are
-  // limited to the standard model sizes we surface everywhere
+  // Distinct driver names / scales / OEMs for the filter dropdowns. Scales
+  // are limited to the standard model sizes we surface everywhere
   // (1:18, 1:24, 1:32, 1:64).
+  //
+  // Filters only. The manual-entry dialog loads its own driver list, because
+  // "drivers present in this list" is the right rule for narrowing a list and
+  // the wrong one for an entry form — it hid every driver the user doesn't
+  // already own a car by, which is precisely who you name when adding a car
+  // the registry doesn't list.
   const driverNames = useMemo(() => {
     const set = new Set<string>();
     for (const i of items ?? []) set.add(i.driver_name ?? "(unknown)");
@@ -486,7 +492,6 @@ export function Collection() {
       {manualEntry && (
         <ManualEntryDialog
           editing={manualEntry === "new" ? null : manualEntry}
-          driverNames={driverNames}
           onClose={() => setManualEntry(null)}
           onSaved={(message, partial) => {
             setManualEntry(null);
