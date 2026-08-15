@@ -7,6 +7,7 @@ import {
   EMPTY_ATTRIBUTE_OPTIONS,
   type AttributeOptions,
 } from "@/lib/attributeOptions";
+import { loadDriverSuggestions } from "@/lib/driverSuggestions";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { Modal } from "@/components/Modal";
 import {
@@ -47,16 +48,11 @@ const PHOTO_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "avif"];
  */
 export function ManualEntryDialog({
   editing,
-  driverNames,
   onClose,
   onSaved,
 }: {
   /** The row being edited, or null when adding. */
   editing: CollectionRow | null;
-  /** Existing driver names, offered as autocomplete so a manual entry lands
-   *  in the same driver group as the rest of the collection instead of
-   *  creating a near-duplicate driver. */
-  driverNames: string[];
   onClose: () => void;
   /** `partial` is true when the entry saved but its photo didn't — the save
    *  went through, so the caller must not report it as a failure. */
@@ -83,15 +79,24 @@ export function ManualEntryDialog({
   const [options, setOptions] = useState<AttributeOptions>(
     EMPTY_ATTRIBUTE_OPTIONS,
   );
+  // Loaded here rather than passed in. The list used to come from Collection,
+  // which builds one from the rows on screen for its filter dropdown — right
+  // for a filter, backwards for this dialog, where the first car by a driver
+  // is the case that most needs the suggestion. Owning the fetch is what stops
+  // that list being handed back.
+  const [driverNames, setDriverNames] = useState<string[]>([]);
   const listId = useId();
 
-  // Loaded on open rather than on first focus: five of the fields below want
+  // Loaded on open rather than on first focus: six of the fields below want
   // suggestions, so there is no keystroke early enough to hide the fetch
-  // behind, and the cache makes every open after the first free.
+  // behind, and the attribute cache makes every open after the first free.
   useEffect(() => {
     let live = true;
     void loadAttributeOptions().then((o) => {
       if (live) setOptions(o);
+    });
+    void loadDriverSuggestions().then((d) => {
+      if (live) setDriverNames(d);
     });
     return () => {
       live = false;
