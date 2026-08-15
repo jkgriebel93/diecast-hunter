@@ -73,6 +73,11 @@ pub struct LocalEntryInput {
     pub condition: Option<String>,
     pub notes: Option<String>,
     pub image_url: Option<String>,
+    /// This copy's sequential number — the DIN, which DCR's registration form
+    /// calls the chassis number. A property of the item on the shelf, not of
+    /// the production run, which is why it is stored on the collection row
+    /// rather than on the registry entry that several copies could share.
+    pub din: Option<i64>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -127,6 +132,21 @@ fn validate(input: &LocalEntryInput) -> AppResult<LocalEntryInput> {
             "Production quantity cannot be negative".into(),
         ));
     }
+    // 1-based: DCR's own form numbers a run from #1, and a "#0 of 2500" would
+    // render as a real DIN rather than as the mistake it is.
+    if input.din.is_some_and(|d| d < 1) {
+        return Err(AppError::Parse("DIN must be 1 or greater".into()));
+    }
+    // Caught here rather than shrugged at, because the pair is what gets
+    // displayed — "#3000 of 2500" is visibly wrong and the user is the only
+    // one who can say which half is the typo.
+    if let (Some(din), Some(qty)) = (input.din, input.production_qty) {
+        if qty > 0 && din > qty {
+            return Err(AppError::Parse(format!(
+                "DIN {din} is higher than the production quantity of {qty}"
+            )));
+        }
+    }
 
     Ok(LocalEntryInput {
         driver_name: driver_name.to_string(),
@@ -145,6 +165,7 @@ fn validate(input: &LocalEntryInput) -> AppResult<LocalEntryInput> {
         condition: clean(&input.condition),
         notes: clean(&input.notes),
         image_url: clean(&input.image_url),
+        din: input.din,
     })
 }
 
@@ -152,12 +173,21 @@ fn validate(input: &LocalEntryInput) -> AppResult<LocalEntryInput> {
 /// looks for `image_url`. No `detail_url`: there is no DCR page to link to,
 /// and writing one would make the row's "View on diecastregistry.com" link
 /// point at a 404.
+///
+/// The DIN goes under `seq_produced.sequence` — the same key
+/// `dcr_collection` writes when it parses My Garage's "(#1832 / 2016)". One
+/// key, one meaning, so the collection list reads the DIN off a manual entry
+/// and a synced one through the same path.
 fn collection_raw_json(input: &LocalEntryInput) -> String {
     serde_json::to_string(&serde_json::json!({
         "source": SOURCE_LOCAL,
         "driver_name": input.driver_name,
         "scheme_text": input.scheme_text,
         "image_url": input.image_url,
+        "seq_produced": {
+            "sequence": input.din,
+            "total": input.production_qty,
+        },
     }))
     .unwrap_or_default()
 }
@@ -578,6 +608,45 @@ mod tests {
         bad_price.paid_cents = Some(-1);
         let err = create_local_entry(&pool, bad_price).await.unwrap_err();
         assert!(err.to_string().contains("negative"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn din_is_stored_where_the_dcr_sync_puts_it() {
+        // The contract that lets one display path serve both sources: a
+        // manual entry's DIN has to land on the same raw_json key
+        // `dcr_collection` writes for "(#1832 / 2016)".
+        let pool = migrated_pool().await;
+        let mut i = input("Jeff Gordon", "DuPont");
+        i.din = Some(1832);
+        i.production_qty = Some(2016);
+        let created = create_local_entry(&pool, i).await.unwrap();
+
+        let (raw,): (String,) = sqlx::query_as("SELECT raw_json FROM my_collection WHERE id = ?")
+            .bind(created.collection_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(json["seq_produced"]["sequence"], 1832);
+        assert_eq!(json["seq_produced"]["total"], 2016);
+    }
+
+    #[tokio::test]
+    async fn a_din_past_the_end_of_the_run_is_rejected() {
+        let pool = migrated_pool().await;
+        let mut i = input("Jeff Gordon", "DuPont");
+        i.din = Some(3000);
+        i.production_qty = Some(2500);
+        let err = create_local_entry(&pool, i).await.unwrap_err();
+        assert!(err.to_string().contains("higher than"), "{err}");
+
+        // Zero production quantity is the prototype convention, not a run of
+        // none, so it can't contradict a DIN.
+        let pool = migrated_pool().await;
+        let mut ok = input("Jeff Gordon", "DuPont");
+        ok.din = Some(1);
+        ok.production_qty = Some(0);
+        create_local_entry(&pool, ok).await.unwrap();
     }
 
     #[tokio::test]

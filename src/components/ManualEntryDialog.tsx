@@ -1,5 +1,12 @@
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { api, ALLOWED_SCALES, type CollectionRow } from "@/lib/tauri";
+import {
+  loadAttributeOptions,
+  EMPTY_ATTRIBUTE_OPTIONS,
+  type AttributeOptions,
+} from "@/lib/attributeOptions";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { Modal } from "@/components/Modal";
 import {
@@ -9,6 +16,22 @@ import {
   validateManualEntry,
   type ManualEntryForm,
 } from "@/lib/localEntry";
+
+/** What should happen to the entry's photo when the dialog is saved.
+ *
+ *  Three states rather than a nullable path because "leave it alone" and
+ *  "take it away" are different intentions, and a single `string | null`
+ *  would collapse them — opening the dialog on a row that already has a
+ *  photo and pressing Save would silently delete it. */
+type PhotoAction =
+  | { kind: "unchanged" }
+  | { kind: "replace"; sourcePath: string }
+  | { kind: "remove" };
+
+/** Extensions the backend accepts (`collection_photo::ALLOWED_EXTENSIONS`).
+ *  Duplicated here so the OS picker greys out files that would be refused,
+ *  rather than letting the user choose one and reporting an error after. */
+const PHOTO_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "avif"];
 
 /**
  * Add or edit a car diecastregistry.com doesn't list (DCH-12).
@@ -35,7 +58,9 @@ export function ManualEntryDialog({
    *  creating a near-duplicate driver. */
   driverNames: string[];
   onClose: () => void;
-  onSaved: (message: string) => void;
+  /** `partial` is true when the entry saved but its photo didn't — the save
+   *  went through, so the caller must not report it as a failure. */
+  onSaved: (message: string, partial?: boolean) => void;
 }) {
   const [form, setForm] = useState<ManualEntryForm>(() =>
     editing ? formFromRow(editing) : EMPTY_MANUAL_ENTRY_FORM,
@@ -46,7 +71,32 @@ export function ManualEntryDialog({
   // would flatten a backend `AppError` into a string before anything got to
   // read its prefix.
   const [saveError, setSaveError] = useState<unknown>(null);
+  const [photo, setPhoto] = useState<PhotoAction>({ kind: "unchanged" });
+  // Seeded from the row being edited; replaced when a new file is picked and
+  // cleared when the photo is removed. Held separately from `photo` because
+  // the stored photo and a freshly-picked one become displayable by different
+  // routes — one is already inside the app's asset scope, the other needs the
+  // per-file grant in `pickPhoto`.
+  const [previewSrc, setPreviewSrc] = useState<string | null>(() =>
+    editing?.local_image_path ? convertFileSrc(editing.local_image_path) : null,
+  );
+  const [options, setOptions] = useState<AttributeOptions>(
+    EMPTY_ATTRIBUTE_OPTIONS,
+  );
   const listId = useId();
+
+  // Loaded on open rather than on first focus: five of the fields below want
+  // suggestions, so there is no keystroke early enough to hide the fetch
+  // behind, and the cache makes every open after the first free.
+  useEffect(() => {
+    let live = true;
+    void loadAttributeOptions().then((o) => {
+      if (live) setOptions(o);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const errors = useMemo(() => validateManualEntry(form), [form]);
 
@@ -65,17 +115,65 @@ export function ManualEntryDialog({
     setSaveError(null);
     try {
       const input = toInput(form);
+      let collectionId: number;
+      let message: string;
       if (editing) {
         await api.updateLocalCollectionEntry(editing.collection_id, input);
-        onSaved(`Updated "${input.schemeText}".`);
+        collectionId = editing.collection_id;
+        message = `Updated "${input.schemeText}".`;
       } else {
-        await api.createLocalCollectionEntry(input);
-        onSaved(`Added "${input.schemeText}" to your collection.`);
+        const summary = await api.createLocalCollectionEntry(input);
+        collectionId = summary.collection_id;
+        message = `Added "${input.schemeText}" to your collection.`;
       }
+
+      // The photo is a second round trip because it needs the entry's id,
+      // which on the add path doesn't exist until the row does. Its failure
+      // is reported as a shortfall rather than an error: everything the user
+      // typed is already saved, and an error banner here would tell them to
+      // retry a save that succeeded.
+      try {
+        if (photo.kind === "replace") {
+          await api.setCollectionPhoto(collectionId, photo.sourcePath);
+        } else if (photo.kind === "remove") {
+          await api.clearCollectionPhoto(collectionId);
+        }
+      } catch (photoErr) {
+        onSaved(
+          `${message} The photo couldn't be ${
+            photo.kind === "remove" ? "removed" : "attached"
+          } — ${String(photoErr)}`,
+          true,
+        );
+        return;
+      }
+      onSaved(message);
     } catch (err) {
       setSaveError(err);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function pickPhoto() {
+    const picked = await openFileDialog({
+      title: "Choose a photo",
+      multiple: false,
+      directory: false,
+      filters: [{ name: "Images", extensions: PHOTO_EXTENSIONS }],
+    });
+    // The picker resolves to null when dismissed; `multiple: false` narrows
+    // the union to a single path, but guard anyway rather than index into it.
+    if (typeof picked !== "string") return;
+    setPhoto({ kind: "replace", sourcePath: picked });
+    // Nothing is copied until Save, so the preview has to read the file where
+    // it sits — outside the app's asset scope. A refusal here costs only the
+    // preview, so it stays silent and the pick still stands.
+    try {
+      await api.allowPhotoPreview(picked);
+      setPreviewSrc(convertFileSrc(picked));
+    } catch {
+      setPreviewSrc(null);
     }
   }
 
@@ -201,52 +299,59 @@ export function ManualEntryDialog({
             </datalist>
           </Field>
 
-          <Field label="OEM">
-            <input
-              className="input"
-              value={form.oem}
-              onChange={(e) => set("oem", e.target.value)}
-              placeholder="Action"
-            />
-          </Field>
-          <Field label="Brand">
-            <input
-              className="input"
-              value={form.brand}
-              onChange={(e) => set("brand", e.target.value)}
-              placeholder="RCCA"
-            />
-          </Field>
+          {/* Suggestions, not a closed set — same as Driver and Scale above.
+              The registry's vocabulary is the right default, but this dialog
+              exists for cars DCR doesn't list, and a promo or an import can
+              carry a brand the registry has never catalogued. */}
+          {(
+            [
+              ["oem", "OEM", "Action", options.oems],
+              ["brand", "Brand", "RCCA", options.brands],
+              ["make", "Make", "CWC", options.makes],
+              ["finish", "Finish", "Elite", options.finishes],
+              ["diecastType", "Type", "Stock Car", options.types],
+            ] as const
+          ).map(([key, label, placeholder, opts]) => (
+            <Field key={key} label={label}>
+              <input
+                className="input"
+                list={`${listId}-${key}`}
+                value={form[key]}
+                onChange={(e) => set(key, e.target.value)}
+                placeholder={placeholder}
+              />
+              <datalist id={`${listId}-${key}`}>
+                {opts.map((o) => (
+                  <option key={o} value={o} />
+                ))}
+              </datalist>
+            </Field>
+          ))}
 
-          <Field label="Make">
-            <input
-              className="input"
-              value={form.make}
-              onChange={(e) => set("make", e.target.value)}
-            />
-          </Field>
-          <Field label="Finish">
-            <input
-              className="input"
-              value={form.finish}
-              onChange={(e) => set("finish", e.target.value)}
-            />
-          </Field>
-
-          <Field label="Type">
-            <input
-              className="input"
-              value={form.diecastType}
-              onChange={(e) => set("diecastType", e.target.value)}
-              placeholder="Stock Car"
-            />
-          </Field>
           <Field label="Production quantity">
             <input
               className="input"
               value={form.productionQty}
               onChange={(e) => set("productionQty", e.target.value)}
               inputMode="numeric"
+              placeholder="2508"
+            />
+          </Field>
+          <Field
+            label="DIN"
+            className="col-span-2"
+            hint="Which copy of the run this one is — the number on the chassis or the card. Leave blank if it isn't numbered."
+          >
+            <input
+              className="input"
+              value={form.din}
+              onChange={(e) => set("din", e.target.value)}
+              inputMode="numeric"
+              placeholder={
+                form.productionQty.trim()
+                  ? `1 of ${form.productionQty.trim()}`
+                  : "1832"
+              }
             />
           </Field>
 
@@ -272,7 +377,14 @@ export function ManualEntryDialog({
               placeholder="Mint in box"
             />
           </Field>
-          <Field label="Image URL">
+          <Field
+            label="Image URL"
+            hint={
+              previewSrc
+                ? "Not shown — your own photo takes precedence."
+                : undefined
+            }
+          >
             <input
               className="input"
               value={form.imageUrl}
@@ -280,6 +392,55 @@ export function ManualEntryDialog({
               placeholder="https://…"
             />
           </Field>
+
+          {/* A plain div, not a Field: the control is a button and an image,
+              so wrapping it in the <label> Field renders would make clicking
+              the preview trigger the button. */}
+          <div className="col-span-2 space-y-1">
+            <span className="text-xs text-fg-subtle">Photo</span>
+            <div className="flex items-start gap-3">
+              {previewSrc ? (
+                <img
+                  src={previewSrc}
+                  alt="Attached photo"
+                  className="h-24 w-24 rounded border border-border object-cover"
+                />
+              ) : (
+                <div className="flex h-24 w-24 items-center justify-center rounded border border-dashed border-border text-xs text-fg-subtle">
+                  No photo
+                </div>
+              )}
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => void pickPhoto()}
+                    disabled={saving}
+                  >
+                    {previewSrc ? "Choose a different photo…" : "Choose photo…"}
+                  </button>
+                  {previewSrc && (
+                    <button
+                      type="button"
+                      className="link-danger text-sm"
+                      onClick={() => {
+                        setPhoto({ kind: "remove" });
+                        setPreviewSrc(null);
+                      }}
+                      disabled={saving}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-fg-subtle">
+                  Copied into the app, so moving or deleting the original
+                  won&rsquo;t break it.
+                </p>
+              </div>
+            </div>
+          </div>
 
           <Field label="Notes" className="col-span-2">
             <textarea

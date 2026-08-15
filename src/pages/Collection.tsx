@@ -9,6 +9,7 @@ import {
   isEmptyRange,
   type YearRange,
 } from "@/lib/yearRange";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -487,11 +488,14 @@ export function Collection() {
           editing={manualEntry === "new" ? null : manualEntry}
           driverNames={driverNames}
           onClose={() => setManualEntry(null)}
-          onSaved={(message) => {
+          onSaved={(message, partial) => {
             setManualEntry(null);
             setError(null);
-            setNotice(null);
-            setSuccessMsg(message);
+            // A partial save is a shortfall, not a failure — the entry is in
+            // the collection either way, so it must not be reported in the
+            // colour that says "this didn't happen".
+            setNotice(partial ? message : null);
+            setSuccessMsg(partial ? null : message);
             void load();
           }}
         />
@@ -777,6 +781,14 @@ function CollectionItemRow({
     `collection:${item.collection_id}`,
   );
 
+  // A photo the user attached wins over the catalog image: it shows the copy
+  // they own rather than a stock shot of the production run.
+  const imageSrc = item.local_image_path
+    ? convertFileSrc(item.local_image_path)
+    : item.image_url
+      ? resolveImage(item.image_url)
+      : null;
+
   const title = (
     <div className="text-sm font-medium truncate flex items-center gap-2">
       <span className="truncate">{item.scheme_text ?? "(no scheme)"}</span>
@@ -803,9 +815,9 @@ function CollectionItemRow({
         onToggle={onToggle}
         className="self-start -mt-0.5"
       />
-      {!isCollapsed && item.image_url && (
+      {!isCollapsed && imageSrc && (
         <img
-          src={resolveImage(item.image_url)}
+          src={imageSrc}
           alt=""
           loading="lazy"
           decoding="async"
@@ -843,6 +855,17 @@ function CollectionItemRow({
                 ]
                   .filter(Boolean)
                   .join(" · ")}
+              </div>
+            )}
+            {/* Outside the `enriched` block above, unlike the other spec
+                fields: the DIN identifies the copy on the shelf, so it is
+                just as real on a manual entry — which never becomes
+                "enriched", having no detail page to enrich from. */}
+            {item.din != null && (
+              <div className="text-xs text-fg-subtle mt-0.5">
+                DIN #{formatCount(item.din)}
+                {item.production_qty != null &&
+                  ` of ${formatCount(item.production_qty)}`}
               </div>
             )}
             {item.condition && (

@@ -95,6 +95,16 @@ export interface CollectionRow {
   paid_cents: number | null;
   condition: string | null;
   notes: string | null;
+  /** This copy's sequential number — what diecastregistry.com's registration
+   *  form calls the chassis number. Shown against `production_qty`, so
+   *  "#1832 of 2016". Typed in for a manual entry, parsed off My Garage for a
+   *  synced one. */
+  din: number | null;
+  /** Absolute path of a photo the user attached, if any. Not a URL — hand it
+   *  to `convertFileSrc` before putting it in an `<img src>`. Takes
+   *  precedence over `image_url`, which is a catalog shot of the production
+   *  run rather than of the copy the user owns. */
+  local_image_path: string | null;
 }
 
 /** Fields of a manually-added collection entry. Mirrors
@@ -116,6 +126,7 @@ export interface LocalEntryInput {
   condition: string | null;
   notes: string | null;
   imageUrl: string | null;
+  din: number | null;
 }
 
 export interface LocalEntrySummary {
@@ -168,6 +179,18 @@ export const api = {
       collectionId,
       input,
     }),
+  /** Copy `sourcePath` into the app's own storage and attach it to the entry,
+   *  replacing any photo already there. Resolves to the absolute path of the
+   *  stored copy. */
+  setCollectionPhoto: (collectionId: number, sourcePath: string) =>
+    invoke<string>("set_collection_photo", { collectionId, sourcePath }),
+  clearCollectionPhoto: (collectionId: number) =>
+    invoke<void>("clear_collection_photo", { collectionId }),
+  /** Grant the webview read access to one just-picked file so it can be
+   *  previewed before saving. The startup asset scope covers only the app's
+   *  own photo directory. */
+  allowPhotoPreview: (path: string) =>
+    invoke<string>("allow_photo_preview", { path }),
   getEbayCredentials: () =>
     invoke<EbayCredentialsState>("get_ebay_credentials"),
   saveEbayCredentials: (appId: string, certId: string, environment: string) =>

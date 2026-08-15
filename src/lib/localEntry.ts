@@ -20,6 +20,8 @@ export interface ManualEntryForm {
   finish: string;
   diecastType: string;
   productionQty: string;
+  /** This copy's sequential number, as typed. See `CollectionRow.din`. */
+  din: string;
   price: string;
   condition: string;
   notes: string;
@@ -39,6 +41,7 @@ export const EMPTY_MANUAL_ENTRY_FORM: ManualEntryForm = {
   finish: "",
   diecastType: "",
   productionQty: "",
+  din: "",
   price: "",
   condition: "",
   notes: "",
@@ -62,6 +65,7 @@ export function formFromRow(row: CollectionRow): ManualEntryForm {
     finish: row.finish ?? "",
     diecastType: row.diecast_type ?? "",
     productionQty: row.production_qty != null ? String(row.production_qty) : "",
+    din: row.din != null ? String(row.din) : "",
     price: row.paid_cents != null ? (row.paid_cents / 100).toFixed(2) : "",
     condition: row.condition ?? "",
     notes: row.notes ?? "",
@@ -118,10 +122,23 @@ export function validateManualEntry(form: ManualEntryForm): string[] {
       errors.push(`${label} must be between ${MIN_YEAR} and ${MAX_YEAR}.`);
   }
 
-  if (parseIntField(form.productionQty) === undefined)
+  const qty = parseIntField(form.productionQty);
+  if (qty === undefined)
     errors.push("Production quantity must be a whole number.");
   if (parsePriceToCents(form.price) === undefined)
     errors.push("Purchase price must be an amount like 45.00.");
+
+  const din = parseIntField(form.din);
+  if (din === undefined) errors.push("DIN must be a whole number.");
+  // Runs from #1: DCR's own registration form numbers them that way, and a
+  // "#0 of 2500" would read as a real DIN rather than as the slip it is.
+  else if (din !== null && din < 1) errors.push("DIN must be 1 or greater.");
+  // A DIN past the end of the run is caught here rather than shrugged at:
+  // the pair is what gets displayed, "#3000 of 2500" is visibly wrong, and
+  // only the user knows which half is the typo. `qty === 0` is the prototype
+  // convention, not a run of none, so it can't contradict anything.
+  else if (din !== null && qty != null && qty > 0 && din > qty)
+    errors.push(`DIN ${din} is higher than the production quantity of ${qty}.`);
 
   return errors;
 }
@@ -149,6 +166,7 @@ export function toInput(form: ManualEntryForm): LocalEntryInput {
     finish: text(form.finish),
     diecastType: text(form.diecastType),
     productionQty: parseIntField(form.productionQty) as number | null,
+    din: parseIntField(form.din) as number | null,
     paidCents: parsePriceToCents(form.price) as number | null,
     condition: text(form.condition),
     notes: text(form.notes),
