@@ -4,6 +4,7 @@ use sqlx::SqlitePool;
 use std::sync::atomic::Ordering;
 use tauri::State;
 
+use crate::collection_photo;
 use crate::error::{AppError, AppResult};
 use crate::listing_groups;
 use crate::local_collection;
@@ -1973,6 +1974,17 @@ pub struct CollectionRow {
     pub condition: Option<String>,
     #[serde(default)]
     pub notes: Option<String>,
+    /// This copy's sequential number, from `raw_json.seq_produced.sequence` —
+    /// typed in for a manual entry, parsed off My Garage's "(#1832 / 2016)"
+    /// for a synced one. Shown against `production_qty`.
+    #[serde(default)]
+    pub din: Option<i64>,
+    /// Absolute path of the user's own photo, if they attached one. Absolute
+    /// because the frontend has to hand it to `convertFileSrc`, and only the
+    /// backend knows where the app data directory is; the database itself
+    /// stores a bare file name (see `collection_photo`).
+    #[serde(default)]
+    pub local_image_path: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -2001,6 +2013,7 @@ struct CollectionRowRaw {
     paid_cents: Option<i64>,
     condition: Option<String>,
     notes: Option<String>,
+    image_path: Option<String>,
 }
 
 // The "complex type" is a sqlx row tuple whose shape is dictated by the
@@ -2100,7 +2113,8 @@ async fn fetch_collection_rows(
                 c.source AS collection_source,
                 c.paid_cents,
                 c.condition,
-                c.notes
+                c.notes,
+                c.image_path
          FROM my_collection c
          JOIN registry_entries re ON re.id = c.registry_entry_id
          JOIN drivers d ON d.id = re.driver_id";
@@ -2121,6 +2135,12 @@ async fn fetch_collection_rows(
             .await?
         }
     };
+
+    // Resolved once for the whole list rather than per row: it's a constant
+    // for the process, and a failure here should not fail the query — a user
+    // whose data dir can't be resolved still gets their collection, just
+    // without local photos.
+    let images_dir = collection_photo::images_dir().ok();
 
     let mut out = Vec::with_capacity(rows.len());
     for r in rows {
@@ -2145,6 +2165,16 @@ async fn fetch_collection_rows(
             .and_then(|v| v.as_str())
             .map(str::to_owned);
         let registry_int_id = coll_json.get("registry_int_id").and_then(|v| v.as_i64());
+        let din = coll_json
+            .get("seq_produced")
+            .and_then(|v| v.get("sequence"))
+            .and_then(|v| v.as_i64());
+        let local_image_path = r.image_path.as_deref().and_then(|name| {
+            images_dir
+                .as_deref()
+                .and_then(|dir| collection_photo::resolve_path(dir, name))
+                .map(|p| p.to_string_lossy().into_owned())
+        });
 
         out.push(CollectionRow {
             collection_id: r.id,
@@ -2173,10 +2203,67 @@ async fn fetch_collection_rows(
             paid_cents: r.paid_cents,
             condition: r.condition,
             notes: r.notes,
+            din,
+            local_image_path,
         });
     }
 
     Ok(out)
+}
+
+/// Attach a photo from the user's disk to a collection entry, replacing any
+/// photo already on it. `source_path` comes from the OS file picker.
+///
+/// Not restricted to manual entries: a photo is of the copy on the shelf, and
+/// a DCR-synced row's catalog image is a stock photo of the production run.
+#[tauri::command]
+pub async fn set_collection_photo(
+    state: State<'_, AppState>,
+    collection_id: i64,
+    source_path: String,
+) -> AppResult<String> {
+    let dir = collection_photo::images_dir()?;
+    let name = collection_photo::set_photo(
+        &state.db.pool,
+        &dir,
+        collection_id,
+        std::path::Path::new(&source_path),
+    )
+    .await?;
+    Ok(dir.join(name).to_string_lossy().into_owned())
+}
+
+/// Let the webview display one file the user just picked, so the dialog can
+/// preview a photo before it is saved.
+///
+/// Needed because the asset-protocol scope granted at startup covers the
+/// app's own `images/` directory and nothing else — deliberately, so a bug in
+/// the frontend can't turn into "render any file on this disk". The grant
+/// here is per-file and lasts only for the session, and the file is one the
+/// user chose in the OS picker moments earlier.
+///
+/// Refuses anything that isn't an existing file, so a path built by mistake
+/// can't widen the scope to a directory.
+#[tauri::command]
+pub async fn allow_photo_preview(app: tauri::AppHandle, path: String) -> AppResult<String> {
+    let path = std::path::PathBuf::from(&path);
+    if !tokio::fs::metadata(&path).await?.is_file() {
+        return Err(AppError::Parse("that isn't a file".into()));
+    }
+    tauri::Manager::asset_protocol_scope(&app)
+        .allow_file(&path)
+        .map_err(|e| AppError::Config(e.to_string()))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Remove an entry's photo and delete the stored file.
+#[tauri::command]
+pub async fn clear_collection_photo(
+    state: State<'_, AppState>,
+    collection_id: i64,
+) -> AppResult<()> {
+    let dir = collection_photo::images_dir()?;
+    collection_photo::clear_photo(&state.db.pool, &dir, collection_id).await
 }
 
 // --- Saved searches + saved sellers ---------------------------------------

@@ -1,3 +1,4 @@
+mod collection_photo;
 mod commands;
 mod comps;
 mod db;
@@ -97,6 +98,34 @@ pub fn run() {
                 });
                 Ok::<_, error::AppError>(pool)
             })?;
+
+            // Let the webview read collection photos out of the app data dir.
+            //
+            // Granted at runtime rather than through `assetProtocol.scope` in
+            // tauri.conf.json because the directory isn't one of Tauri's own:
+            // the database lives wherever `directories::ProjectDirs` puts it
+            // (`%APPDATA%\DiecastHunter\DiecastHunter\data`), which is not
+            // Tauri's `$APPDATA` (`%APPDATA%\com.diecasthunter.app`). A static
+            // scope could only reach it by walking back out with `..`.
+            //
+            // Non-recursive: `images/` holds nothing but photos, and there is
+            // no reason for the webview to be able to read a subdirectory
+            // someone drops in there later.
+            match collection_photo::images_dir() {
+                Ok(dir) => {
+                    if let Err(e) = std::fs::create_dir_all(&dir)
+                        .map_err(error::AppError::from)
+                        .and_then(|()| {
+                            app.asset_protocol_scope()
+                                .allow_directory(&dir, false)
+                                .map_err(|e| error::AppError::Config(e.to_string()))
+                        })
+                    {
+                        tracing::error!("collection photos will not render: {e}");
+                    }
+                }
+                Err(e) => tracing::error!("could not resolve the collection photo directory: {e}"),
+            }
 
             // Embedded listing receiver for the browser extension. Failures
             // are non-fatal — the rest of the app works without it.
@@ -219,6 +248,9 @@ pub fn run() {
             commands::list_all_collection_items,
             commands::create_local_collection_entry,
             commands::update_local_collection_entry,
+            commands::set_collection_photo,
+            commands::clear_collection_photo,
+            commands::allow_photo_preview,
             commands::get_ebay_credentials,
             commands::save_ebay_credentials,
             commands::clear_ebay_credentials,

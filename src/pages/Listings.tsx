@@ -34,6 +34,11 @@ import {
   type ReceivedOffer,
   type WishlistInfo,
 } from "@/lib/tauri";
+import {
+  loadAttributeOptions,
+  EMPTY_ATTRIBUTE_OPTIONS,
+  type AttributeOptions,
+} from "@/lib/attributeOptions";
 import { useImageSize, IMG_CLASS } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
@@ -2561,49 +2566,6 @@ function DriverTagSection({
       </button>
     </form>
   );
-}
-
-/** Suggestion lists for the attribute editor, from the cached DCR form
- *  options. Fetched once per app session on first editor open; a failure
- *  resets the cache (so a later open retries) and the editor degrades to
- *  free-form inputs. */
-interface AttributeOptions {
-  oems: string[];
-  brands: string[];
-  makes: string[];
-  finishes: string[];
-}
-const EMPTY_ATTRIBUTE_OPTIONS: AttributeOptions = {
-  oems: [],
-  brands: [],
-  makes: [],
-  finishes: [],
-};
-let attributeOptionsPromise: Promise<AttributeOptions> | null = null;
-function loadAttributeOptions() {
-  attributeOptionsPromise ??= Promise.all([
-    api.listRegistryFormOptions("oem"),
-    api.listRegistryFormOptions("brand"),
-    api.listRegistryFormOptions("make"),
-    api.listRegistryFormOptions("finish"),
-  ]).then(
-    ([o, b, m, f]) => ({
-      // Stable sort floats the OEMs the user actually buys to the top.
-      oems: o
-        .map((x) => x.display)
-        .sort(
-          (a, b2) => Number(isPreferredOem(b2)) - Number(isPreferredOem(a)),
-        ),
-      brands: prepareBrandOptions(b).map((x) => x.display),
-      makes: prepareMakeOptions(m).map((x) => x.display),
-      finishes: f.map((x) => x.display),
-    }),
-    () => {
-      attributeOptionsPromise = null;
-      return EMPTY_ATTRIBUTE_OPTIONS;
-    },
-  );
-  return attributeOptionsPromise;
 }
 
 /** Listing-level attributes (oem / brand / finish / make + race-win and

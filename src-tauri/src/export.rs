@@ -341,8 +341,23 @@ pub async fn export_collection(
             Some(i as u32),
             Some(total),
         );
-        let image = match &r.image_url {
-            Some(u) => match fetch_image_data_uri(&client, u).await {
+        // The user's own photo wins over the catalog image: they attached it
+        // because it shows the copy they own. Read from disk rather than
+        // fetched — `fetch_image_data_uri` would treat the path as a DCR-
+        // relative URL and produce a 404 and a placeholder.
+        let image = match (&r.local_image_path, &r.image_url) {
+            (Some(p), _) => match read_image_data_uri(std::path::Path::new(p)).await {
+                Ok(uri) => {
+                    images_embedded += 1;
+                    Some(uri)
+                }
+                Err(e) => {
+                    tracing::warn!("export: could not read local photo {p}: {e}");
+                    images_failed += 1;
+                    None
+                }
+            },
+            (None, Some(u)) => match fetch_image_data_uri(&client, u).await {
                 Ok(uri) => {
                     images_embedded += 1;
                     Some(uri)
@@ -353,7 +368,7 @@ pub async fn export_collection(
                     None
                 }
             },
-            None => None,
+            (None, None) => None,
         };
         entries.push(EntryHtml {
             header: collection_header_line(r),
@@ -399,10 +414,10 @@ fn build_collection_csv(rows: &[CollectionRow]) -> String {
     let mut out = String::from("\u{feff}");
     out.push_str(
         "Driver,Year,Car Number,Scheme,OEM,Brand,Scale,Make,Finish,Type,\
-         Production Qty,Retail Value,Wholesale Value,Registration Number,DCR URL\n",
+         Production Qty,DIN,Retail Value,Wholesale Value,Registration Number,DCR URL\n",
     );
     for r in rows {
-        let fields: [String; 15] = [
+        let fields: [String; 16] = [
             r.driver_name.clone().unwrap_or_default(),
             r.year.map(|y| y.to_string()).unwrap_or_default(),
             r.car_number.clone().unwrap_or_default(),
@@ -414,6 +429,7 @@ fn build_collection_csv(rows: &[CollectionRow]) -> String {
             r.finish.clone().unwrap_or_default(),
             r.diecast_type.clone().unwrap_or_default(),
             r.production_qty.map(|n| n.to_string()).unwrap_or_default(),
+            r.din.map(|n| n.to_string()).unwrap_or_default(),
             r.retail_value_cents.map(csv_dollars).unwrap_or_default(),
             r.wholesale_value_cents.map(csv_dollars).unwrap_or_default(),
             r.registration_number.clone().unwrap_or_default(),
@@ -645,6 +661,7 @@ fn collection_subheader_line(r: &CollectionRow) -> String {
         r.finish.clone(),
         r.production_qty
             .map(|n| format!("production qty {}", format_thousands(n))),
+        r.din.map(|n| format!("DIN #{}", format_thousands(n))),
         r.retail_value_cents
             .map(|c| format!("Retail Value {}", format_dollars(c))),
     ]
@@ -859,6 +876,16 @@ async fn fetch_image_data_uri(client: &reqwest::Client, url: &str) -> AppResult<
         .bytes()
         .await?;
     let mime = sniff_mime(&bytes, &abs);
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:{mime};base64,{b64}"))
+}
+
+/// Same data URI, but for a photo the user attached from their own disk
+/// (`collection_photo`). Shares `sniff_mime` so an export embeds a local
+/// photo exactly as it embeds a downloaded one.
+async fn read_image_data_uri(path: &std::path::Path) -> AppResult<String> {
+    let bytes = tokio::fs::read(path).await?;
+    let mime = sniff_mime(&bytes, &path.to_string_lossy());
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Ok(format!("data:{mime};base64,{b64}"))
 }
@@ -1239,6 +1266,8 @@ mod tests {
             paid_cents: None,
             condition: None,
             notes: None,
+            din: None,
+            local_image_path: None,
         }
     }
 

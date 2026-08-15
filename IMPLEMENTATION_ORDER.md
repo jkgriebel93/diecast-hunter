@@ -1,5 +1,13 @@
 # Implementation order for open DCH tickets
 
+Rev 21, 2026-08-15. **Manual entries grew photos, attribute dropdowns and a DIN**
+(unticketed, extending DCH-12). Two things came out of it that affect the queue below:
+`cargo test` was failing outright on Windows — including in CI, so the Rust gate had been
+red since rev 20 — for a manifest reason unrelated to any test (see `build.rs`); and
+**DCH-42 got materially larger**, because a collection photo is a file in the app data
+directory rather than a row, so a database-only backup now silently loses data the user
+cannot re-sync from anywhere.
+
 Rev 20, 2026-08-13. **DCH-54 shipped**: one `EbayClient`, one keyring read of the app
 credentials, and one load of the association tables per watchlist sync (and per
 refresh-all pass), with Trading calls sharing the Browse client's connection pool. The
@@ -33,7 +41,7 @@ backend PR is waiting on review, 58 can start early without rebasing risk.
 | 1 | DCH-13 | Photo-tagging feasibility | Spike. Flagged likely-expensive; confirm or kill cheaply. |
 | 2 | DCH-26 | Lionel website integration | Scope still open — needs a use case before an implementation. |
 | 3 | DCH-27 | Revive Facebook Marketplace | Its stated precondition (matching/valuation epics) is met, but the real blocker was never sequencing: FB has no API, and the previous integration was removed deliberately. |
-| — | DCH-42 | Database backup and restore | Filed from DCH-25. Only the manually-entered slice is genuinely at risk — DCR data re-syncs — but the sold-listings archive can't be backfilled at all. |
+| — | DCH-42 | Database backup and restore | Filed from DCH-25. Only the manually-entered slice is genuinely at risk — DCR data re-syncs — but the sold-listings archive can't be backfilled at all. **Rev 21 widened this**: collection photos live as files in `<data dir>/images/`, not as rows, so "back up the database" is no longer the whole job. A backup that takes the `.sqlite` and leaves `images/` behind restores rows pointing at files that aren't there. |
 
 **DCH-16 is parked** (On Hold). The original complaint was forgotten and never written down.
 Rather than invent one, wait and see whether the UI track resolved it.
