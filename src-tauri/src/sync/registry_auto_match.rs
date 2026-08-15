@@ -370,6 +370,23 @@ pub async fn auto_match_listing(
     listing_id: i64,
     network: Option<&ProgressEmitter>,
 ) -> AppResult<AutoMatchOutcome> {
+    let aliases = load_aliases(pool).await?;
+    let model = ScoreModel::load(pool).await;
+    auto_match_listing_with(pool, listing_id, network, &aliases, &model).await
+}
+
+/// Same as [`auto_match_listing`], against an alias map and score model the
+/// caller already loaded — the watchlist sync loads both once per run
+/// (DCH-54) instead of once per item. Candidates still load per call: they
+/// are keyed by the listing's driver, which isn't known until the row is
+/// read.
+pub(crate) async fn auto_match_listing_with(
+    pool: &SqlitePool,
+    listing_id: i64,
+    network: Option<&ProgressEmitter>,
+    aliases: &AliasMap,
+    model: &ScoreModel,
+) -> AppResult<AutoMatchOutcome> {
     let Some(listing) = load_listing_for_matching(pool, listing_id).await? else {
         return Err(AppError::Parse(format!("listing {listing_id} not found")));
     };
@@ -399,15 +416,13 @@ pub async fn auto_match_listing(
         ));
     }
 
-    let aliases = load_aliases(pool).await?;
-    let model = ScoreModel::load(pool).await;
     let sig = build_signals(
         &listing.title,
         listing.raw_json.as_deref(),
-        &aliases,
+        aliases,
         &listing.attrs,
     );
-    apply_best(pool, listing_id, &sig, &candidates, &model).await
+    apply_best(pool, listing_id, &sig, &candidates, model).await
 }
 
 /// Auto-match every listing that the user hasn't already confirmed or

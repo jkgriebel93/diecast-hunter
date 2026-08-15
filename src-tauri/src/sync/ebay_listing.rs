@@ -28,9 +28,48 @@ pub struct RefreshSummary {
     pub failed: u32,
 }
 
+/// The lookup tables the post-save association passes need, loaded once and
+/// reused across a whole batch (DCH-54). Per item, driver association used
+/// to reload the drivers table, attribute detection the form-option vocab,
+/// and auto-match the scheme aliases + score model — O(items × tables) of
+/// redundant reads and tokenization per watchlist sync.
+pub(crate) struct ListingAssocContext {
+    drivers: Vec<crate::sync::driver_assoc::DriverRow>,
+    vocab: crate::sync::attribute_assoc::Vocab,
+    aliases: crate::sync::registry_auto_match::AliasMap,
+    model: crate::sync::registry_auto_match::ScoreModel,
+}
+
+impl ListingAssocContext {
+    pub(crate) async fn load(pool: &SqlitePool) -> AppResult<Self> {
+        Ok(Self {
+            drivers: crate::sync::driver_assoc::load_drivers(pool).await?,
+            vocab: crate::sync::attribute_assoc::load_vocab(pool).await?,
+            aliases: crate::sync::registry_auto_match::load_aliases(pool).await?,
+            model: crate::sync::registry_auto_match::ScoreModel::load(pool).await,
+        })
+    }
+}
+
 /// Add an eBay listing by URL or bare item id. Idempotent: if we've already
-/// saved this item, refresh it instead of duplicating.
+/// saved this item, refresh it instead of duplicating. One-shot flavor:
+/// builds its own client and association context; batch flows call
+/// [`add_listing_with_client`] with shared ones.
 pub async fn add_listing_from_input(pool: &SqlitePool, input: &str) -> AppResult<AddListingResult> {
+    let client = EbayClient::from_settings(pool.clone()).await?;
+    let assoc = ListingAssocContext::load(pool).await?;
+    add_listing_with_client(pool, &client, &assoc, input).await
+}
+
+/// The full add/refresh pipeline against a caller-supplied client and
+/// association context (DCH-54): Browse fetch → diecast filter → upsert +
+/// history → driver/attribute association → auto-match.
+pub(crate) async fn add_listing_with_client(
+    pool: &SqlitePool,
+    client: &EbayClient,
+    assoc: &ListingAssocContext,
+    input: &str,
+) -> AppResult<AddListingResult> {
     let legacy_id = extract_legacy_item_id(input).ok_or_else(|| {
         AppError::Parse(
             "couldn't pull an eBay item id out of that — paste a full \
@@ -39,8 +78,7 @@ pub async fn add_listing_from_input(pool: &SqlitePool, input: &str) -> AppResult
         )
     })?;
 
-    let client = EbayClient::from_settings(pool.clone()).await?;
-    let item = fetch_item_by_legacy_id(&client, &legacy_id).await?;
+    let item = fetch_item_by_legacy_id(client, &legacy_id).await?;
 
     // Filter out non-diecast listings unless the user opted out. The check
     // runs against the eBay categoryPath we just fetched; without category
@@ -65,13 +103,20 @@ pub async fn add_listing_from_input(pool: &SqlitePool, input: &str) -> AppResult
 
     let (listing_id, created) = upsert_listing(pool, &item).await?;
     insert_history(pool, listing_id, &item).await?;
-    if let Err(e) = crate::sync::driver_assoc::associate_listing_driver(pool, listing_id).await {
+    if let Err(e) =
+        crate::sync::driver_assoc::associate_listing_driver_with(pool, listing_id, &assoc.drivers)
+            .await
+    {
         // Auto-association is a soft hint — failure shouldn't block the
         // listing from being saved.
         tracing::warn!("driver auto-assoc for listing {listing_id} failed: {e}");
     }
-    if let Err(e) =
-        crate::sync::attribute_assoc::associate_listing_attributes(pool, listing_id).await
+    if let Err(e) = crate::sync::attribute_assoc::associate_listing_attributes_with(
+        pool,
+        listing_id,
+        &assoc.vocab,
+    )
+    .await
     {
         tracing::warn!("attribute auto-assoc for listing {listing_id} failed: {e}");
     }
@@ -80,8 +125,14 @@ pub async fn add_listing_from_input(pool: &SqlitePool, input: &str) -> AppResult
         // best-effort suggestion immediately when the driver's registry
         // entries are already cached. Existing rows are left alone so a
         // user's cleared match doesn't silently come back.
-        if let Err(e) =
-            crate::sync::registry_auto_match::auto_match_listing(pool, listing_id, None).await
+        if let Err(e) = crate::sync::registry_auto_match::auto_match_listing_with(
+            pool,
+            listing_id,
+            None,
+            &assoc.aliases,
+            &assoc.model,
+        )
+        .await
         {
             tracing::warn!("registry auto-match for listing {listing_id} failed: {e}");
         }
@@ -102,8 +153,20 @@ async fn filter_non_diecasts_enabled(pool: &SqlitePool) -> AppResult<bool> {
     }
 }
 
-/// Re-fetch a single tracked listing's current state.
+/// Re-fetch a single tracked listing's current state. One-shot flavor;
+/// [`refresh_all_active`] holds a shared client + context instead.
 pub async fn refresh_listing(pool: &SqlitePool, listing_id: i64) -> AppResult<()> {
+    let client = EbayClient::from_settings(pool.clone()).await?;
+    let assoc = ListingAssocContext::load(pool).await?;
+    refresh_listing_with_client(pool, &client, &assoc, listing_id).await
+}
+
+pub(crate) async fn refresh_listing_with_client(
+    pool: &SqlitePool,
+    client: &EbayClient,
+    assoc: &ListingAssocContext,
+    listing_id: i64,
+) -> AppResult<()> {
     let row: Option<(String, i64)> = sqlx::query_as(
         "SELECT l.external_id, s.id
          FROM listings l
@@ -124,15 +187,21 @@ pub async fn refresh_listing(pool: &SqlitePool, listing_id: i64) -> AppResult<()
     // back out for the Browse API call.
     let legacy_id = legacy_id_from_v1(&external_id).unwrap_or(external_id.clone());
 
-    let client = EbayClient::from_settings(pool.clone()).await?;
-    let item = fetch_item_by_legacy_id(&client, &legacy_id).await?;
+    let item = fetch_item_by_legacy_id(client, &legacy_id).await?;
     upsert_listing(pool, &item).await?;
     insert_history(pool, listing_id, &item).await?;
-    if let Err(e) = crate::sync::driver_assoc::associate_listing_driver(pool, listing_id).await {
+    if let Err(e) =
+        crate::sync::driver_assoc::associate_listing_driver_with(pool, listing_id, &assoc.drivers)
+            .await
+    {
         tracing::warn!("driver auto-assoc for listing {listing_id} failed: {e}");
     }
-    if let Err(e) =
-        crate::sync::attribute_assoc::associate_listing_attributes(pool, listing_id).await
+    if let Err(e) = crate::sync::attribute_assoc::associate_listing_attributes_with(
+        pool,
+        listing_id,
+        &assoc.vocab,
+    )
+    .await
     {
         tracing::warn!("attribute auto-assoc for listing {listing_id} failed: {e}");
     }
@@ -160,6 +229,13 @@ pub async fn refresh_all_active(
         considered: total,
         ..Default::default()
     };
+    if total == 0 {
+        progress.done("No active eBay listings to refresh.");
+        return Ok(summary);
+    }
+    // One client + one association context for the whole pass (DCH-54).
+    let client = EbayClient::from_settings(pool.clone()).await?;
+    let assoc = ListingAssocContext::load(pool).await?;
     for (idx, (id,)) in rows.into_iter().enumerate() {
         progress.check_cancelled()?;
         progress.step(
@@ -167,7 +243,7 @@ pub async fn refresh_all_active(
             Some((idx + 1) as u32),
             Some(total),
         );
-        match refresh_listing(pool, id).await {
+        match refresh_listing_with_client(pool, &client, &assoc, id).await {
             Ok(()) => summary.refreshed += 1,
             // Daily quota exhausted — every remaining refresh would 429 too.
             Err(e @ AppError::RateLimited(_)) => {
@@ -374,6 +450,24 @@ mod tests {
         .fetch_all(pool)
         .await
         .unwrap()
+    }
+
+    /// The DCH-54 association context is pure-DB — drivers, vocabulary,
+    /// aliases and the score model all come from SQLite, never the keyring
+    /// or network — which is what lets a batch flow load it once per run
+    /// (and lets this test exist at all; see CLAUDE.md on keyring-reaching
+    /// test binaries).
+    #[tokio::test]
+    async fn assoc_context_loads_without_client_or_keyring() {
+        let pool = migrated_pool().await;
+        sqlx::query(
+            "INSERT INTO drivers (name, normalized_name) VALUES ('Jeff Gordon', 'jeff-gordon')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let ctx = ListingAssocContext::load(&pool).await.unwrap();
+        assert_eq!(ctx.drivers.len(), 1);
     }
 
     /// The DCH-56 contract in sequence: a first observation writes, a

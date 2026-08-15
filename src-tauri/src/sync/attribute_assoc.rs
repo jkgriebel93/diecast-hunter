@@ -40,8 +40,11 @@ struct Phrase {
     display: String,
 }
 
+/// `pub(crate)` so batch flows (watchlist sync, DCH-54) can load the
+/// vocabulary once via [`load_vocab`] and run
+/// [`associate_listing_attributes_with`] per item.
 #[derive(Debug, Default)]
-struct Vocab {
+pub(crate) struct Vocab {
     oems: Vec<Phrase>,
     brands: Vec<Phrase>,
     makes: Vec<Phrase>,
@@ -62,6 +65,18 @@ struct Detected {
 /// pinned via the attribute editor. Non-fatal at call sites — this is a
 /// soft hint, same as driver association.
 pub async fn associate_listing_attributes(pool: &SqlitePool, listing_id: i64) -> AppResult<()> {
+    let vocab = load_vocab(pool).await?;
+    associate_listing_attributes_with(pool, listing_id, &vocab).await
+}
+
+/// Same as [`associate_listing_attributes`], against a vocabulary the
+/// caller already loaded — the watchlist sync loads it once per run
+/// (DCH-54) instead of once per item.
+pub(crate) async fn associate_listing_attributes_with(
+    pool: &SqlitePool,
+    listing_id: i64,
+    vocab: &Vocab,
+) -> AppResult<()> {
     let row: Option<(String, Option<String>, i64)> =
         sqlx::query_as("SELECT title, raw_json, attributes_user_set FROM listings WHERE id = ?")
             .bind(listing_id)
@@ -73,8 +88,7 @@ pub async fn associate_listing_attributes(pool: &SqlitePool, listing_id: i64) ->
     if user_set != 0 {
         return Ok(());
     }
-    let vocab = load_vocab(pool).await?;
-    let d = detect(&title, raw_json.as_deref(), &vocab);
+    let d = detect(&title, raw_json.as_deref(), vocab);
     if d != Detected::default() {
         apply(pool, listing_id, &d).await?;
     }
@@ -231,7 +245,7 @@ pub async fn clear_backfilled_attrs(pool: &SqlitePool, listing_id: i64) -> AppRe
 /// detection works even before the form-options cache is populated.
 const BUILTIN_MAKES: &[&str] = &["CWC", "CWB", "BWC", "BWB"];
 
-async fn load_vocab(pool: &SqlitePool) -> AppResult<Vocab> {
+pub(crate) async fn load_vocab(pool: &SqlitePool) -> AppResult<Vocab> {
     let rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT field, display FROM registry_form_options
          WHERE field IN ('oem', 'brand', 'make', 'finish')",

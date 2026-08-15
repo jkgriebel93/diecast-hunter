@@ -8,7 +8,8 @@ use crate::ebay::trading::WatchlistPage;
 use crate::ebay::{
     add_to_watchlist, end_reason_from_raw, extract_legacy_item_id, fetch_watchlist_page,
     invalidate_user_token_cache, is_iaf_token_expired_error, is_item_not_found_error,
-    legacy_id_from_v1, remove_from_watchlist, user_iaf_token,
+    legacy_id_from_v1, remove_from_watchlist, standalone_http, user_iaf_token, EbayClient,
+    EbayUserCreds,
 };
 use crate::error::{AppError, AppResult};
 use crate::progress::ProgressEmitter;
@@ -85,6 +86,17 @@ pub async fn sync_watchlist(
     let mut summary = WatchlistSyncSummary::default();
     let mut seen_legacy_ids: HashSet<String> = HashSet::new();
     let fresh_legacy_ids = load_fresh_legacy_ids(pool).await?;
+
+    // One of everything for the whole sync (DCH-54): one EbayClient (one
+    // reqwest pool shared by Browse and Trading calls, and a rate limiter
+    // that actually spans items), one keyring read of the app credentials,
+    // and one load of the association lookup tables. Tokens are still
+    // re-resolved per call through their KV caches, so a mid-sync expiry
+    // refreshes without failing the remaining items.
+    let client = EbayClient::from_settings(pool.clone()).await?;
+    let creds = EbayUserCreds::from_settings(pool).await?;
+    let assoc = ebay_listing::ListingAssocContext::load(pool).await?;
+
     let mut walk_complete = true;
     let mut page = 1u32;
     loop {
@@ -95,7 +107,7 @@ pub async fn sync_watchlist(
         // expiry), this proactively refreshes. fetch_with_token_retry
         // adds belt-and-suspenders for the case where eBay says the token
         // is expired anyway (clock skew or upstream revocation).
-        let result = fetch_with_token_retry(pool, page).await?;
+        let result = fetch_with_token_retry(pool, &client, &creds, page).await?;
         summary.pages_fetched += 1;
         summary.items_seen += result.item_ids.len() as u32;
 
@@ -117,7 +129,7 @@ pub async fn sync_watchlist(
                 Some((i + 1) as u32),
                 Some(result.item_ids.len() as u32),
             );
-            match ebay_listing::add_listing_from_input(pool, item_id).await {
+            match ebay_listing::add_listing_with_client(pool, &client, &assoc, item_id).await {
                 Ok(res) if res.filtered_reason.is_some() => {
                     summary.filtered += 1;
                 }
@@ -181,7 +193,8 @@ pub async fn sync_watchlist(
     // thereby prune-exempt) in the same run that unwatches them on eBay.
     // Safe on an incomplete walk: flagging is driven by local status, and
     // the unwatch half only touches ids actually seen on the watchlist.
-    let (archived, unwatched) = archive_ended_listings(pool, &seen_legacy_ids).await?;
+    let (archived, unwatched) =
+        archive_ended_listings(pool, &client, &creds, &seen_legacy_ids).await?;
     summary.archived = archived;
     summary.unwatched = unwatched;
 
@@ -252,8 +265,34 @@ async fn archive_removed_listing(pool: &SqlitePool, legacy_id: &str) -> AppResul
 /// unwatched).
 async fn archive_ended_listings(
     pool: &SqlitePool,
+    client: &EbayClient,
+    creds: &EbayUserCreds,
     seen_legacy_ids: &HashSet<String>,
 ) -> AppResult<(u32, u32)> {
+    let archived = flag_ended_listings(pool).await?;
+    let to_remove = archived_ids_to_unwatch(pool, seen_legacy_ids).await?;
+
+    let mut unwatched = 0u32;
+    if !to_remove.is_empty() {
+        let env = creds.environment();
+        let token = creds.token(pool).await?;
+        for legacy in &to_remove {
+            match remove_from_watchlist(client.http(), env, &token, legacy).await {
+                Ok(()) => unwatched += 1,
+                Err(e) => {
+                    tracing::warn!("archive: failed to unwatch item {legacy}: {e}")
+                }
+            }
+        }
+    }
+    Ok((archived, unwatched))
+}
+
+/// The local half of archival, split from the network half (DCH-54) so it
+/// stays testable without an `EbayClient` — client construction reaches the
+/// OS keyring, which no test may link (see CLAUDE.md on the Windows CI
+/// loader failure). Returns the count of newly archived rows.
+async fn flag_ended_listings(pool: &SqlitePool) -> AppResult<u32> {
     let now = Utc::now().timestamp();
     // Rows to archive plus already-archived rows missing an end_reason
     // (pre-0024 archives). Reason derivation needs raw_json, so this is a
@@ -292,9 +331,15 @@ async fn archive_ended_listings(
         }
     }
     tx.commit().await?;
+    Ok(archived)
+}
 
-    // Every archived row still on the watchlist — including ones archived in
-    // earlier runs whose removal failed then.
+/// Every archived row still on the watchlist this walk — including ones
+/// archived in earlier runs whose removal failed then.
+async fn archived_ids_to_unwatch(
+    pool: &SqlitePool,
+    seen_legacy_ids: &HashSet<String>,
+) -> AppResult<Vec<String>> {
     let rows: Vec<(String,)> = sqlx::query_as(
         "SELECT l.external_id
          FROM listings l
@@ -303,25 +348,11 @@ async fn archive_ended_listings(
     )
     .fetch_all(pool)
     .await?;
-    let to_remove: Vec<String> = rows
+    Ok(rows
         .into_iter()
         .map(|(ext,)| legacy_id_from_v1(&ext).unwrap_or(ext))
         .filter(|legacy| seen_legacy_ids.contains(legacy))
-        .collect();
-
-    let mut unwatched = 0u32;
-    if !to_remove.is_empty() {
-        let (env, token) = user_iaf_token(pool).await?;
-        for legacy in &to_remove {
-            match remove_from_watchlist(env, &token, legacy).await {
-                Ok(()) => unwatched += 1,
-                Err(e) => {
-                    tracing::warn!("archive: failed to unwatch item {legacy}: {e}")
-                }
-            }
-        }
-    }
-    Ok((archived, unwatched))
+        .collect())
 }
 
 /// Legacy ids of local eBay listings considered fresh enough to skip this
@@ -421,7 +452,7 @@ pub async fn watch_and_save(
     })?;
 
     let (env, token) = user_iaf_token(pool).await?;
-    add_to_watchlist(env, &token, &legacy_id).await?;
+    add_to_watchlist(&standalone_http()?, env, &token, &legacy_id).await?;
 
     // Local mirror. Reuses the diecast-filter + listing_history pipeline.
     // If the local save says "filtered" (non-diecast) we still want it on
@@ -464,7 +495,7 @@ pub async fn unwatch_and_delete(pool: &SqlitePool, listing_id: i64) -> AppResult
     let legacy_id = legacy_id_from_v1(&external_id).unwrap_or_else(|| external_id.clone());
 
     let (env, token) = user_iaf_token(pool).await?;
-    remove_from_watchlist(env, &token, &legacy_id).await?;
+    remove_from_watchlist(&standalone_http()?, env, &token, &legacy_id).await?;
 
     sqlx::query("DELETE FROM listings WHERE id = ?")
         .bind(listing_id)
@@ -478,14 +509,20 @@ pub async fn unwatch_and_delete(pool: &SqlitePool, listing_id: i64) -> AppResult
 /// `user_iaf_token` should make this rare, but we keep the retry for
 /// the case where our local expiry guess drifts (clock skew) or the
 /// token gets revoked upstream.
-async fn fetch_with_token_retry(pool: &SqlitePool, page: u32) -> AppResult<WatchlistPage> {
-    let (env, token) = user_iaf_token(pool).await?;
-    match fetch_watchlist_page(env, &token, page, 200).await {
+async fn fetch_with_token_retry(
+    pool: &SqlitePool,
+    client: &EbayClient,
+    creds: &EbayUserCreds,
+    page: u32,
+) -> AppResult<WatchlistPage> {
+    let env = creds.environment();
+    let token = creds.token(pool).await?;
+    match fetch_watchlist_page(client.http(), env, &token, page, 200).await {
         Err(AppError::Network(msg)) if is_iaf_token_expired_error(&msg) => {
             tracing::info!("watchlist sync: IAF token rejected ({msg}); refreshing and retrying");
             invalidate_user_token_cache(pool, env).await?;
-            let (env2, token2) = user_iaf_token(pool).await?;
-            fetch_watchlist_page(env2, &token2, page, 200).await
+            let token2 = creds.token(pool).await?;
+            fetch_watchlist_page(client.http(), env, &token2, page, 200).await
         }
         other => other,
     }
@@ -561,12 +598,13 @@ mod tests {
         let unsold = insert_listing(&pool, "v1|222222222222|0", "ended", "{}").await;
         let active = insert_listing(&pool, "v1|333333333333|0", "active", "{}").await;
 
-        // Empty seen-set: nothing qualifies for the eBay unwatch call, so no
-        // network is touched.
-        let (archived, unwatched) = archive_ended_listings(&pool, &HashSet::new())
+        let archived = flag_ended_listings(&pool).await.unwrap();
+        assert_eq!(archived, 2);
+        // Empty seen-set: nothing qualifies for the eBay unwatch call.
+        assert!(archived_ids_to_unwatch(&pool, &HashSet::new())
             .await
-            .unwrap();
-        assert_eq!((archived, unwatched), (2, 0));
+            .unwrap()
+            .is_empty());
 
         let (_, arch, reason, at) = row_state(&pool, sold).await;
         assert_eq!((arch, reason.as_deref()), (1, Some("sold")));
@@ -588,14 +626,34 @@ mod tests {
             .await
             .unwrap();
 
-        let (archived, _) = archive_ended_listings(&pool, &HashSet::new())
-            .await
-            .unwrap();
+        let archived = flag_ended_listings(&pool).await.unwrap();
         assert_eq!(archived, 0, "backfill must not count as newly archived");
 
         let (_, _, reason, at) = row_state(&pool, old).await;
         assert_eq!(reason.as_deref(), Some("sold"));
         assert_eq!(at, Some(42), "existing archived_at must be preserved");
+    }
+
+    /// The unwatch candidate set (DCH-54's split-out pure half): archived
+    /// rows seen on this walk are returned as legacy ids; archived-but-
+    /// unseen and active rows are not.
+    #[tokio::test]
+    async fn archived_ids_to_unwatch_filters_by_seen_set() {
+        let pool = migrated_pool().await;
+        let seen_archived = insert_listing(&pool, "v1|555555555555|0", "ended", "{}").await;
+        let unseen_archived = insert_listing(&pool, "v1|666666666666|0", "ended", "{}").await;
+        insert_listing(&pool, "v1|777777777777|0", "active", "{}").await;
+        for id in [seen_archived, unseen_archived] {
+            sqlx::query("UPDATE listings SET is_archived = 1 WHERE id = ?")
+                .bind(id)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        let seen: HashSet<String> = ["555555555555".to_string(), "777777777777".to_string()].into();
+        let to_remove = archived_ids_to_unwatch(&pool, &seen).await.unwrap();
+        assert_eq!(to_remove, vec!["555555555555"]);
     }
 
     #[tokio::test]

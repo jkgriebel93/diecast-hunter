@@ -40,9 +40,11 @@ pub struct AssocSummary {
     pub unmatched: u32,
 }
 
-/// One driver, pre-tokenized for cheap matching.
+/// One driver, pre-tokenized for cheap matching. `pub(crate)` so batch
+/// flows (watchlist sync, DCH-54) can load the table once via
+/// [`load_drivers`] and run [`associate_listing_driver_with`] per item.
 #[derive(Debug, Clone)]
-struct DriverRow {
+pub(crate) struct DriverRow {
     id: i64,
     /// Lowercase, alphanumeric-only tokens of the driver name.
     /// "Dale Earnhardt Jr" → ["dale", "earnhardt", "jr"].
@@ -71,6 +73,18 @@ pub(crate) async fn detect_driver_for_title(
 /// runs detection, and writes the result. Non-fatal at the call site if
 /// this fails — auto-association is a soft hint.
 pub async fn associate_listing_driver(pool: &SqlitePool, listing_id: i64) -> AppResult<()> {
+    let drivers = load_drivers(pool).await?;
+    associate_listing_driver_with(pool, listing_id, &drivers).await
+}
+
+/// Same as [`associate_listing_driver`], against a driver table the caller
+/// already loaded — the watchlist sync loads it once per run (DCH-54)
+/// instead of once per item.
+pub(crate) async fn associate_listing_driver_with(
+    pool: &SqlitePool,
+    listing_id: i64,
+    drivers: &[DriverRow],
+) -> AppResult<()> {
     let row: Option<(String,)> = sqlx::query_as("SELECT title FROM listings WHERE id = ?")
         .bind(listing_id)
         .fetch_optional(pool)
@@ -78,8 +92,7 @@ pub async fn associate_listing_driver(pool: &SqlitePool, listing_id: i64) -> App
     let Some((title,)) = row else {
         return Ok(());
     };
-    let drivers = load_drivers(pool).await?;
-    let detected = detect_driver(&title, &drivers);
+    let detected = detect_driver(&title, drivers);
     apply(pool, listing_id, detected, false).await
 }
 
@@ -231,7 +244,7 @@ async fn apply_known(
     }
 }
 
-async fn load_drivers(pool: &SqlitePool) -> AppResult<Vec<DriverRow>> {
+pub(crate) async fn load_drivers(pool: &SqlitePool) -> AppResult<Vec<DriverRow>> {
     let rows: Vec<(i64, String)> = sqlx::query_as("SELECT id, name FROM drivers")
         .fetch_all(pool)
         .await?;
