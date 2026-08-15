@@ -14,7 +14,7 @@
  */
 
 import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 import { isConventionalSortValue } from "./sortOptions";
 
@@ -28,12 +28,22 @@ function sourceFiles(): string[] {
         const p = join(dir, e.name);
         if (e.isDirectory()) walk(p);
         else if (/\.tsx?$/.test(e.name) && !/\.test\.tsx?$/.test(e.name))
-          out.push(p);
+          out.push(posix(p));
       }
     };
     walk(root);
   }
   return out.sort();
+}
+
+/** Forward slashes regardless of platform. Every allowlist entry below is
+ *  written `src/components/Foo.tsx`, and `join` yields backslashes on
+ *  Windows — which is the app's only shipping target, so the whole suite
+ *  failed there while passing on the Linux CI runner. An exemption that only
+ *  matches on some machines is worse than none: it turns "this rule is
+ *  satisfied" into "this rule wasn't checked here". */
+function posix(p: string): string {
+  return p.split(sep).join("/");
 }
 
 /** Every `file:line` whose text matches, as "path:N — <line>" for readable
