@@ -9,6 +9,7 @@ import {
   isEmptyRange,
   type YearRange,
 } from "@/lib/yearRange";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -26,14 +27,14 @@ import {
   useMinimized,
   useMinimizedSet,
 } from "@/lib/minimized";
+import { Thumbnail } from "@/components/Thumbnail";
+import { DCR_BASE } from "@/lib/dcr";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-24 h-24",
   md: "w-48 h-48",
   lg: "w-72 h-72",
 };
-
-const DCR_BASE = "https://www.diecastregistry.com";
 
 type SortMode =
   "driver-asc" | "value-desc" | "count-desc" | "year-desc" | "year-asc";
@@ -230,9 +231,15 @@ export function Collection() {
     }
   }
 
-  // Distinct driver names / scales / OEMs for filter dropdowns. Scales are
-  // limited to the standard model sizes we surface everywhere
+  // Distinct driver names / scales / OEMs for the filter dropdowns. Scales
+  // are limited to the standard model sizes we surface everywhere
   // (1:18, 1:24, 1:32, 1:64).
+  //
+  // Filters only. The manual-entry dialog loads its own driver list, because
+  // "drivers present in this list" is the right rule for narrowing a list and
+  // the wrong one for an entry form — it hid every driver the user doesn't
+  // already own a car by, which is precisely who you name when adding a car
+  // the registry doesn't list.
   const driverNames = useMemo(() => {
     const set = new Set<string>();
     for (const i of items ?? []) set.add(i.driver_name ?? "(unknown)");
@@ -485,13 +492,15 @@ export function Collection() {
       {manualEntry && (
         <ManualEntryDialog
           editing={manualEntry === "new" ? null : manualEntry}
-          driverNames={driverNames}
           onClose={() => setManualEntry(null)}
-          onSaved={(message) => {
+          onSaved={(message, partial) => {
             setManualEntry(null);
             setError(null);
-            setNotice(null);
-            setSuccessMsg(message);
+            // A partial save is a shortfall, not a failure — the entry is in
+            // the collection either way, so it must not be reported in the
+            // colour that says "this didn't happen".
+            setNotice(partial ? message : null);
+            setSuccessMsg(partial ? null : message);
             void load();
           }}
         />
@@ -777,6 +786,12 @@ function CollectionItemRow({
     `collection:${item.collection_id}`,
   );
 
+  // A photo the user attached wins over the catalog image: it shows the copy
+  // they own rather than a stock shot of the production run.
+  const imageSrc = item.local_image_path
+    ? convertFileSrc(item.local_image_path)
+    : item.image_url;
+
   const title = (
     <div className="text-sm font-medium truncate flex items-center gap-2">
       <span className="truncate">{item.scheme_text ?? "(no scheme)"}</span>
@@ -803,15 +818,7 @@ function CollectionItemRow({
         onToggle={onToggle}
         className="self-start -mt-0.5"
       />
-      {!isCollapsed && item.image_url && (
-        <img
-          src={resolveImage(item.image_url)}
-          alt=""
-          loading="lazy"
-          decoding="async"
-          className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
-        />
-      )}
+      {!isCollapsed && <Thumbnail src={imageSrc} className={imgSizeClass} />}
       <div className="flex-1 min-w-0">
         <button
           type="button"
@@ -843,6 +850,17 @@ function CollectionItemRow({
                 ]
                   .filter(Boolean)
                   .join(" · ")}
+              </div>
+            )}
+            {/* Outside the `enriched` block above, unlike the other spec
+                fields: the DIN identifies the copy on the shelf, so it is
+                just as real on a manual entry — which never becomes
+                "enriched", having no detail page to enrich from. */}
+            {item.din != null && (
+              <div className="text-xs text-fg-subtle mt-0.5">
+                DIN #{formatCount(item.din)}
+                {item.production_qty != null &&
+                  ` of ${formatCount(item.production_qty)}`}
               </div>
             )}
             {item.condition && (
@@ -937,11 +955,6 @@ function CollectionItemRow({
 /** Stable expand/collapse key for a driver group. */
 function groupKey(g: DriverGroupView): number | string {
   return g.driver_id != null ? g.driver_id : `name:${g.driver_name}`;
-}
-
-function resolveImage(src: string): string {
-  if (src.startsWith("http")) return src;
-  return DCR_BASE + src;
 }
 
 const GROUP_BY_DRIVER_KEY = "collection:group-by-driver";

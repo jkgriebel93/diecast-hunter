@@ -45,6 +45,8 @@ const row = (over: Partial<CollectionRow> = {}): CollectionRow => ({
   paid_cents: null,
   condition: null,
   notes: null,
+  din: null,
+  local_image_path: null,
   ...over,
 });
 
@@ -112,6 +114,35 @@ describe("validateManualEntry", () => {
     );
     expect(validateManualEntry(form({ year: "1998" }))).toEqual([]);
   });
+
+  it("treats a blank DIN as absent — most diecasts aren't numbered", () => {
+    expect(validateManualEntry(form({ din: "" }))).toEqual([]);
+  });
+
+  it("rejects a DIN that isn't a counting number", () => {
+    expect(validateManualEntry(form({ din: "one" }))).toContain(
+      "DIN must be a whole number.",
+    );
+    expect(validateManualEntry(form({ din: "0" }))).toContain(
+      "DIN must be 1 or greater.",
+    );
+  });
+
+  it("rejects a DIN past the end of the production run", () => {
+    expect(
+      validateManualEntry(form({ din: "3000", productionQty: "2500" })),
+    ).toContain("DIN 3000 is higher than the production quantity of 2500.");
+    expect(
+      validateManualEntry(form({ din: "2500", productionQty: "2500" })),
+    ).toEqual([]);
+    // Unknown run size can't contradict anything...
+    expect(validateManualEntry(form({ din: "3000" }))).toEqual([]);
+    // ...and neither can 0, which is the prototype convention rather than a
+    // run of none.
+    expect(validateManualEntry(form({ din: "1", productionQty: "0" }))).toEqual(
+      [],
+    );
+  });
 });
 
 describe("toInput", () => {
@@ -124,8 +155,10 @@ describe("toInput", () => {
         brand: "   ",
         price: "$45.00",
         productionQty: "2,508",
+        din: "1832",
       }),
     );
+    expect(input.din).toBe(1832);
     expect(input.driverName).toBe("Jeff Gordon");
     expect(input.year).toBe(1998);
     expect(input.oem).toBe("Action");
@@ -149,6 +182,8 @@ describe("formFromRow", () => {
       price: "45.00",
       oem: "Action",
       scale: "1:24",
+      din: "412",
+      productionQty: "2508",
     });
     const input = toInput(original);
     const stored = row({
@@ -159,6 +194,8 @@ describe("formFromRow", () => {
       scale: input.scale,
       car_number: null,
       paid_cents: input.paidCents,
+      din: input.din,
+      production_qty: input.productionQty,
       is_local: true,
     });
     expect(toInput(formFromRow(stored))).toEqual(input);

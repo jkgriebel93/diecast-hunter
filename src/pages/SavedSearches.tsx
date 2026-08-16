@@ -16,6 +16,7 @@ import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { Modal } from "@/components/Modal";
+import { Thumbnail } from "@/components/Thumbnail";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-12 h-12",
@@ -380,19 +381,9 @@ function ResultRow({
   return (
     <li className="py-2 flex items-center gap-3">
       <MinimizeToggle minimized={minimized} onToggle={toggleMinimized} />
-      {!minimized &&
-        (item.image_url ? (
-          <img
-            src={item.image_url}
-            alt=""
-            loading="lazy"
-            className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
-          />
-        ) : (
-          <div
-            className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`}
-          />
-        ))}
+      {!minimized && (
+        <Thumbnail src={item.image_url} className={imgSizeClass} />
+      )}
       <div className="flex-1 min-w-0">
         <a
           href={item.web_url}

@@ -13,6 +13,7 @@ pub mod ebay_all;
 pub mod ebay_listing;
 pub mod ebay_saved;
 pub mod ebay_watchlist;
+pub(crate) mod raw_json;
 pub mod registry_auto_match;
 pub mod registry_link;
 pub mod registry_prewarm;

@@ -1,0 +1,20 @@
+-- User-supplied photo for a collection entry.
+--
+-- Manually-added cars (DCH-12) have no diecastregistry.com detail page and so
+-- no image_url, which left every manual row rendering as a blank card. The
+-- dialog's "Image URL" field only helps for a car that happens to be pictured
+-- somewhere public — the common case is a photo on the user's own disk.
+--
+-- Stores the *file name*, not a path: the file lives in `images/` beside the
+-- SQLite database, so recording an absolute path would break the moment the
+-- app data directory moves (a new Windows profile, a restored backup). The
+-- absolute path is rebuilt at read time from the same ProjectDirs lookup that
+-- located the database.
+--
+-- On my_collection rather than registry_entries because a photo is of the
+-- copy the user owns — its condition, its packaging, its DIN card — not of
+-- the production run. That also keeps it clear of every DCR sync path:
+-- dcr_collection's upsert touches registry_entry_id, raw_json and imported_at
+-- only, so a photo survives a full sync untouched, and photos are therefore
+-- not limited to manual entries.
+ALTER TABLE my_collection ADD COLUMN image_path TEXT;

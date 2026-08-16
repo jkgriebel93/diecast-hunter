@@ -235,6 +235,28 @@ pub async fn add_from_search(
     })
 }
 
+/// Pick a picture for a registry entry out of its `raw_json`.
+///
+/// Two writers, two keys: the garage and production-search pages supply a
+/// thumbnail as `image_url`, while the detail page supplies the `photos`
+/// lightbox and no thumbnail at all. An entry may have been reached by only
+/// one of those routes, so either key on its own has to be enough — reading
+/// `image_url` alone is why enriched wishlist rows rendered an empty box.
+///
+/// The registry query in `commands.rs` coalesces the same pair in SQL; this
+/// is that rule for the callers that already have the blob parsed.
+fn entry_image(raw: Option<&serde_json::Value>) -> Option<String> {
+    let raw = raw?;
+    let thumbnail = raw.get("image_url").and_then(|v| v.as_str());
+    let first_photo = || {
+        raw.get("photos")
+            .and_then(|v| v.as_array())?
+            .first()?
+            .as_str()
+    };
+    thumbnail.or_else(first_photo).map(str::to_owned)
+}
+
 pub async fn list(pool: &SqlitePool, wishlist_id: i64) -> AppResult<Vec<WishlistEntry>> {
     let rows: Vec<EntryRow> = sqlx::query_as(
         "SELECT e.id AS entry_id, e.wishlist_id, e.registry_entry_id,
@@ -321,7 +343,7 @@ pub async fn list(pool: &SqlitePool, wishlist_id: i64) -> AppResult<Vec<Wishlist
                 production_qty: r.production_qty,
                 retail_value_cents: r.retail_value_cents,
                 wholesale_value_cents: r.wholesale_value_cents,
-                image_url: json_str("image_url"),
+                image_url: entry_image(raw.as_ref()),
                 detail_url: json_str("detail_url"),
                 notes: r.notes,
                 added_at: r.added_at,
@@ -628,6 +650,45 @@ mod tests {
 
     fn linked(entry_created: bool) -> ListingWishOutcome {
         ListingWishOutcome::Linked { entry_created }
+    }
+
+    mod entry_image {
+        use super::*;
+        use serde_json::json;
+
+        #[test]
+        fn prefers_the_thumbnail_when_both_are_present() {
+            let raw = json!({ "image_url": "/thumb.jpg", "photos": ["/big.jpg"] });
+            assert_eq!(entry_image(Some(&raw)).as_deref(), Some("/thumb.jpg"));
+        }
+
+        /// The regression: an enriched entry has only the lightbox, and used
+        /// to render an empty box on the wishlist while the registry page
+        /// showed it fine.
+        #[test]
+        fn falls_back_to_the_first_lightbox_photo() {
+            let raw = json!({ "photos": ["/big-1.jpg", "/big-2.jpg"] });
+            assert_eq!(entry_image(Some(&raw)).as_deref(), Some("/big-1.jpg"));
+        }
+
+        #[test]
+        fn a_stub_with_neither_key_has_no_picture() {
+            let raw = json!({ "detail_url": "/diecast/x/y/z" });
+            assert_eq!(entry_image(Some(&raw)), None);
+        }
+
+        /// An empty array is not a picture, and `photos[0]` on it must not
+        /// become a Some("") that renders as a broken image.
+        #[test]
+        fn an_empty_photos_array_is_not_a_picture() {
+            let raw = json!({ "photos": [] });
+            assert_eq!(entry_image(Some(&raw)), None);
+        }
+
+        #[test]
+        fn unparseable_raw_json_is_not_a_picture() {
+            assert_eq!(entry_image(None), None);
+        }
     }
 
     #[test]

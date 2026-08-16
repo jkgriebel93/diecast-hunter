@@ -198,10 +198,25 @@ pub(crate) async fn enrich_one(
         _ => None,
     };
 
-    let now = Utc::now().timestamp();
-    let raw_json = build_raw_json(&detail, detail_url);
+    apply_detail(pool, row_id, &detail, driver_id, detail_url).await
+}
 
-    sqlx::query(
+/// Write a parsed detail page over an existing entry.
+///
+/// Split out of [`enrich_one`] so the merge semantics of `raw_json` can be
+/// tested without a network fetch — the interesting behaviour is which keys
+/// of a half-populated row survive, and that is pure database work.
+async fn apply_detail(
+    pool: &SqlitePool,
+    row_id: i64,
+    detail: &RegistryDetail,
+    driver_id: Option<i64>,
+    detail_url: &str,
+) -> AppResult<()> {
+    let now = Utc::now().timestamp();
+    let raw_json = build_raw_json(detail, detail_url);
+
+    sqlx::query(&format!(
         "UPDATE registry_entries SET
             driver_id = COALESCE(?, driver_id),
             year = COALESCE(?, year),
@@ -218,11 +233,12 @@ pub(crate) async fn enrich_one(
             production_qty = COALESCE(?, production_qty),
             retail_value_cents = COALESCE(?, retail_value_cents),
             wholesale_value_cents = COALESCE(?, wholesale_value_cents),
-            raw_json = ?,
+            {merge},
             fetched_at = ?,
             details_fetched_at = ?
          WHERE id = ?",
-    )
+        merge = crate::sync::raw_json::MERGE_UPDATE,
+    ))
     .bind(driver_id)
     .bind(detail.year_released)
     .bind(detail.year_raced)
@@ -253,12 +269,19 @@ fn extract_detail_url(raw_json: Option<&str>) -> Option<String> {
     v.get("detail_url")?.as_str().map(|s| s.to_string())
 }
 
-/// `detail_url` is carried forward into the rebuilt raw_json: it is the only
-/// place we store the site-relative page path (the slugs aren't derivable
-/// from columns), and dropping it would break both re-enrichment and the
-/// "View on diecastregistry.com" link on matched listings.
+/// `detail_url` is carried forward explicitly rather than left to the merge:
+/// it is the only place we store the site-relative page path (the slugs
+/// aren't derivable from columns), and it is the one key here we want to
+/// re-assert even when a previous writer already had one, since this is the
+/// URL we just proved resolves to this entry.
+///
+/// Everything the detail page *doesn't* carry is left out and survives the
+/// merge — `image_url` above all, which is the garage/search thumbnail. This
+/// function used to be assigned over the whole column, which meant enriching
+/// an entry silently deleted that thumbnail; the wishlist reads it, so rows
+/// lost their picture the first time they were enriched. See `sync::raw_json`.
 fn build_raw_json(detail: &RegistryDetail, detail_url: &str) -> String {
-    serde_json::to_string(&serde_json::json!({
+    crate::sync::raw_json::payload(serde_json::json!({
         "source": "registry_detail_page",
         "detail_url": detail_url,
         "external_id": detail.external_id,
@@ -269,7 +292,6 @@ fn build_raw_json(detail: &RegistryDetail, detail_url: &str) -> String {
         "comments": detail.comments,
         "photos": detail.photos,
     }))
-    .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -284,6 +306,43 @@ mod tests {
             "/diecast/jeff-gordon/action-lionel-elite-24/68acf030-a051-4e24-907f-abf2475e5315";
         let raw_json = build_raw_json(&RegistryDetail::default(), url);
         assert_eq!(extract_detail_url(Some(&raw_json)).as_deref(), Some(url));
+    }
+
+    /// The detail page has no thumbnail on it — that lives on the garage and
+    /// search listings — so enrichment must leave the `image_url` a previous
+    /// writer parsed alone. It used to assign the whole column, which is why
+    /// wishlist rows lost their picture the first time they were enriched.
+    #[tokio::test]
+    async fn enrichment_keeps_the_thumbnail_it_knows_nothing_about() {
+        let pool = migrated_pool().await;
+        let id = insert_entry(&pool, "guid-1", None, true).await;
+        sqlx::query(
+            "UPDATE registry_entries
+             SET raw_json = json_set(raw_json, '$.image_url', '/img/thumb.jpg')
+             WHERE id = ?",
+        )
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let detail = RegistryDetail {
+            photos: vec!["/img/big-1.jpg".into(), "/img/big-2.jpg".into()],
+            ..RegistryDetail::default()
+        };
+        apply_detail(&pool, id, &detail, None, "/diecast/x/y/guid-1")
+            .await
+            .unwrap();
+
+        let raw: String = sqlx::query_scalar("SELECT raw_json FROM registry_entries WHERE id = ?")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(v["image_url"], "/img/thumb.jpg");
+        assert_eq!(v["photos"][0], "/img/big-1.jpg");
+        assert_eq!(v["detail_url"], "/diecast/x/y/guid-1");
     }
 
     async fn migrated_pool() -> SqlitePool {

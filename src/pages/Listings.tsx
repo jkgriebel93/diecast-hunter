@@ -34,6 +34,11 @@ import {
   type ReceivedOffer,
   type WishlistInfo,
 } from "@/lib/tauri";
+import {
+  loadAttributeOptions,
+  EMPTY_ATTRIBUTE_OPTIONS,
+  type AttributeOptions,
+} from "@/lib/attributeOptions";
 import { useImageSize, IMG_CLASS } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
@@ -62,6 +67,8 @@ import {
   type FilterSummary,
 } from "@/lib/filterPanel";
 import { AnchoredMenu, AnchoredMenuList } from "@/components/AnchoredMenu";
+import { Thumbnail } from "@/components/Thumbnail";
+import { DCR_BASE, resolveDcrUrl } from "@/lib/dcr";
 import {
   passesSellerFilter,
   sellerFilterLabel,
@@ -1973,15 +1980,7 @@ function ListingCard({
         onToggle={toggleMinimized}
         className="self-start -mt-0.5"
       />
-      {!minimized && row.image_url && (
-        <img
-          src={row.image_url}
-          alt=""
-          loading="lazy"
-          decoding="async"
-          className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
-        />
-      )}
+      {!minimized && <Thumbnail src={row.image_url} className={imgSizeClass} />}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <div className="text-sm font-medium truncate flex-1 min-w-0">
@@ -2069,16 +2068,10 @@ function ListingCard({
                   {row.matched_detail_url && (
                     <a
                       className="text-accent hover:underline inline-block"
-                      href={
-                        "https://www.diecastregistry.com" +
-                        row.matched_detail_url
-                      }
+                      href={DCR_BASE + row.matched_detail_url}
                       onClick={(e) => {
                         e.preventDefault();
-                        void openExternal(
-                          "https://www.diecastregistry.com" +
-                            row.matched_detail_url,
-                        );
+                        void openExternal(DCR_BASE + row.matched_detail_url);
                       }}
                     >
                       View on diecastregistry.com →
@@ -2561,49 +2554,6 @@ function DriverTagSection({
       </button>
     </form>
   );
-}
-
-/** Suggestion lists for the attribute editor, from the cached DCR form
- *  options. Fetched once per app session on first editor open; a failure
- *  resets the cache (so a later open retries) and the editor degrades to
- *  free-form inputs. */
-interface AttributeOptions {
-  oems: string[];
-  brands: string[];
-  makes: string[];
-  finishes: string[];
-}
-const EMPTY_ATTRIBUTE_OPTIONS: AttributeOptions = {
-  oems: [],
-  brands: [],
-  makes: [],
-  finishes: [],
-};
-let attributeOptionsPromise: Promise<AttributeOptions> | null = null;
-function loadAttributeOptions() {
-  attributeOptionsPromise ??= Promise.all([
-    api.listRegistryFormOptions("oem"),
-    api.listRegistryFormOptions("brand"),
-    api.listRegistryFormOptions("make"),
-    api.listRegistryFormOptions("finish"),
-  ]).then(
-    ([o, b, m, f]) => ({
-      // Stable sort floats the OEMs the user actually buys to the top.
-      oems: o
-        .map((x) => x.display)
-        .sort(
-          (a, b2) => Number(isPreferredOem(b2)) - Number(isPreferredOem(a)),
-        ),
-      brands: prepareBrandOptions(b).map((x) => x.display),
-      makes: prepareMakeOptions(m).map((x) => x.display),
-      finishes: f.map((x) => x.display),
-    }),
-    () => {
-      attributeOptionsPromise = null;
-      return EMPTY_ATTRIBUTE_OPTIONS;
-    },
-  );
-  return attributeOptionsPromise;
 }
 
 /** Listing-level attributes (oem / brand / finish / make + race-win and
@@ -5136,14 +5086,7 @@ function RegistrySearchDialog({
       }
       header={
         <div className="flex items-start gap-3 min-w-0 flex-1">
-          {listing.image_url && (
-            <img
-              src={listing.image_url}
-              alt=""
-              className="w-16 h-16 object-cover rounded border border-border flex-shrink-0"
-              referrerPolicy="no-referrer"
-            />
-          )}
+          <Thumbnail src={listing.image_url} className="w-16 h-16" eager />
           <div className="min-w-0 flex-1">
             <h3 className="text-base font-medium">Search registry</h3>
             <p className="text-xs text-fg-subtle mt-0.5" title={listing.title}>
@@ -5391,20 +5334,7 @@ function RegistrySearchDialog({
               disabled={linkingGuid !== null}
             >
               <div className="flex items-center gap-3">
-                {r.image_url ? (
-                  <img
-                    src={
-                      r.image_url.startsWith("http")
-                        ? r.image_url
-                        : "https://www.diecastregistry.com" + r.image_url
-                    }
-                    alt=""
-                    loading="lazy"
-                    className="w-48 h-48 object-cover rounded border border-border shrink-0"
-                  />
-                ) : (
-                  <div className="w-48 h-48 rounded border border-border bg-bg shrink-0" />
-                )}
+                <Thumbnail src={r.image_url} className="w-48 h-48" />
                 <div className="min-w-0 flex-1">
                   <div className="text-base font-medium truncate">
                     {r.driver_name}
@@ -5427,18 +5357,11 @@ function RegistrySearchDialog({
                   )}
                   {r.detail_url && (
                     <a
-                      href={
-                        r.detail_url.startsWith("http")
-                          ? r.detail_url
-                          : "https://www.diecastregistry.com" + r.detail_url
-                      }
+                      href={resolveDcrUrl(r.detail_url)}
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        const url = r.detail_url!.startsWith("http")
-                          ? r.detail_url!
-                          : "https://www.diecastregistry.com" + r.detail_url!;
-                        void openExternal(url);
+                        void openExternal(resolveDcrUrl(r.detail_url!));
                       }}
                       className="text-xs text-accent hover:underline mt-1 inline-block"
                     >

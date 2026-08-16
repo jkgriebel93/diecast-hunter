@@ -14,7 +14,7 @@
  */
 
 import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 import { isConventionalSortValue } from "./sortOptions";
 
@@ -28,12 +28,22 @@ function sourceFiles(): string[] {
         const p = join(dir, e.name);
         if (e.isDirectory()) walk(p);
         else if (/\.tsx?$/.test(e.name) && !/\.test\.tsx?$/.test(e.name))
-          out.push(p);
+          out.push(posix(p));
       }
     };
     walk(root);
   }
   return out.sort();
+}
+
+/** Forward slashes regardless of platform. Every allowlist entry below is
+ *  written `src/components/Foo.tsx`, and `join` yields backslashes on
+ *  Windows — which is the app's only shipping target, so the whole suite
+ *  failed there while passing on the Linux CI runner. An exemption that only
+ *  matches on some machines is worse than none: it turns "this rule is
+ *  satisfied" into "this rule wasn't checked here". */
+function posix(p: string): string {
+  return p.split(sep).join("/");
 }
 
 /** Every `file:line` whose text matches, as "path:N — <line>" for readable
@@ -116,6 +126,55 @@ describe("errors go through ErrorBanner", () => {
         `${allowed} is on the allowlist but has no error box — drop it`,
       ).toBe(true);
     }
+  });
+});
+
+describe("row images go through the shared Thumbnail", () => {
+  /** A raw `<img` anywhere a list row or card is built. The tag itself is the
+   *  right thing to match: the defects were all in what surrounded it —
+   *  whether the caller resolved DCR's origin prefix, whether it sent a
+   *  referrer, and above all whether it had an `onError`. Eleven of twelve
+   *  did not, so a URL that stopped resolving painted the webview's
+   *  broken-image glyph instead of the "no picture" box the same screens
+   *  already showed for a null. */
+  const RAW_IMG = /<img\b/;
+
+  /** Two exemptions, both checked by eye:
+   *
+   *  - `Thumbnail` is the component the rule points at.
+   *  - `ManualEntryDialog` previews a file the user picked seconds ago,
+   *    before it is saved anywhere. There is no stored value to resolve and
+   *    no remote host to fail, and a failed load there means the picked file
+   *    is unreadable — worth showing as a broken preview rather than
+   *    disguising as "no photo attached". */
+  const ALLOWED = [
+    "src/components/Thumbnail.tsx",
+    "src/components/ManualEntryDialog.tsx",
+  ];
+
+  it("has no hand-rolled <img> outside the known exemptions", () => {
+    const hits = violations(RAW_IMG).filter(
+      (h) => !ALLOWED.some((a) => h.startsWith(a)),
+    );
+    expect(hits).toEqual([]);
+  });
+
+  it("keeps the exemption list honest", () => {
+    const hits = violations(RAW_IMG);
+    for (const allowed of ALLOWED) {
+      expect(
+        hits.some((h) => h.startsWith(allowed)),
+        `${allowed} is on the allowlist but has no <img> — drop it`,
+      ).toBe(true);
+    }
+  });
+
+  it("has no hand-rolled diecastregistry.com origin prefix", () => {
+    // Four pages spelled `startsWith("http") ? src : DCR_BASE + src`, which
+    // turns a protocol-relative `//host/…` into a DCR path. `DCR_BASE` is
+    // still imported for `detail_url` links — it's the literal that must not
+    // come back.
+    expect(violations(/"https:\/\/www\.diecastregistry\.com"/)).toEqual([]);
   });
 });
 

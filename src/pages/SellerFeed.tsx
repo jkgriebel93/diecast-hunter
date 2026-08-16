@@ -25,6 +25,7 @@ import { ErrorBanner } from "@/components/ErrorBanner";
 import { NoticeBanner } from "@/components/NoticeBanner";
 import { Modal } from "@/components/Modal";
 import { ClearFiltersButton, FilteredEmpty } from "@/components/FilterCard";
+import { Thumbnail } from "@/components/Thumbnail";
 
 const PAGE_SIZE = 50;
 
@@ -1107,18 +1108,7 @@ function FeedCard({
         />
         {!minimized && (
           <div className="shrink-0 space-y-1">
-            {shownImage ? (
-              <img
-                src={shownImage}
-                alt=""
-                loading="lazy"
-                className={`${imgSizeClass} object-cover rounded border border-border`}
-              />
-            ) : (
-              <div
-                className={`${imgSizeClass} rounded border border-border bg-bg-elevated`}
-              />
-            )}
+            <Thumbnail src={shownImage} className={imgSizeClass} />
             {expanded && images.length > 1 && (
               <div className="flex items-center justify-center gap-2 text-xs text-fg-subtle tabular-nums">
                 <button
