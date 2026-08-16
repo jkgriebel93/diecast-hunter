@@ -18,3 +18,15 @@
 - ~~Include commas in monetary (and other numerical) displays~~ (DCH-17: shared `formatCents`/`formatCount` helpers in `src/lib/format.ts` (Intl.NumberFormat, unit-tested via the new `pnpm test` vitest setup); extension overlay formatter updated to match)
 - Learned tagging
 - FF extension option to correct a match
+- Edit My Collection entries
+  - Specifically to add notes to an entry
+- Open in new window
+- Standardize Display Header in My Collection
+  - 
+- Separate sorts for Drivers & listings within driver panel
+  - Is this too busy
+- Add versioning, display in title bar
+  - Semantic or calendar
+- Add Expand All everywhere there is a Collapse All
+- Auto/learned grouping?
+  - Have I written this somewhere else?
