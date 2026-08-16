@@ -306,16 +306,15 @@ async fn upsert_stub_on(
 
     // raw_json carries detail_url so M3 enrichment can find the page later,
     // plus the search-page-only fields we'd otherwise drop.
-    let raw_json = serde_json::to_string(&serde_json::json!({
+    let raw_json = crate::sync::raw_json::payload(serde_json::json!({
         "detail_url": r.detail_url,
         "image_url": r.image_url,
         "scheme_text": r.scheme_text,
         "seq_produced_total": r.seq_produced_total,
         "source": "registry_prewarm",
-    }))
-    .unwrap_or_default();
+    }));
 
-    sqlx::query(
+    sqlx::query(&format!(
         "INSERT INTO registry_entries
             (external_id, driver_id, year, oem, brand, scale, make,
              scheme_text, production_qty,
@@ -334,22 +333,13 @@ async fn upsert_stub_on(
             retail_value_cents = COALESCE(excluded.retail_value_cents, registry_entries.retail_value_cents),
             wholesale_value_cents = COALESCE(excluded.wholesale_value_cents, registry_entries.wholesale_value_cents),
             -- Overwriting raw_json wholesale would wipe enriched detail-page
-            -- data (comments, photos). Replace stubs/invalid JSON; for
-            -- enriched rows only refresh the search-derived keys.
-            raw_json = CASE
-                WHEN registry_entries.raw_json IS NULL
-                     OR registry_entries.raw_json = ''
-                     OR NOT json_valid(registry_entries.raw_json)
-                     OR json_extract(registry_entries.raw_json, '$.source') = 'registry_prewarm'
-                  THEN excluded.raw_json
-                ELSE json_set(registry_entries.raw_json,
-                              '$.detail_url', COALESCE(json_extract(excluded.raw_json, '$.detail_url'),
-                                                       json_extract(registry_entries.raw_json, '$.detail_url')),
-                              '$.image_url', COALESCE(json_extract(excluded.raw_json, '$.image_url'),
-                                                      json_extract(registry_entries.raw_json, '$.image_url')))
-            END,
+            -- data (comments, photos). The merge keeps both sides; this used
+            -- to be a hand-rolled json_set naming the two keys the search
+            -- knows, which every other writer then had to reimplement.
+            {merge},
             fetched_at = excluded.fetched_at",
-    )
+        merge = crate::sync::raw_json::MERGE_ON_CONFLICT,
+    ))
     .bind(&r.registry_guid)
     .bind(driver_id)
     .bind(r.year)

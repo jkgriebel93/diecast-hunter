@@ -297,7 +297,11 @@ async fn upsert_listing(pool: &SqlitePool, item: &EbayItem) -> AppResult<(i64, b
             end_time = excluded.end_time,
             seller_username = excluded.seller_username,
             seller_rating = excluded.seller_rating,
-            image_url = excluded.image_url,
+            -- Unlike the fields above, an absent image is not news. eBay
+            -- stops returning `image` as a listing ages out, so assigning it
+            -- straight across let a routine refresh blank a picture we had
+            -- and could still display. Keep the last one we saw.
+            image_url = COALESCE(excluded.image_url, listings.image_url),
             category_id = excluded.category_id,
             category_path = excluded.category_path,
             last_seen_at = excluded.last_seen_at,

@@ -27,14 +27,14 @@ import {
   useMinimized,
   useMinimizedSet,
 } from "@/lib/minimized";
+import { Thumbnail } from "@/components/Thumbnail";
+import { DCR_BASE } from "@/lib/dcr";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-24 h-24",
   md: "w-48 h-48",
   lg: "w-72 h-72",
 };
-
-const DCR_BASE = "https://www.diecastregistry.com";
 
 type SortMode =
   "driver-asc" | "value-desc" | "count-desc" | "year-desc" | "year-asc";
@@ -790,9 +790,7 @@ function CollectionItemRow({
   // they own rather than a stock shot of the production run.
   const imageSrc = item.local_image_path
     ? convertFileSrc(item.local_image_path)
-    : item.image_url
-      ? resolveImage(item.image_url)
-      : null;
+    : item.image_url;
 
   const title = (
     <div className="text-sm font-medium truncate flex items-center gap-2">
@@ -820,15 +818,7 @@ function CollectionItemRow({
         onToggle={onToggle}
         className="self-start -mt-0.5"
       />
-      {!isCollapsed && imageSrc && (
-        <img
-          src={imageSrc}
-          alt=""
-          loading="lazy"
-          decoding="async"
-          className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
-        />
-      )}
+      {!isCollapsed && <Thumbnail src={imageSrc} className={imgSizeClass} />}
       <div className="flex-1 min-w-0">
         <button
           type="button"
@@ -965,11 +955,6 @@ function CollectionItemRow({
 /** Stable expand/collapse key for a driver group. */
 function groupKey(g: DriverGroupView): number | string {
   return g.driver_id != null ? g.driver_id : `name:${g.driver_name}`;
-}
-
-function resolveImage(src: string): string {
-  if (src.startsWith("http")) return src;
-  return DCR_BASE + src;
 }
 
 const GROUP_BY_DRIVER_KEY = "collection:group-by-driver";

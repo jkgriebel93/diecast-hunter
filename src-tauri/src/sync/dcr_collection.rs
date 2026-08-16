@@ -293,17 +293,19 @@ async fn upsert_registry_stub(
     driver_id: i64,
     now: i64,
 ) -> AppResult<i64> {
-    let raw_json = serde_json::to_string(&serde_json::json!({
+    // Merged, not assigned: the garage list has no lightbox, so overwriting
+    // would drop the `photos` of an already-enriched entry. See
+    // `sync::raw_json`.
+    let raw_json = crate::sync::raw_json::payload(serde_json::json!({
         "registry_int_id": item.registry_int_id,
         "scheme_text": item.scheme_text,
         "image_url": item.image_url,
         "detail_url": item.detail_url,
         "seq_produced_total": item.seq_produced.total,
         "source": "collection_page",
-    }))
-    .unwrap_or_default();
+    }));
 
-    let row: (i64,) = sqlx::query_as(
+    let row: (i64,) = sqlx::query_as(&format!(
         "INSERT INTO registry_entries
             (external_id, driver_id, year, oem, brand, scale, make,
              production_qty, retail_value_cents, wholesale_value_cents,
@@ -319,10 +321,11 @@ async fn upsert_registry_stub(
             production_qty = COALESCE(excluded.production_qty, registry_entries.production_qty),
             retail_value_cents = COALESCE(excluded.retail_value_cents, registry_entries.retail_value_cents),
             wholesale_value_cents = COALESCE(excluded.wholesale_value_cents, registry_entries.wholesale_value_cents),
-            raw_json = excluded.raw_json,
+            {merge},
             fetched_at = excluded.fetched_at
          RETURNING id",
-    )
+        merge = crate::sync::raw_json::MERGE_ON_CONFLICT,
+    ))
     .bind(guid)
     .bind(driver_id)
     .bind(item.year)
@@ -434,6 +437,81 @@ mod tests {
             retail_value_cents: None,
             wholesale_value_cents: None,
         }
+    }
+
+    /// The mirror of `enrichment_keeps_the_thumbnail_it_knows_nothing_about`
+    /// over in `dcr_registry`: the garage list has the thumbnail but no
+    /// lightbox and no comments, so a routine sync must not undo an
+    /// enrichment that already ran. Both writers used to assign `raw_json`
+    /// wholesale, so whichever ran last won and the other's keys vanished.
+    #[tokio::test]
+    async fn a_garage_sync_keeps_detail_page_data_it_cannot_see() {
+        let pool = migrated_pool().await;
+        let mut summary = SyncSummary::default();
+        let mut driver_ids = DriverIdCache::new();
+        let mut item = garage_item("asset-1", Some("guid-1"), "Jeff Gordon");
+
+        persist_page(&pool, &[item.clone()], &mut driver_ids, &mut summary)
+            .await
+            .unwrap();
+
+        // Stand in for an enrichment pass having run against this entry.
+        sqlx::query(
+            "UPDATE registry_entries
+             SET raw_json = json_set(raw_json,
+                     '$.photos', json_array('/img/big.jpg'),
+                     '$.comments', 'nice car')
+             WHERE external_id = 'guid-1'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        item.image_url = Some("/img/thumb.jpg".to_string());
+        persist_page(&pool, &[item], &mut driver_ids, &mut summary)
+            .await
+            .unwrap();
+
+        let raw: String = sqlx::query_scalar(
+            "SELECT raw_json FROM registry_entries WHERE external_id = 'guid-1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(v["image_url"], "/img/thumb.jpg");
+        assert_eq!(v["photos"][0], "/img/big.jpg");
+        assert_eq!(v["comments"], "nice car");
+    }
+
+    /// A garage row with no thumbnail says nothing about the image; it must
+    /// not erase one another writer parsed. This is the null-stripping in
+    /// `sync::raw_json` — as a merge patch, an explicit null deletes.
+    #[tokio::test]
+    async fn a_garage_row_without_a_thumbnail_does_not_erase_one() {
+        let pool = migrated_pool().await;
+        let mut summary = SyncSummary::default();
+        let mut driver_ids = DriverIdCache::new();
+        let mut item = garage_item("asset-1", Some("guid-1"), "Jeff Gordon");
+        item.image_url = Some("/img/thumb.jpg".to_string());
+
+        persist_page(&pool, &[item.clone()], &mut driver_ids, &mut summary)
+            .await
+            .unwrap();
+
+        item.image_url = None;
+        persist_page(&pool, &[item], &mut driver_ids, &mut summary)
+            .await
+            .unwrap();
+
+        let raw: String = sqlx::query_scalar(
+            "SELECT raw_json FROM registry_entries WHERE external_id = 'guid-1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(v["image_url"], "/img/thumb.jpg");
     }
 
     /// One garage page persists as one unit, and the driver memo spans

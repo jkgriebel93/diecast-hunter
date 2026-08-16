@@ -196,7 +196,11 @@ impl SearchItem {
             .as_ref()
             .and_then(|s| s.feedback_percentage.as_deref())
             .and_then(|s| s.parse::<f64>().ok());
-        let image_url = r.image.as_ref().map(|i| i.image_url.clone());
+        let image_url = crate::ebay::parse::pick_image_url([
+            r.image.as_ref(),
+            r.thumbnail_images.as_deref().and_then(<[_]>::first),
+            r.additional_images.as_deref().and_then(<[_]>::first),
+        ]);
 
         Self {
             item_id: r.item_id,
@@ -240,6 +244,10 @@ struct SearchItemRaw {
     item_end_date: Option<String>,
     seller: Option<BrowseSeller>,
     image: Option<BrowseImage>,
+    #[serde(rename = "thumbnailImages")]
+    thumbnail_images: Option<Vec<BrowseImage>>,
+    #[serde(rename = "additionalImages")]
+    additional_images: Option<Vec<BrowseImage>>,
     #[serde(rename = "itemWebUrl")]
     item_web_url: String,
 }
@@ -263,11 +271,7 @@ struct BrowseSeller {
     feedback_percentage: Option<String>,
 }
 
-#[derive(Deserialize)]
-struct BrowseImage {
-    #[serde(rename = "imageUrl")]
-    image_url: String,
-}
+use crate::ebay::parse::EbayImage as BrowseImage;
 
 fn urlencode(s: &str) -> String {
     url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
