@@ -87,9 +87,85 @@ pub fn dollars_string_to_cents(s: &str) -> Option<i64> {
     Some((f * 100.0).round() as i64)
 }
 
+/// The `{ "imageUrl": … }` shape eBay repeats for every image field on a
+/// Browse payload — `image`, `thumbnailImages`, `additionalImages`.
+#[derive(serde::Deserialize, Debug, Clone)]
+pub struct EbayImage {
+    #[serde(rename = "imageUrl")]
+    pub image_url: String,
+}
+
+/// First usable image URL among the candidates, in the caller's order of
+/// preference.
+///
+/// `image` is the one we want and usually the one we get, but it is optional
+/// in the schema and eBay does drop it — most visibly as a listing ages out,
+/// and on item groups where the variations carry the pictures. Falling back
+/// to the thumbnail or an additional shot is the difference between a row
+/// with a small picture and a row with an empty box.
+///
+/// Blank strings are treated as absent: an empty `src` renders as a broken
+/// image, which reads as a bug rather than as a listing with no photo.
+pub fn pick_image_url<'a>(
+    candidates: impl IntoIterator<Item = Option<&'a EbayImage>>,
+) -> Option<String> {
+    candidates
+        .into_iter()
+        .flatten()
+        .map(|i| i.image_url.trim())
+        .find(|u| !u.is_empty())
+        .map(str::to_owned)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod pick_image {
+        use super::*;
+
+        fn img(u: &str) -> EbayImage {
+            EbayImage {
+                image_url: u.to_string(),
+            }
+        }
+
+        #[test]
+        fn takes_the_first_candidate_that_has_one() {
+            let primary = img("https://i.ebayimg.com/primary.jpg");
+            let thumb = img("https://i.ebayimg.com/thumb.jpg");
+            assert_eq!(
+                pick_image_url([Some(&primary), Some(&thumb)]).as_deref(),
+                Some("https://i.ebayimg.com/primary.jpg")
+            );
+        }
+
+        /// The regression: `image` absent is exactly the case that produced
+        /// an empty box, and it is common on aged and grouped listings.
+        #[test]
+        fn falls_through_a_missing_primary_image() {
+            let thumb = img("https://i.ebayimg.com/thumb.jpg");
+            assert_eq!(
+                pick_image_url([None, Some(&thumb)]).as_deref(),
+                Some("https://i.ebayimg.com/thumb.jpg")
+            );
+        }
+
+        #[test]
+        fn a_blank_url_is_not_a_candidate() {
+            let blank = img("   ");
+            let thumb = img("https://i.ebayimg.com/thumb.jpg");
+            assert_eq!(
+                pick_image_url([Some(&blank), Some(&thumb)]).as_deref(),
+                Some("https://i.ebayimg.com/thumb.jpg")
+            );
+        }
+
+        #[test]
+        fn no_candidates_at_all_is_none() {
+            assert_eq!(pick_image_url([None, None]), None);
+        }
+    }
 
     #[test]
     fn url_clean() {

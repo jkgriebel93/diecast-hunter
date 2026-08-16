@@ -129,6 +129,55 @@ describe("errors go through ErrorBanner", () => {
   });
 });
 
+describe("row images go through the shared Thumbnail", () => {
+  /** A raw `<img` anywhere a list row or card is built. The tag itself is the
+   *  right thing to match: the defects were all in what surrounded it —
+   *  whether the caller resolved DCR's origin prefix, whether it sent a
+   *  referrer, and above all whether it had an `onError`. Eleven of twelve
+   *  did not, so a URL that stopped resolving painted the webview's
+   *  broken-image glyph instead of the "no picture" box the same screens
+   *  already showed for a null. */
+  const RAW_IMG = /<img\b/;
+
+  /** Two exemptions, both checked by eye:
+   *
+   *  - `Thumbnail` is the component the rule points at.
+   *  - `ManualEntryDialog` previews a file the user picked seconds ago,
+   *    before it is saved anywhere. There is no stored value to resolve and
+   *    no remote host to fail, and a failed load there means the picked file
+   *    is unreadable — worth showing as a broken preview rather than
+   *    disguising as "no photo attached". */
+  const ALLOWED = [
+    "src/components/Thumbnail.tsx",
+    "src/components/ManualEntryDialog.tsx",
+  ];
+
+  it("has no hand-rolled <img> outside the known exemptions", () => {
+    const hits = violations(RAW_IMG).filter(
+      (h) => !ALLOWED.some((a) => h.startsWith(a)),
+    );
+    expect(hits).toEqual([]);
+  });
+
+  it("keeps the exemption list honest", () => {
+    const hits = violations(RAW_IMG);
+    for (const allowed of ALLOWED) {
+      expect(
+        hits.some((h) => h.startsWith(allowed)),
+        `${allowed} is on the allowlist but has no <img> — drop it`,
+      ).toBe(true);
+    }
+  });
+
+  it("has no hand-rolled diecastregistry.com origin prefix", () => {
+    // Four pages spelled `startsWith("http") ? src : DCR_BASE + src`, which
+    // turns a protocol-relative `//host/…` into a DCR path. `DCR_BASE` is
+    // still imported for `detail_url` links — it's the literal that must not
+    // come back.
+    expect(violations(/"https:\/\/www\.diecastregistry\.com"/)).toEqual([]);
+  });
+});
+
 describe("dialogs go through the shared Modal", () => {
   /** The hand-rolled dialog shape DCH-32 replaced: a full-viewport backdrop
    *  with a tint. Ten of these disagreed on z-layer, vertical placement,

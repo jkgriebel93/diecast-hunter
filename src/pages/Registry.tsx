@@ -35,14 +35,14 @@ import {
 import { ViewLink } from "@/components/ViewLink";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { Thumbnail } from "@/components/Thumbnail";
+import { DCR_BASE } from "@/lib/dcr";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-24 h-24",
   md: "w-48 h-48",
   lg: "w-72 h-72",
 };
-
-const DCR_BASE = "https://www.diecastregistry.com";
 
 type SortMode =
   | "registry"
@@ -992,23 +992,7 @@ function RegistryResultCard({
         onToggle={toggleMinimized}
         className="-mt-0.5"
       />
-      {!minimized &&
-        (r.image_url ? (
-          <img
-            src={
-              r.image_url.startsWith("http")
-                ? r.image_url
-                : DCR_BASE + r.image_url
-            }
-            alt=""
-            loading="lazy"
-            className={`${imgClass} object-cover rounded border border-border shrink-0`}
-          />
-        ) : (
-          <div
-            className={`${imgClass} rounded border border-border bg-bg shrink-0`}
-          />
-        ))}
+      {!minimized && <Thumbnail src={r.image_url} className={imgClass} />}
       <div className="flex-1 min-w-0">
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">

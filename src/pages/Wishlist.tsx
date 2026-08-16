@@ -18,14 +18,14 @@ import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { Modal } from "@/components/Modal";
 import { FilterCard, FilteredEmpty } from "@/components/FilterCard";
+import { Thumbnail } from "@/components/Thumbnail";
+import { DCR_BASE } from "@/lib/dcr";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-24 h-24",
   md: "w-48 h-48",
   lg: "w-72 h-72",
 };
-
-const DCR_BASE = "https://www.diecastregistry.com";
 
 /** Nearest ancestor that actually scrolls vertically — in the split-view
  *  workspace that's the pane body (`overflow-auto`), not the window. */
@@ -751,23 +751,9 @@ function WishlistCard({
           onToggle={toggleMinimized}
           className="-mt-0.5"
         />
-        {!minimized &&
-          (entry.image_url ? (
-            <img
-              src={
-                entry.image_url.startsWith("http")
-                  ? entry.image_url
-                  : DCR_BASE + entry.image_url
-              }
-              alt=""
-              loading="lazy"
-              className={`${IMG_CLASS[imgSize]} object-cover rounded border border-border shrink-0`}
-            />
-          ) : (
-            <div
-              className={`${IMG_CLASS[imgSize]} rounded border border-border bg-bg shrink-0`}
-            />
-          ))}
+        {!minimized && (
+          <Thumbnail src={entry.image_url} className={IMG_CLASS[imgSize]} />
+        )}
         <div className="flex-1 min-w-0">
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">
@@ -1039,16 +1025,7 @@ function LinkedListingRow({
   const ended = listing.status !== "active";
   return (
     <div className="flex items-center gap-3 text-xs">
-      {listing.image_url ? (
-        <img
-          src={listing.image_url}
-          alt=""
-          loading="lazy"
-          className="w-10 h-10 object-cover rounded border border-border shrink-0"
-        />
-      ) : (
-        <div className="w-10 h-10 rounded border border-border bg-bg shrink-0" />
-      )}
+      <Thumbnail src={listing.image_url} className="w-10 h-10" />
       <div className="flex-1 min-w-0">
         <a
           className={`truncate block hover:underline ${
@@ -1188,16 +1165,7 @@ function LinkListingModal({
                 key={l.listing_id}
                 className="flex items-center gap-3 text-xs border border-border rounded p-2"
               >
-                {l.image_url ? (
-                  <img
-                    src={l.image_url}
-                    alt=""
-                    loading="lazy"
-                    className="w-12 h-12 object-cover rounded border border-border shrink-0"
-                  />
-                ) : (
-                  <div className="w-12 h-12 rounded border border-border bg-bg shrink-0" />
-                )}
+                <Thumbnail src={l.image_url} className="w-12 h-12" />
                 <div className="flex-1 min-w-0">
                   <div className="truncate" title={l.title}>
                     {l.title}

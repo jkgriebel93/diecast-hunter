@@ -16,6 +16,7 @@ import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { NoticeBanner } from "@/components/NoticeBanner";
 import { ClearFiltersButton } from "@/components/FilterCard";
+import { Thumbnail } from "@/components/Thumbnail";
 
 const PAGE_SIZE = 50;
 
@@ -532,19 +533,9 @@ function SearchCard({
           onToggle={toggleMinimized}
           className="self-start -mt-0.5"
         />
-        {!minimized &&
-          (item.image_url ? (
-            <img
-              src={item.image_url}
-              alt=""
-              loading="lazy"
-              className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
-            />
-          ) : (
-            <div
-              className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`}
-            />
-          ))}
+        {!minimized && (
+          <Thumbnail src={item.image_url} className={imgSizeClass} />
+        )}
         <div className="min-w-0 flex-1">
           <div
             className={`text-sm font-medium ${minimized ? "truncate" : "line-clamp-2"}`}

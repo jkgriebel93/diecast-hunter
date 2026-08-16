@@ -67,6 +67,8 @@ import {
   type FilterSummary,
 } from "@/lib/filterPanel";
 import { AnchoredMenu, AnchoredMenuList } from "@/components/AnchoredMenu";
+import { Thumbnail } from "@/components/Thumbnail";
+import { DCR_BASE, resolveDcrUrl } from "@/lib/dcr";
 import {
   passesSellerFilter,
   sellerFilterLabel,
@@ -1978,15 +1980,7 @@ function ListingCard({
         onToggle={toggleMinimized}
         className="self-start -mt-0.5"
       />
-      {!minimized && row.image_url && (
-        <img
-          src={row.image_url}
-          alt=""
-          loading="lazy"
-          decoding="async"
-          className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
-        />
-      )}
+      {!minimized && <Thumbnail src={row.image_url} className={imgSizeClass} />}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <div className="text-sm font-medium truncate flex-1 min-w-0">
@@ -2074,16 +2068,10 @@ function ListingCard({
                   {row.matched_detail_url && (
                     <a
                       className="text-accent hover:underline inline-block"
-                      href={
-                        "https://www.diecastregistry.com" +
-                        row.matched_detail_url
-                      }
+                      href={DCR_BASE + row.matched_detail_url}
                       onClick={(e) => {
                         e.preventDefault();
-                        void openExternal(
-                          "https://www.diecastregistry.com" +
-                            row.matched_detail_url,
-                        );
+                        void openExternal(DCR_BASE + row.matched_detail_url);
                       }}
                     >
                       View on diecastregistry.com →
@@ -5098,14 +5086,7 @@ function RegistrySearchDialog({
       }
       header={
         <div className="flex items-start gap-3 min-w-0 flex-1">
-          {listing.image_url && (
-            <img
-              src={listing.image_url}
-              alt=""
-              className="w-16 h-16 object-cover rounded border border-border flex-shrink-0"
-              referrerPolicy="no-referrer"
-            />
-          )}
+          <Thumbnail src={listing.image_url} className="w-16 h-16" eager />
           <div className="min-w-0 flex-1">
             <h3 className="text-base font-medium">Search registry</h3>
             <p className="text-xs text-fg-subtle mt-0.5" title={listing.title}>
@@ -5353,20 +5334,7 @@ function RegistrySearchDialog({
               disabled={linkingGuid !== null}
             >
               <div className="flex items-center gap-3">
-                {r.image_url ? (
-                  <img
-                    src={
-                      r.image_url.startsWith("http")
-                        ? r.image_url
-                        : "https://www.diecastregistry.com" + r.image_url
-                    }
-                    alt=""
-                    loading="lazy"
-                    className="w-48 h-48 object-cover rounded border border-border shrink-0"
-                  />
-                ) : (
-                  <div className="w-48 h-48 rounded border border-border bg-bg shrink-0" />
-                )}
+                <Thumbnail src={r.image_url} className="w-48 h-48" />
                 <div className="min-w-0 flex-1">
                   <div className="text-base font-medium truncate">
                     {r.driver_name}
@@ -5389,18 +5357,11 @@ function RegistrySearchDialog({
                   )}
                   {r.detail_url && (
                     <a
-                      href={
-                        r.detail_url.startsWith("http")
-                          ? r.detail_url
-                          : "https://www.diecastregistry.com" + r.detail_url
-                      }
+                      href={resolveDcrUrl(r.detail_url)}
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        const url = r.detail_url!.startsWith("http")
-                          ? r.detail_url!
-                          : "https://www.diecastregistry.com" + r.detail_url!;
-                        void openExternal(url);
+                        void openExternal(resolveDcrUrl(r.detail_url!));
                       }}
                       className="text-xs text-accent hover:underline mt-1 inline-block"
                     >

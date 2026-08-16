@@ -15,6 +15,7 @@ import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { Thumbnail } from "@/components/Thumbnail";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-12 h-12",
@@ -327,20 +328,7 @@ function ListingPreview({
   return (
     <li className="px-4 py-2 flex items-center gap-3">
       <MinimizeToggle minimized={minimized} onToggle={toggleMinimized} />
-      {!minimized &&
-        (row.image_url ? (
-          <img
-            src={row.image_url}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            className={`${imgSizeClass} object-cover rounded border border-border shrink-0`}
-          />
-        ) : (
-          <div
-            className={`${imgSizeClass} rounded border border-border bg-bg-elevated shrink-0`}
-          />
-        ))}
+      {!minimized && <Thumbnail src={row.image_url} className={imgSizeClass} />}
       <div className="flex-1 min-w-0">
         <a
           href={row.url}

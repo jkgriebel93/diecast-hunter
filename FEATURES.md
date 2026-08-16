@@ -1,5 +1,5 @@
-- Auto sync overnight
-  - Auto refresh pre-warmed drivers
+- ~~Auto sync overnight~~
+  - ~~Auto refresh pre-warmed drivers~~
 - ~~Archive Saved Listings that ended or were removed~~ (DCH-8: watchlist sync flags ended listings archived instead of deleting them — raw_json, final price, history, and matches all kept; `end_reason` records sold / ended unsold / removed-from-eBay (Browse 404); Listings page grew an "Archived" status facet (excluded by default) and shows the end reason on archived rows)
 - ~~Wishlist feature~~ (Wishlist page with multiple named lists (tabs; create/rename/delete, move entries between lists); "♡ Add to wishlist" on registry search results; per-wish notes, drag-and-drop stack ranking + linked saved listings via the "Link listing…" picker)
     - ~~Select DCR entries~~
@@ -17,4 +17,14 @@
 - ~~Make error messages look nicer~~ (DCH-18: `describeError` in `src/lib/errors.ts` maps `AppError` strings to plain-language title + fix hint, with the raw text behind a "Technical details" disclosure; all 29 error render sites go through the shared `ErrorBanner` component)
 - ~~Include commas in monetary (and other numerical) displays~~ (DCH-17: shared `formatCents`/`formatCount` helpers in `src/lib/format.ts` (Intl.NumberFormat, unit-tested via the new `pnpm test` vitest setup); extension overlay formatter updated to match)
 - Learned tagging
-- FF extension option to correct a match
+  - Would have to use AI to inspect listing photos -> likely very expensive
+- ~~Option to correct/confirm a match from the browser extension~~ (DCH-11: confirm / "not this car" verdict row in the eBay extension overlay)
+- Make application ready for "production"
+  - Option for cloud syncing of collection, saved listings, and so on (DCH-38 read-only snapshot Worker and DCH-42 backup/restore are in the backlog)
+  - What other considerations?
+- Performance profiling
+  - Identify potential areas for improvement
+- Build pipeline
+  - At least build executable/installer on commit to main
+    - Locally only?
+  - (CI now runs checks and packages the extension zip — DCH-29/DCH-31 — but doesn't build the installer yet)
