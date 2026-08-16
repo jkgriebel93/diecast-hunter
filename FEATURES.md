@@ -28,7 +28,6 @@
   - At least build executable/installer on commit to main
     - Locally only?
   - (CI now runs checks and packages the extension zip — DCH-29/DCH-31 — but doesn't build the installer yet)
-
 - FF extension option to correct a match
 - Edit My Collection entries
   - Specifically to add notes to an entry
