@@ -22,10 +22,9 @@ import {
 import { useImageSize, type ImageSize } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
 import {
+  ExpandCollapseAllButton,
   MinimizeToggle,
-  setManyMinimized,
   useMinimized,
-  useMinimizedSet,
 } from "@/lib/minimized";
 import { Thumbnail } from "@/components/Thumbnail";
 import { DCR_BASE } from "@/lib/dcr";
@@ -57,33 +56,10 @@ interface DriverGroupView {
   has_cost: boolean;
 }
 
-/**
- * Expand/Collapse-all for the flat (ungrouped) view. This component — not
- * Collection() — subscribes to the shared minimized store: the store emits
- * on every card toggle on every page, and pages stay mounted in hidden
- * workspace tabs, so a page-level subscription would re-render the entire
- * collection list (images and all) on each toggle anywhere in the app.
- */
-function FlatExpandAllButton({ items }: { items: CollectionRow[] }) {
-  const minimizedSet = useMinimizedSet();
-  const allExpanded =
-    items.length > 0 &&
-    items.every((i) => !minimizedSet.has(`collection:${i.collection_id}`));
-  return (
-    <button
-      type="button"
-      className="text-xs text-fg-subtle hover:text-fg"
-      onClick={() =>
-        setManyMinimized(
-          items.map((i) => `collection:${i.collection_id}`),
-          allExpanded,
-        )
-      }
-    >
-      {allExpanded ? "Collapse all" : "Expand all"}
-    </button>
-  );
-}
+// The flat view's Expand/Collapse-all is the shared
+// `ExpandCollapseAllButton` (DCH-68), which owns the minimized-store
+// subscription so Collection() itself stays out of the per-toggle
+// re-render path (pages stay mounted in hidden workspace tabs).
 
 export function Collection() {
   const [items, setItems] = useState<CollectionRow[] | null>(null);
@@ -654,7 +630,11 @@ export function Collection() {
                 {allGroupsExpanded ? "Collapse all" : "Expand all"}
               </button>
             ) : (
-              <FlatExpandAllButton items={flatItems ?? []} />
+              <ExpandCollapseAllButton
+                keys={(flatItems ?? []).map(
+                  (i) => `collection:${i.collection_id}`,
+                )}
+              />
             )}
             <ImageSizeToggle size={imgSize} onChange={setImgSize} />
           </div>

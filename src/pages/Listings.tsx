@@ -43,7 +43,11 @@ import {
 } from "@/lib/attributeOptions";
 import { useImageSize, IMG_CLASS } from "@/lib/imageSize";
 import { ImageSizeToggle } from "@/components/ImageSizeToggle";
-import { useMinimized, MinimizeToggle } from "@/lib/minimized";
+import {
+  ExpandCollapseAllButton,
+  MinimizeToggle,
+  useMinimized,
+} from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { NoticeBanner } from "@/components/NoticeBanner";
 import { Modal } from "@/components/Modal";
@@ -1525,26 +1529,36 @@ export function Listings() {
                     ? `Showing ${filteredRows.length} of ${rows.length} listings.`
                     : ""}
                 </div>
-                <button
-                  type="button"
-                  className="text-fg-muted hover:text-fg underline decoration-dotted underline-offset-2 disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
-                  disabled={viewMode === "flat"}
-                  onClick={() =>
-                    setCollapseCmd((c) => ({
-                      seq: c.seq + 1,
-                      collapse: !allCollapsed,
-                    }))
-                  }
-                  title={
-                    viewMode === "flat"
-                      ? "Sections only exist in the grouped views"
-                      : allCollapsed
+                {viewMode === "flat" ? (
+                  // Flat view has no sections — here the pair operates on
+                  // the cards themselves (DCH-68). Cards default collapsed
+                  // (DCH-20), so "Expand all" writes explicit false entries.
+                  <ExpandCollapseAllButton
+                    keys={(filteredRows ?? []).map(
+                      (r) => `listing:${r.listing_id}`,
+                    )}
+                    defaultMinimized
+                    className="text-fg-muted hover:text-fg underline decoration-dotted underline-offset-2 disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="text-fg-muted hover:text-fg underline decoration-dotted underline-offset-2"
+                    onClick={() =>
+                      setCollapseCmd((c) => ({
+                        seq: c.seq + 1,
+                        collapse: !allCollapsed,
+                      }))
+                    }
+                    title={
+                      allCollapsed
                         ? "Expand every section"
                         : "Collapse every section"
-                  }
-                >
-                  {allCollapsed ? "Expand all" : "Collapse all"}
-                </button>
+                    }
+                  >
+                    {allCollapsed ? "Expand all" : "Collapse all"}
+                  </button>
+                )}
               </div>
 
               {filteredRows && filteredRows.length === 0 ? (

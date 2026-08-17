@@ -135,6 +135,58 @@ function collapsedKeys(): ReadonlySet<string> {
 }
 
 /**
+ * Whether every one of `keys` is currently expanded, honoring the screen's
+ * default for keys the user has no stored opinion on. This is what makes
+ * one control work on both kinds of screen (DCH-68): on Saved Listings
+ * (default collapsed) an absent key counts as collapsed, so "Expand all"
+ * must write explicit `false` entries — clearing keys would spring the
+ * cards back shut.
+ */
+export function allExpanded(
+  keys: readonly string[],
+  defaultMinimized: boolean,
+): boolean {
+  return (
+    keys.length > 0 &&
+    keys.every((k) => !(minimizedState(k) ?? defaultMinimized))
+  );
+}
+
+/**
+ * The paired Expand all / Collapse all control (DCH-68): one button whose
+ * label flips with the aggregate state, writing explicit per-key values
+ * through {@link setManyMinimized}. Pass the keys of the cards currently
+ * on screen and the same `defaultMinimized` those cards use.
+ *
+ * Subscribes to the store itself (via {@link useMinimizedSet}) so pages
+ * stay out of the per-toggle re-render path — the same reason Collection's
+ * original flat-view button was its own component.
+ */
+export function ExpandCollapseAllButton({
+  keys,
+  defaultMinimized = false,
+  className = "text-xs text-fg-subtle hover:text-fg",
+}: {
+  keys: readonly string[];
+  defaultMinimized?: boolean;
+  className?: string;
+}) {
+  useMinimizedSet(); // subscription only — re-render on any store change
+  const expanded = allExpanded(keys, defaultMinimized);
+  return (
+    <button
+      type="button"
+      className={className}
+      disabled={keys.length === 0}
+      onClick={() => setManyMinimized([...keys], expanded)}
+      title={expanded ? "Collapse every card" : "Expand every card"}
+    >
+      {expanded ? "Collapse all" : "Expand all"}
+    </button>
+  );
+}
+
+/**
  * Rotating-chevron button matching the app's existing collapse idiom.
  * Renders a fixed 24×24 hit target (the glyph alone is ~10px — too easy to
  * miss) with hover feedback, so every card offers the same click area.
