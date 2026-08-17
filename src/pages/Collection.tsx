@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { Modal } from "@/components/Modal";
+import {
+  compareFlat,
+  compareGroups,
+  compareItems,
+  type DriverSort,
+  type FlatSort,
+  type GroupItemSort,
+} from "@/lib/collectionSort";
 import { ManualEntryDialog } from "@/components/ManualEntryDialog";
 import { findLocalDuplicates } from "@/lib/localEntry";
 import { YearRangeFilter } from "@/components/YearRangeFilter";
@@ -37,8 +45,8 @@ const IMG_CLASS: Record<ImageSize, string> = {
   lg: "w-72 h-72",
 };
 
-type SortMode =
-  "driver-asc" | "value-desc" | "count-desc" | "year-desc" | "year-asc";
+// Ordering is split by level (DCH-66): the driver groups and the cars
+// inside them are different questions — see lib/collectionSort.ts.
 
 interface DriverGroupView {
   driver_id: number | null;
@@ -79,7 +87,12 @@ export function Collection() {
   const [oemFilter, setOemFilter] = useState<string>("");
   const [yearFilter, setYearFilter] = useState<YearRange>(EMPTY_YEAR_RANGE);
   const [exporting, setExporting] = useState(false);
-  const [sortMode, setSortMode] = useState<SortMode>("driver-asc");
+  // Defaults reproduce the pre-split behavior exactly: drivers A → Z with
+  // each panel newest-car-first, and the flat list by driver then year.
+  const [driverSort, setDriverSort] = useState<DriverSort>("driver-asc");
+  const [groupItemSort, setGroupItemSort] =
+    useState<GroupItemSort>("year-desc");
+  const [flatSort, setFlatSort] = useState<FlatSort>("driver-asc");
   const [groupByDriver, setGroupByDriver] = useGroupByDriver();
   const [imgSize, setImgSize] = useImageSize("collection");
   /** null = closed. "new" = adding; a row = editing that row. */
@@ -315,63 +328,26 @@ export function Collection() {
       }
     }
 
-    // Sort items within each group by year desc (consistent with the
-    // server's previous list_collection_for_driver ordering).
+    // The two levels sort independently (DCH-66): the panel order never
+    // depends on years, the cars inside never depend on driver names.
+    const itemCmp = compareItems(groupItemSort);
     for (const g of map.values()) {
-      g.items.sort((a, b) => (b.year ?? 0) - (a.year ?? 0));
+      g.items.sort(itemCmp);
     }
 
     const list = Array.from(map.values());
-    list.sort((a, b) => {
-      switch (sortMode) {
-        case "driver-asc":
-          return a.driver_name.localeCompare(b.driver_name);
-        case "value-desc":
-          return b.retail_total_cents - a.retail_total_cents;
-        case "count-desc":
-          return b.items.length - a.items.length;
-        case "year-desc":
-          return (
-            Math.max(...b.items.map((i) => i.year ?? 0)) -
-            Math.max(...a.items.map((i) => i.year ?? 0))
-          );
-        case "year-asc":
-          return (
-            Math.min(...a.items.map((i) => i.year ?? 9999)) -
-            Math.min(...b.items.map((i) => i.year ?? 9999))
-          );
-      }
-    });
+    list.sort(compareGroups(driverSort));
     return list;
-  }, [filtered, sortMode]);
+  }, [filtered, driverSort, groupItemSort]);
 
   // Flat (ungrouped) view of the filtered items, sorted to mirror the
   // group sort where it makes sense at the item level.
   const flatItems: CollectionRow[] | null = useMemo(() => {
     if (!filtered) return null;
     const list = [...filtered];
-    list.sort((a, b) => {
-      switch (sortMode) {
-        case "value-desc":
-          return (b.retail_value_cents ?? 0) - (a.retail_value_cents ?? 0);
-        case "year-desc":
-          return (b.year ?? 0) - (a.year ?? 0);
-        case "year-asc":
-          return (a.year ?? 9999) - (b.year ?? 9999);
-        case "driver-asc":
-        case "count-desc":
-        default: {
-          // Fall back to driver name, then newest year within a driver.
-          const byName = (a.driver_name ?? "").localeCompare(
-            b.driver_name ?? "",
-          );
-          if (byName !== 0) return byName;
-          return (b.year ?? 0) - (a.year ?? 0);
-        }
-      }
-    });
+    list.sort(compareFlat(flatSort));
     return list;
-  }, [filtered, sortMode]);
+  }, [filtered, flatSort]);
 
   function toggleGroup(key: number | string) {
     setExpanded((prev) => {
@@ -513,22 +489,57 @@ export function Collection() {
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
             />
-            <select
-              className="input !w-auto"
-              value={sortMode}
-              onChange={(e) => setSortMode(e.target.value as SortMode)}
-              title={groupByDriver ? "Sort drivers" : "Sort items"}
-            >
-              <option value="driver-asc">Driver A → Z</option>
-              <option value="value-desc">
-                {groupByDriver ? "Total value high → low" : "Value high → low"}
-              </option>
-              {groupByDriver && (
-                <option value="count-desc">Item count high → low</option>
-              )}
-              <option value="year-desc">Year newest → oldest</option>
-              <option value="year-asc">Year oldest → newest</option>
-            </select>
+            {groupByDriver ? (
+              // Two levels, two controls (DCH-66) — the answer to the
+              // ticket's "too busy?" question is that ONE ambiguous control
+              // was busier: its year options reordered drivers while the
+              // cars stayed fixed. Flat view keeps a single control, so
+              // nothing is added at rest.
+              <>
+                <label className="flex items-center gap-1 text-xs">
+                  <span className="text-fg-subtle">Drivers:</span>
+                  <select
+                    className="input !w-auto"
+                    value={driverSort}
+                    onChange={(e) =>
+                      setDriverSort(e.target.value as DriverSort)
+                    }
+                    title="Order of the driver panels"
+                  >
+                    <option value="driver-asc">A → Z</option>
+                    <option value="value-desc">Total value high → low</option>
+                    <option value="count-desc">Item count high → low</option>
+                  </select>
+                </label>
+                <label className="flex items-center gap-1 text-xs">
+                  <span className="text-fg-subtle">Cars:</span>
+                  <select
+                    className="input !w-auto"
+                    value={groupItemSort}
+                    onChange={(e) =>
+                      setGroupItemSort(e.target.value as GroupItemSort)
+                    }
+                    title="Order of the cars inside each driver's panel"
+                  >
+                    <option value="year-desc">Year newest → oldest</option>
+                    <option value="year-asc">Year oldest → newest</option>
+                    <option value="value-desc">Value high → low</option>
+                  </select>
+                </label>
+              </>
+            ) : (
+              <select
+                className="input !w-auto"
+                value={flatSort}
+                onChange={(e) => setFlatSort(e.target.value as FlatSort)}
+                title="Sort items"
+              >
+                <option value="driver-asc">Driver A → Z</option>
+                <option value="value-desc">Value high → low</option>
+                <option value="year-desc">Year newest → oldest</option>
+                <option value="year-asc">Year oldest → newest</option>
+              </select>
+            )}
           </div>
           <label className="flex items-center gap-2 text-xs text-fg-subtle select-none w-fit">
             <input

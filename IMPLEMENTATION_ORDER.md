@@ -1,5 +1,17 @@
 # Implementation order for open DCH tickets
 
+Rev 36, 2026-08-17. **DCH-66 shipped**, and its open question is answered: two
+dropdowns is NOT too busy, because the one control it replaces was busier — its year
+options secretly reordered *drivers* by their newest car while the cars inside stayed
+fixed at year-desc, and "drivers A → Z, newest car first within each" was
+inexpressible. Grouped view now has two compact labelled selects (Drivers: A → Z /
+total value / item count · Cars: year both ways / value), flat view keeps exactly one
+(driver / value / year), so nothing is added at rest. The comparators live in
+`lib/collectionSort.ts` (unit-tested; null years/values keep their sink-to-the-bottom
+treatment), and year is deliberately no longer a *driver* ordering — with the levels
+split it's a property of the cars. Defaults reproduce the pre-split behavior exactly.
+The polish epic is down to DCH-65 → 64.
+
 Rev 35, 2026-08-17. **DCH-71 shipped.** The mechanism is `lib/dataEvents.ts` — a tiny
 frontend pub/sub (topics `drivers` and `registry-options`) that makes the mutate→list
 refresh cycle deliberate: the mutating page emits after success, and every mounted page
