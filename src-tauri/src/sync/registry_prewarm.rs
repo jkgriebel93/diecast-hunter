@@ -11,7 +11,8 @@ use serde::Serialize;
 use sqlx::{SqliteConnection, SqlitePool};
 
 use crate::dcr::{
-    search_all_pages_with_progress, DcrClient, ProductionSearchFilter, ProductionSearchResult,
+    search_all_pages_with_progress, DcrClient, DcrSession, ProductionSearchFilter,
+    ProductionSearchResult,
 };
 use crate::error::{AppError, AppResult};
 use crate::progress::ProgressEmitter;
@@ -50,6 +51,7 @@ pub struct PrewarmRefreshSummary {
 
 pub async fn prewarm_by_driver(
     pool: &SqlitePool,
+    session: &DcrSession,
     driver_guid: &str,
     progress: &ProgressEmitter,
 ) -> AppResult<PrewarmSummary> {
@@ -57,10 +59,12 @@ pub async fn prewarm_by_driver(
         return Err(AppError::Parse("driver_guid is required".into()));
     }
 
-    progress.step("Logging in to diecastregistry.com…", None, None);
-    let client = logged_in_client(pool).await?;
-
-    let summary = prewarm_driver_with_client(pool, &client, driver_guid, progress).await?;
+    progress.step("Connecting to diecastregistry.com…", None, None);
+    let summary = session
+        .with_client(pool, progress, |client| async move {
+            prewarm_driver_with_client(pool, &client, driver_guid, progress).await
+        })
+        .await?;
 
     progress.done(format!(
         "Pre-warm complete: {} entries for {}.",
@@ -78,6 +82,7 @@ pub async fn prewarm_by_driver(
 /// are logged and skipped; cancellation propagates.
 pub async fn refresh_stale_prewarms(
     pool: &SqlitePool,
+    session: &DcrSession,
     progress: &ProgressEmitter,
 ) -> AppResult<PrewarmRefreshSummary> {
     let max_entries = settings::get(pool, settings::KEY_PREWARM_REFRESH_MAX_ENTRIES)
@@ -156,49 +161,44 @@ pub async fn refresh_stale_prewarms(
         return Ok(summary);
     }
 
-    progress.step("Logging in to diecastregistry.com…", None, None);
-    let client = logged_in_client(pool).await?;
-
-    let total = batch.len() as u32;
-    for (i, guid) in batch.iter().enumerate() {
-        progress.check_cancelled()?;
-        progress.step(
-            format!("Refreshing stale pre-warm {} of {total}…", i + 1),
-            Some(i as u32),
-            Some(total),
-        );
-        match prewarm_driver_with_client(pool, &client, guid, progress).await {
-            Ok(s) => {
-                summary.drivers_refreshed += 1;
-                summary.registry_entries_upserted += s.registry_entries_upserted;
+    progress.step("Connecting to diecastregistry.com…", None, None);
+    // The whole batch runs inside with_client so a dead cached session —
+    // which surfaces on the first driver's first fetch, before any writes —
+    // restarts the batch once on a fresh login instead of failing every
+    // driver in turn.
+    let batch = &batch;
+    let (drivers_refreshed, entries_upserted) = session
+        .with_client(pool, progress, |client| async move {
+            let mut refreshed = 0u32;
+            let mut upserted = 0u32;
+            let total = batch.len() as u32;
+            for (i, guid) in batch.iter().enumerate() {
+                progress.check_cancelled()?;
+                progress.step(
+                    format!("Refreshing stale pre-warm {} of {total}…", i + 1),
+                    Some(i as u32),
+                    Some(total),
+                );
+                match prewarm_driver_with_client(pool, &client, guid, progress).await {
+                    Ok(s) => {
+                        refreshed += 1;
+                        upserted += s.registry_entries_upserted;
+                    }
+                    Err(e @ (AppError::Cancelled | AppError::SessionExpired)) => return Err(e),
+                    Err(e) => tracing::warn!("prewarm refresh: driver {guid} failed: {e}"),
+                }
             }
-            Err(AppError::Cancelled) => return Err(AppError::Cancelled),
-            Err(e) => tracing::warn!("prewarm refresh: driver {guid} failed: {e}"),
-        }
-    }
+            Ok((refreshed, upserted))
+        })
+        .await?;
+    summary.drivers_refreshed = drivers_refreshed;
+    summary.registry_entries_upserted = entries_upserted;
 
     progress.done(format!(
         "Refreshed {} of {} stale pre-warmed drivers ({} entries updated).",
         summary.drivers_refreshed, drivers_stale, summary.registry_entries_upserted
     ));
     Ok(summary)
-}
-
-/// Build a `DcrClient` logged in with the credentials from Settings. Shared
-/// with flows that pre-warm several drivers in one session (e.g. the
-/// detail-url backfill).
-pub(crate) async fn logged_in_client(pool: &SqlitePool) -> AppResult<DcrClient> {
-    let username = settings::get(pool, settings::KEY_DCR_USERNAME)
-        .await?
-        .ok_or_else(|| {
-            AppError::NotConfigured("diecastregistry.com username not set in Settings".into())
-        })?;
-    let password = settings::secret_get(settings::ENTRY_DCR_PASSWORD)?.ok_or_else(|| {
-        AppError::NotConfigured("diecastregistry.com password not set in Settings".into())
-    })?;
-    let client = DcrClient::new()?;
-    client.login(&username, &password).await?;
-    Ok(client)
 }
 
 /// Search + upsert for one driver on an already-logged-in client. Emits

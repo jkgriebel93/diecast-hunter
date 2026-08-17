@@ -29,12 +29,17 @@ pub async fn run_once(pool: &SqlitePool) -> bool {
 
     let mut ok = true;
 
+    // One DCR session for the whole run (DCH-57): the collection sync's login
+    // is the run's only login — the pre-warm and pre-search refreshes below
+    // reuse the cached client instead of each performing their own.
+    let dcr_session = crate::dcr::DcrSession::new();
+
     // My Collection (DCR). The enrichment pass is capped and prioritized
     // (DCH-53): at most `auto_sync.enrich_max_entries` detail pages per run,
     // referenced entries first, and unreferenced prewarm stubs are enriched
     // once but never re-refreshed — so a bulk-prewarmed cohort aging past 30
     // days can't turn this into an hours-long walk.
-    match sync::sync_dcr_collection_and_enrich(pool, &progress, true).await {
+    match sync::sync_dcr_collection_and_enrich(pool, &dcr_session, &progress, true).await {
         Ok(s) => tracing::info!(
             "auto-sync DCR: {} items seen, {} rows upserted, {} removed",
             s.items_seen,
@@ -66,7 +71,7 @@ pub async fn run_once(pool: &SqlitePool) -> bool {
     // pre-warm is older than the staleness threshold, capped per run, so most
     // runs do nothing. Skipping the "0 stale" case keeps quiet runs quiet in
     // the log.
-    match sync::refresh_stale_prewarms(pool, &progress).await {
+    match sync::refresh_stale_prewarms(pool, &dcr_session, &progress).await {
         Ok(s) if s.drivers_stale == 0 => {}
         Ok(s) => tracing::info!(
             "auto-sync prewarm refresh: {} of {} stale drivers refreshed, {} entries upserted",
@@ -84,7 +89,7 @@ pub async fn run_once(pool: &SqlitePool) -> bool {
     // only ones past the staleness window, capped per run, quiet when there's
     // nothing to do. Runs after the pre-warm so a driver walk that already
     // pulled in the same entries makes this pass cheap.
-    match crate::presearch::refresh_stale(pool, &progress).await {
+    match crate::presearch::refresh_stale(pool, &dcr_session, &progress).await {
         Ok(s) if s.stale == 0 => {}
         Ok(s) => tracing::info!(
             "auto-sync pre-search refresh: {} of {} stale refreshed ({} failed), {} entries upserted",

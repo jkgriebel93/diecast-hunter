@@ -30,6 +30,12 @@ const MAX_RETRIES: u32 = 3;
 pub struct DcrClient {
     http: Client,
     next_send: Mutex<Instant>,
+    /// The /Production page's anti-forgery form token, captured the first
+    /// time a search scrapes it. ASP.NET validates a form token against the
+    /// cookie half living in this client's jar and accepts the same pair for
+    /// the session's lifetime, so reusing it saves the extra GET /Production
+    /// that existed only to read the token (DCH-57). Dies with the client.
+    production_token: std::sync::Mutex<Option<String>>,
 }
 
 impl DcrClient {
@@ -57,7 +63,20 @@ impl DcrClient {
         Ok(Self {
             http,
             next_send: Mutex::new(Instant::now()),
+            production_token: std::sync::Mutex::new(None),
         })
+    }
+
+    pub(crate) fn cached_production_token(&self) -> Option<String> {
+        self.production_token.lock().unwrap().clone()
+    }
+
+    pub(crate) fn cache_production_token(&self, token: String) {
+        *self.production_token.lock().unwrap() = Some(token);
+    }
+
+    pub(crate) fn clear_production_token(&self) {
+        *self.production_token.lock().unwrap() = None;
     }
 
     /// Performs the ASP.NET MVC anti-forgery login dance:
@@ -356,7 +375,11 @@ pub fn extract_form_token(html: &str) -> Option<String> {
         .and_then(|el| el.value().attr("value").map(str::to_owned))
 }
 
-fn looks_like_login_page(html: &str) -> bool {
+/// True when `html` is (or contains) the /Account/Login form — what an
+/// auth-gated page looks like after the redirect a dead session cookie
+/// triggers. Flows running on a cached session use this to tell "expired
+/// session" apart from "page with genuinely nothing on it".
+pub(crate) fn looks_like_login_page(html: &str) -> bool {
     let doc = Html::parse_document(html);
     let sel = Selector::parse(r#"form[action="/Account/Login"]"#).unwrap();
     doc.select(&sel).next().is_some()
@@ -382,4 +405,34 @@ fn cookie_names(set_cookies: &[String]) -> Vec<String> {
         .iter()
         .filter_map(|c| c.split('=').next().map(|n| n.trim().to_string()))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn login_page_is_detected_and_real_pages_are_not() {
+        let login = r#"<html><body>
+            <form action="/Account/Login" method="post">
+              <input name="__RequestVerificationToken" type="hidden" value="tok">
+              <input name="Email"><input name="Password">
+            </form></body></html>"#;
+        assert!(looks_like_login_page(login));
+
+        let results_page = include_str!("../../fixtures/dcr/production_search_one_result.html");
+        assert!(!looks_like_login_page(results_page));
+        let garage_page = include_str!("../../fixtures/dcr/mygarage_two_items.html");
+        assert!(!looks_like_login_page(garage_page));
+    }
+
+    #[test]
+    fn production_token_round_trips() {
+        let client = DcrClient::new().unwrap();
+        assert_eq!(client.cached_production_token(), None);
+        client.cache_production_token("abc123".into());
+        assert_eq!(client.cached_production_token(), Some("abc123".into()));
+        client.clear_production_token();
+        assert_eq!(client.cached_production_token(), None);
+    }
 }

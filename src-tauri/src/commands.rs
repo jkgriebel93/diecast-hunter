@@ -234,7 +234,9 @@ pub async fn sync_dcr_collection(
 ) -> AppResult<sync::SyncSummary> {
     let progress = ProgressEmitter::new(app, "sync");
     set_active_cancel(&state, &progress).await;
-    let result = sync::sync_dcr_collection_and_enrich(&state.db.pool, &progress, enrich).await;
+    let result =
+        sync::sync_dcr_collection_and_enrich(&state.db.pool, &state.dcr_session, &progress, enrich)
+            .await;
     clear_active_cancel(&state).await;
     finish_progress(&progress, &result, "Sync");
     result
@@ -280,7 +282,7 @@ pub async fn refresh_registry_details(
 ) -> AppResult<sync::EnrichSummary> {
     let progress = ProgressEmitter::new(app, "enrich");
     set_active_cancel(&state, &progress).await;
-    let result = sync::enrich_only(&state.db.pool, force, &progress).await;
+    let result = sync::enrich_only(&state.db.pool, &state.dcr_session, force, &progress).await;
     clear_active_cancel(&state).await;
     finish_progress(&progress, &result, "Enrichment");
     result
@@ -1393,17 +1395,15 @@ pub async fn remove_non_diecast_listings(state: State<'_, AppState>) -> AppResul
 pub async fn refresh_registry_form_options(
     state: State<'_, AppState>,
 ) -> AppResult<crate::dcr::RefreshOptionsSummary> {
-    let username = settings::get(&state.db.pool, settings::KEY_DCR_USERNAME)
-        .await?
-        .ok_or_else(|| {
-            AppError::NotConfigured("diecastregistry.com username not set in Settings".into())
-        })?;
-    let password = settings::secret_get(settings::ENTRY_DCR_PASSWORD)?.ok_or_else(|| {
-        AppError::NotConfigured("diecastregistry.com password not set in Settings".into())
-    })?;
-    let client = crate::dcr::DcrClient::new()?;
-    client.login(&username, &password).await?;
-    crate::dcr::refresh_form_options(&state.db.pool, &client).await
+    let pool = &state.db.pool;
+    state
+        .dcr_session
+        .with_client(
+            pool,
+            &ProgressEmitter::null("form_options"),
+            |client| async move { crate::dcr::refresh_form_options(pool, &client).await },
+        )
+        .await
 }
 
 #[derive(Serialize)]
@@ -1572,36 +1572,25 @@ async fn run_dcr_production_search(
     filter: &crate::dcr::ProductionSearchFilter,
 ) -> AppResult<Vec<crate::dcr::ProductionSearchResult>> {
     progress.step("Connecting to diecastregistry.com…", None, None);
-    let (client, was_cached) = session.get_or_login(pool).await?;
-
     let subject = resolve_search_subject(pool, filter).await;
-    let first =
-        crate::dcr::search_all_pages_with_progress(&client, filter, progress, subject.as_deref())
-            .await;
-    // A cached session that errors — or comes back empty, which is what an
-    // expired auth cookie looks like after the redirect to the login page —
-    // gets one retry on a fresh login. Costs a duplicate search only when
-    // the query genuinely has zero results.
-    let stale_suspect = was_cached && !matches!(&first, Ok((r, _)) if !r.is_empty());
-    let results = if stale_suspect {
-        session.invalidate().await;
-        progress.step(
-            "Session may have expired — logging in to diecastregistry.com again…",
-            None,
-            None,
-        );
-        let (client, _) = session.get_or_login(pool).await?;
-        let (results, _) = crate::dcr::search_all_pages_with_progress(
-            &client,
-            filter,
-            progress,
-            subject.as_deref(),
-        )
+    // An expired cookie announces itself as `SessionExpired` (the search
+    // detects the login-page redirect), so with_client re-logs-in and retries
+    // only then — a search that legitimately finds nothing walks once
+    // instead of being re-run as a stale-cookie suspect (DCH-57).
+    let (results, _pages) = session
+        .with_client(pool, progress, |client| {
+            let subject = subject.clone();
+            async move {
+                crate::dcr::search_all_pages_with_progress(
+                    &client,
+                    filter,
+                    progress,
+                    subject.as_deref(),
+                )
+                .await
+            }
+        })
         .await?;
-        results
-    } else {
-        first?.0
-    };
     progress.done(format!("Found {} results.", results.len()));
     Ok(results)
 }
@@ -1850,7 +1839,8 @@ pub async fn prewarm_registry_by_driver(
 ) -> AppResult<sync::PrewarmSummary> {
     let progress = ProgressEmitter::new(app, "prewarm");
     set_active_cancel(&state, &progress).await;
-    let result = sync::prewarm_by_driver(&state.db.pool, &driver_guid, &progress).await;
+    let result =
+        sync::prewarm_by_driver(&state.db.pool, &state.dcr_session, &driver_guid, &progress).await;
     clear_active_cancel(&state).await;
     finish_progress(&progress, &result, "Pre-warm");
     result
@@ -1867,7 +1857,7 @@ pub async fn backfill_registry_detail_urls(
 ) -> AppResult<sync::DetailUrlBackfillSummary> {
     let progress = ProgressEmitter::new(app, "detail-url-backfill");
     set_active_cancel(&state, &progress).await;
-    let result = sync::backfill_detail_urls(&state.db.pool, &progress).await;
+    let result = sync::backfill_detail_urls(&state.db.pool, &state.dcr_session, &progress).await;
     clear_active_cancel(&state).await;
     finish_progress(&progress, &result, "Link repair");
     result
@@ -2872,7 +2862,8 @@ pub async fn refresh_registry_presearch(
 ) -> AppResult<u32> {
     let progress = ProgressEmitter::new(app, "presearch_refresh");
     set_active_cancel(&state, &progress).await;
-    let result = crate::presearch::refresh_one(&state.db.pool, id, &progress).await;
+    let result =
+        crate::presearch::refresh_one(&state.db.pool, &state.dcr_session, id, &progress).await;
     clear_active_cancel(&state).await;
     if result.is_err() {
         finish_progress(&progress, &result, "Pre-search refresh");

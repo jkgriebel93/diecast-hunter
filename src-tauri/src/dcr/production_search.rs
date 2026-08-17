@@ -16,7 +16,7 @@ use regex::Regex;
 use scraper::{ElementRef, Html, Selector};
 use serde::{Deserialize, Serialize};
 
-use crate::dcr::client::extract_form_token;
+use crate::dcr::client::{extract_form_token, looks_like_login_page};
 use crate::dcr::parse::{
     dollars_to_cents, normalize_driver_name, parse_details_line, parse_seq_produced,
     registry_guid_from_feedback_url, SeqProduced,
@@ -94,11 +94,23 @@ pub async fn search_all_pages_with_progress(
     progress.check_cancelled()?;
     progress.step("Applying filter…", None, None);
 
-    // 1. GET /Production for the form anti-forgery token.
-    let initial = client.get_html("/Production").await?;
-    let token = extract_form_token(&initial).ok_or_else(|| {
-        AppError::Parse("could not find anti-forgery token on /Production".into())
-    })?;
+    // 1. The form's anti-forgery token. The client caches it per session
+    //    (DCH-57), so only the first search on a session pays the extra
+    //    GET /Production that exists purely to scrape the token.
+    let token = match client.cached_production_token() {
+        Some(t) => t,
+        None => {
+            let initial = client.get_html("/Production").await?;
+            if looks_like_login_page(&initial) {
+                return Err(AppError::SessionExpired);
+            }
+            let t = extract_form_token(&initial).ok_or_else(|| {
+                AppError::Parse("could not find anti-forgery token on /Production".into())
+            })?;
+            client.cache_production_token(t.clone());
+            t
+        }
+    };
 
     // 2. POST /Production/UpdateFilter — sets server-side filter state.
     let form = build_form(&token, filter);
@@ -111,6 +123,15 @@ pub async fn search_all_pages_with_progress(
         }
         _ => client.get_html("/Production").await?,
     };
+
+    // A dead session cookie turns this page into the login form, which
+    // parses as zero results — indistinguishable from a legitimately empty
+    // search. Say so explicitly instead, so callers re-login and retry
+    // rather than re-walking every zero-result search (DCH-57).
+    if looks_like_login_page(&first_page_html) {
+        client.clear_production_token();
+        return Err(AppError::SessionExpired);
+    }
 
     // scraper::Html isn't Send; scope the doc to a block so it drops before
     // the .await calls below.
