@@ -32,6 +32,9 @@ export function Dashboard() {
 
       {status && (
         <div className="card text-xs text-fg-subtle font-mono break-all">
+          <div>
+            app: {status.app_version} ({status.build_commit})
+          </div>
           <div>db: {status.db_path}</div>
           <div>schema: v{status.schema_version}</div>
         </div>

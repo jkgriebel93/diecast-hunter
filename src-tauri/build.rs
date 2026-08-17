@@ -8,6 +8,55 @@ fn main() {
     )
     .expect("failed to run tauri-build");
     manifest_common_controls_v6();
+    emit_build_version();
+}
+
+/// Derive the version at build time (DCH-67) so nothing is hand-edited:
+///
+/// - `DCH_BUILD_VERSION`: CalVer `YY.M.D` from the build date. Calendar
+///   rather than semver — a single-user app shipping continuously makes no
+///   compatibility promises — and a two-digit year because the Windows MSI
+///   ProductVersion caps its major field at 255, so `2026.x.y` would break
+///   the installer bundle.
+/// - `DCH_BUILD_COMMIT`: short git hash, `-dirty` when the tree has
+///   uncommitted changes, `unknown` when git isn't available (source
+///   tarball). Two same-day builds differ here, which is exactly the
+///   situation per-commit CI installers produce.
+///
+/// The rerun-if-changed on `.git/HEAD` keeps the commit fresh across local
+/// commits; the date is only as fresh as the last rebuild, which is fine —
+/// CI builds from a clean checkout and is always current.
+fn emit_build_version() {
+    let now = chrono::Local::now();
+    println!(
+        "cargo:rustc-env=DCH_BUILD_VERSION={}",
+        now.format("%-y.%-m.%-d")
+    );
+
+    let commit = std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    let dirty = std::process::Command::new("git")
+        .args(["status", "--porcelain"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .is_some_and(|o| !o.stdout.is_empty());
+    let commit = match commit {
+        Some(c) => {
+            if dirty {
+                format!("{c}-dirty")
+            } else {
+                c
+            }
+        }
+        None => "unknown".to_string(),
+    };
+    println!("cargo:rustc-env=DCH_BUILD_COMMIT={commit}");
+    println!("cargo:rerun-if-changed=../.git/HEAD");
 }
 
 /// Declare the Common-Controls v6 side-by-side dependency for *every* binary

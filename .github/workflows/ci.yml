@@ -170,8 +170,17 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # `tauri build` runs `pnpm build` itself via beforeBuildCommand.
+      # The installer version is stamped here (DCH-67): CalVer YY.M.D of
+      # the build date, matching the in-app version build.rs derives — so
+      # installer metadata never depends on anyone remembering to edit
+      # tauri.conf.json, whose static version is only the fallback for
+      # local builds that skip this step. Two-digit year on purpose: the
+      # MSI ProductVersion major field caps at 255.
       - name: Build installers
-        run: pnpm tauri build
+        shell: bash
+        run: >-
+          pnpm tauri build --config
+          "{\"version\": \"$(date +%-y.%-m.%-d)\"}"
 
       - name: Upload installers
         uses: actions/upload-artifact@v4

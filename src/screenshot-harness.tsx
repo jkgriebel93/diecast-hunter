@@ -27,6 +27,7 @@ import { WorkspaceProvider } from "./lib/workspace";
 import { Settings } from "./pages/Settings";
 import { SellerFeed } from "./pages/SellerFeed";
 import { Registry } from "./pages/Registry";
+import { Dashboard } from "./pages/Dashboard";
 import { resetMinimized, setManyMinimized } from "./lib/minimized";
 import { facetSectionKey } from "./lib/facetSections";
 import type {
@@ -420,6 +421,18 @@ const REGISTRY_FORM_OPTIONS: Record<string, FormOptionRow[]> = {
 };
 
 const RESULTS: Record<string, unknown> = {
+  // DCH-67: the diagnostics card's version line. Fixed values — a live
+  // date would make the capture non-deterministic.
+  app_status: {
+    app_version: "26.8.17",
+    build_commit: "cd658ea",
+    db_path:
+      "C:\\Users\\you\\AppData\\Roaming\\DiecastHunter\\DiecastHunter\\data\\diecast-hunter.sqlite",
+    schema_version: 33,
+    registry_count: 46213,
+    collection_count: 214,
+    listing_count: 1093,
+  },
   list_listings: LISTINGS,
   list_watched_external_ids: [],
   frontend_ready: null,
@@ -981,7 +994,9 @@ function Harness() {
                 ? "Seller Feed"
                 : preset.startsWith("registry")
                   ? "Registry Search"
-                  : "Saved Listings"}
+                  : preset === "dashboard"
+                    ? "Dashboard"
+                    : "Saved Listings"}
         </div>
       </div>
       <div className="relative flex-1 min-h-0">
@@ -994,6 +1009,8 @@ function Harness() {
             <SellerFeed />
           ) : preset.startsWith("registry") ? (
             <Registry />
+          ) : preset === "dashboard" ? (
+            <Dashboard />
           ) : (
             <Listings />
           )}

@@ -56,6 +56,18 @@ pub struct AppState {
     pub frontend_ready: tokio::sync::Notify,
 }
 
+/// Build-time version metadata (DCH-67), derived in `build.rs`: CalVer
+/// `YY.M.D` of the build date, and the short commit (`-dirty` when built
+/// from an unclean tree). Nothing here is hand-edited.
+pub const APP_VERSION: &str = env!("DCH_BUILD_VERSION");
+pub const BUILD_COMMIT: &str = env!("DCH_BUILD_COMMIT");
+
+/// The main window's title: name, version, and the commit that built it —
+/// the commit is what tells two same-day CI builds apart.
+fn window_title(version: &str, commit: &str) -> String {
+    format!("Diecast Hunter {version} ({commit})")
+}
+
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -132,6 +144,12 @@ pub fn run() {
                     }
                 }
                 Err(e) => tracing::error!("could not resolve the collection photo directory: {e}"),
+            }
+
+            // Which build is this? In the title bar so it's readable at a
+            // glance and lands in every screenshot a bug report includes.
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_title(&window_title(APP_VERSION, BUILD_COMMIT));
             }
 
             // Embedded listing receiver for the browser extension. Failures
@@ -475,5 +493,42 @@ fn init_tracing() {
         }
     } else {
         registry.init();
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::*;
+
+    /// The build script's contract: CalVer `YY.M.D`, all numeric, year
+    /// two-digit — the MSI ProductVersion major field caps at 255, so a
+    /// four-digit year would break the installer bundle.
+    #[test]
+    fn build_version_is_two_digit_calver() {
+        let parts: Vec<u32> = APP_VERSION
+            .split('.')
+            .map(|p| p.parse().expect("numeric version part"))
+            .collect();
+        assert_eq!(parts.len(), 3, "expected YY.M.D, got {APP_VERSION}");
+        assert!(parts[0] <= 99, "year must be two-digit: {APP_VERSION}");
+        assert!((1..=12).contains(&parts[1]), "bad month: {APP_VERSION}");
+        assert!((1..=31).contains(&parts[2]), "bad day: {APP_VERSION}");
+    }
+
+    #[test]
+    fn build_commit_is_short_hash_or_unknown() {
+        let hash = BUILD_COMMIT.strip_suffix("-dirty").unwrap_or(BUILD_COMMIT);
+        assert!(
+            hash == "unknown" || (hash.len() >= 7 && hash.chars().all(|c| c.is_ascii_hexdigit())),
+            "unexpected commit form: {BUILD_COMMIT}"
+        );
+    }
+
+    #[test]
+    fn title_carries_name_version_and_commit() {
+        assert_eq!(
+            window_title("26.8.17", "abc1234"),
+            "Diecast Hunter 26.8.17 (abc1234)"
+        );
     }
 }
