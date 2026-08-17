@@ -1,5 +1,13 @@
 # Implementation order for open DCH tickets
 
+Rev 22, 2026-08-16. **Six new tickets from the FEATURES.md pass (DCH-63…68)** are slotted
+below, and the plan is reconciled with Jira: the Seller Feed track (DCH-16 and its
+spin-offs DCH-49…52) shipped on Aug 12 but never made the shipped log — the "DCH-16 is
+parked" note was three revisions stale — and **DCH-13 closed as a Go**: on-demand photo
+analysis at ~$0.003/listing (tag once, never per sync), with the Stage 1 ticket still to
+be filed (see Open items). The naive per-sync design the FEATURES.md flag feared really
+would have been ~$870/month; the spike's design isn't.
+
 Rev 21, 2026-08-15. **Manual entries grew photos, attribute dropdowns and a DIN**
 (unticketed, extending DCH-12). Two things came out of it that affect the queue below:
 `cargo test` was failing outright on Windows — including in CI, so the Rust gate had been
@@ -7,13 +15,6 @@ red since rev 20 — for a manifest reason unrelated to any test (see `build.rs`
 **DCH-42 got materially larger**, because a collection photo is a file in the app data
 directory rather than a row, so a database-only backup now silently loses data the user
 cannot re-sync from anywhere.
-
-Rev 20, 2026-08-13. **DCH-54 shipped**: one `EbayClient`, one keyring read of the app
-credentials, and one load of the association tables per watchlist sync (and per
-refresh-all pass), with Trading calls sharing the Browse client's connection pool. The
-eBay-sync stretch of the epic (55 → 56 → 54) is complete. Epic **DCH-62** (from the DCH-23
-[findings note](https://thistlegrow.atlassian.net/wiki/spaces/DCH/pages/53018626)) remains
-the front of the queue; DCH-53 (rev 17), DCH-55 (rev 18) and DCH-56 (rev 19) are in.
 
 The ordering principle is unchanged: compounding work — anything that makes later tickets
 cheaper or safer — goes before work that only pays off once.
@@ -34,17 +35,27 @@ traffic (57, 61), frontend + startup (58, 59, 60).
 Track note: the two frontend tickets (58, 59) share no files with the backend track, so if a
 backend PR is waiting on review, 58 can start early without rebasing risk.
 
-## Next up (after the epic)
+## UI & app polish (DCH-63…68, filed 2026-08-16)
+
+The FEATURES.md batch. Ordered small-and-decided before large-and-undecided; none blocks
+the perf epic, and 67/68 are small enough to interleave with it as palate cleansers.
 
 | # | Ticket | What | Why here |
 | --- | --- | --- | --- |
-| 1 | DCH-13 | Photo-tagging feasibility | Spike. Flagged likely-expensive; confirm or kill cheaply. |
-| 2 | DCH-26 | Lionel website integration | Scope still open — needs a use case before an implementation. |
-| 3 | DCH-27 | Revive Facebook Marketplace | Its stated precondition (matching/valuation epics) is met, but the real blocker was never sequencing: FB has no API, and the previous integration was removed deliberately. |
-| — | DCH-42 | Database backup and restore | Filed from DCH-25. Only the manually-entered slice is genuinely at risk — DCR data re-syncs — but the sold-listings archive can't be backfilled at all. **Rev 21 widened this**: collection photos live as files in `<data dir>/images/`, not as rows, so "back up the database" is no longer the whole job. A backup that takes the `.sqlite` and leaves `images/` behind restores rows pointing at files that aren't there. |
+| 1 | DCH-67 | Version number in the title bar | Small and compounding: every bug report from here on can name its build (feeds DCH-24's docs). Decisions are calver-vs-semver and deriving the number at build time rather than hand-editing `tauri.conf.json`. |
+| 2 | DCH-68 | Expand All beside every Collapse All | Small and mechanical: `useMinimized`'s map already supports it via `setManyMinimized`. The one trap is written down in the ticket — expand-all writes explicit `false` entries, or Saved Listings' collapsed-by-default springs back. |
+| 3 | DCH-63 | Edit collection entries, incl. notes | The most-wanted of the batch, but needs a schema decision first: notes are user-authored data with no DCR equivalent, and `my_collection.raw_json` is rebuilt on every sync, so they need their own column plus a protect-on-sync rule (the `driver_id_user_set` pattern). Whatever ships here widens DCH-42's at-risk slice again. |
+| 4 | DCH-66 | Separate driver / within-driver sorts | Design question before code: the reporter's own note asks whether two sort dropdowns is too busy. Answer that (maybe a fixed within-group order suffices), then any new values follow the DCH-35 vocabulary. |
+| 5 | DCH-65 | Standardize the Collection display header | Not yet actionable — the FEATURES.md sub-bullet was empty, so the specific complaint needs capturing before anything is built. Same posture as DCH-26: needs a problem statement, not a guess. |
+| 6 | DCH-64 | Open a view in a new window | Largest and least defined: a second window needs its own workspace state (`workspace.v1` is one shared blob) and a defined interaction with tray-mode close. Worth a short design note before a branch. |
 
-**DCH-16 is parked** (On Hold). The original complaint was forgotten and never written down.
-Rather than invent one, wait and see whether the UI track resolved it.
+## Next up (after those)
+
+| # | Ticket | What | Why here |
+| --- | --- | --- | --- |
+| 1 | DCH-26 | Lionel website integration | Scope still open — needs a use case before an implementation. |
+| 2 | DCH-27 | Revive Facebook Marketplace | Its stated precondition (matching/valuation epics) is met, but the real blocker was never sequencing: FB has no API, and the previous integration was removed deliberately. |
+| — | DCH-42 | Database backup and restore | Filed from DCH-25. Only the manually-entered slice is genuinely at risk — DCR data re-syncs — but the sold-listings archive can't be backfilled at all. **Rev 21 widened this**: collection photos live as files in `<data dir>/images/`, not as rows, so "back up the database" is no longer the whole job. A backup that takes the `.sqlite` and leaves `images/` behind restores rows pointing at files that aren't there. DCH-63's notes will add another slice when they land. |
 
 ## Remote access (DCH-25's output)
 
@@ -104,6 +115,12 @@ read-only projection.
 | DCH-55 | `synchronous=NORMAL` under WAL; hot sync loops write in transactions (per garage page, 100-row batches for prewarm/presearch, one tx for watchlist archival, 200-row batches for the driver backfill); the shared `driver_upsert` collapses INSERT+SELECT to `RETURNING id` behind a per-run memo. Cancel checks sit between batches, so no long uncancellable transaction. |
 | DCH-56 | `listing_history` only records change: an observation identical to the listing's latest row (price, shipping, status — NULLs compare equal) is skipped; first observations and reverts still write. Migration 0031 collapsed existing runs to first + last row each. The table is still write-only — nothing reads it yet — so the sparser shape constrains nothing. |
 | DCH-54 | One `EbayClient` + `EbayUserCreds` + `ListingAssocContext` per watchlist sync (and per refresh-all pass): per-item TLS handshakes, keyring reads, and drivers/vocab/alias/model reloads are gone, the 200 ms limiter finally spans items, and Trading calls take `&reqwest::Client` so they share the Browse pool. Archival's local half (`flag_ended_listings`) was split from its network half so tests never link the keyring. |
+| DCH-16 | Seller Feed brought up to the list-screen conventions (closed 2026-08-12, with DCH-49…52 below covering the rest of SELLER_FEED_REVIEW.md): DCH-35 filter contract with clear-refetches-the-Browse-query, "Manage Saved Sellers" moved into a `Modal`, pagination reachable from the bottom of the page. |
+| DCH-49 | Fixed medium/large `ImageSizeToggle` sizes breaking Seller Feed cards; layout now matches Saved Listings at every size. |
+| DCH-50 | Card/list view toggle on the Seller Feed, persisted, with list rows matching Saved Listings' density. |
+| DCH-51 | "Not interested" dismissal on the Seller Feed. The feed is a live Browse query, so dismissals persist locally and are applied client-side after each fetch; reversible, so no confirm. |
+| DCH-52 | In-place image carousel + expandable item specifics/description on the Seller Feed, fetched via `getItem` on expansion only (cached per session; local `raw_json` preferred) to protect the Browse quota. |
+| DCH-13 | Spike verdict: **Go** — on-demand "Analyze photos" first (Haiku-class vision, ~3 downscaled images, ~$0.003/listing, tag once per listing with provenance so nothing is ever re-billed), optional capped auto-tag as a flagged stage 2; **no-go** on training a custom model (archive too small, image URLs rot). Full cost math and a Stage 1 AC sketch are on the ticket. |
 
 ## Things worth not rediscovering
 
@@ -191,6 +208,10 @@ latter resolves an unpinned version.
 
 ## Open items that aren't tickets
 
+- **DCH-13's Stage 1 ticket isn't filed.** The spike closed with a Go and a ready-made AC
+  sketch (on-demand "Analyze photos" writing to the existing attribute columns, keyring
+  credential, `sync/photo_tags.rs`), but no implementation ticket exists yet. File it when
+  the feature's turn comes rather than losing the verdict.
 - ~~Cloudflare alert on `deletion_insert_failed`~~ — became **DCH-30**, then stopped being a
   Cloudflare thing at all. Verified end to end on 2026-08-07; evidence is on the ticket. One
   thing it could not prove: the **fingerprint is untested**, because that was the first
