@@ -90,7 +90,8 @@ pub async fn refresh_access_token(
     scopes: &[&str],
 ) -> AppResult<()> {
     let refresh_token =
-        settings::secret_get(&settings::ebay_user_refresh_token_entry(env.as_str()))?
+        settings::secret_get(&settings::ebay_user_refresh_token_entry(env.as_str()))
+            .await?
             .ok_or_else(|| AppError::NotConfigured("eBay account not connected".into()))?;
 
     let body = format!(
@@ -120,7 +121,7 @@ pub async fn refresh_access_token(
     .await?;
     if let Some(rt) = token.refresh_token {
         // eBay may issue a new refresh token; update if so.
-        settings::secret_set(&settings::ebay_user_refresh_token_entry(env.as_str()), &rt)?;
+        settings::secret_set(&settings::ebay_user_refresh_token_entry(env.as_str()), &rt).await?;
     }
     Ok(())
 }
@@ -173,9 +174,11 @@ impl EbayUserCreds {
             .await?
             .unwrap_or_else(|| "sandbox".to_string());
         let env = EbayEnvironment::from_str(&env_str);
-        let app_id = settings::secret_get(settings::ENTRY_EBAY_APP_ID)?
+        let app_id = settings::secret_get(settings::ENTRY_EBAY_APP_ID)
+            .await?
             .ok_or_else(|| AppError::NotConfigured("eBay App ID not set".into()))?;
-        let cert_id = settings::secret_get(settings::ENTRY_EBAY_CERT_ID)?
+        let cert_id = settings::secret_get(settings::ENTRY_EBAY_CERT_ID)
+            .await?
             .ok_or_else(|| AppError::NotConfigured("eBay Cert ID not set".into()))?;
         Ok(Self {
             env,
@@ -230,7 +233,7 @@ pub fn is_iaf_token_expired_error(msg: &str) -> bool {
 }
 
 pub async fn disconnect(pool: &SqlitePool, env: EbayEnvironment) -> AppResult<()> {
-    settings::secret_delete(&settings::ebay_user_refresh_token_entry(env.as_str()))?;
+    settings::secret_delete(&settings::ebay_user_refresh_token_entry(env.as_str())).await?;
     settings::delete(pool, &settings::ebay_user_access_token_key(env.as_str())).await?;
     settings::delete(
         pool,
@@ -242,8 +245,9 @@ pub async fn disconnect(pool: &SqlitePool, env: EbayEnvironment) -> AppResult<()
 }
 
 pub async fn status(pool: &SqlitePool, env: EbayEnvironment) -> AppResult<OauthStatus> {
-    let has_refresh =
-        settings::secret_get(&settings::ebay_user_refresh_token_entry(env.as_str()))?.is_some();
+    let has_refresh = settings::secret_get(&settings::ebay_user_refresh_token_entry(env.as_str()))
+        .await?
+        .is_some();
     let has_ru_name = settings::get(pool, &settings::ebay_ru_name_key(env.as_str()))
         .await?
         .is_some();
@@ -334,7 +338,7 @@ async fn persist_tokens(
         .await?;
     }
     if let Some(rt) = &token.refresh_token {
-        settings::secret_set(&settings::ebay_user_refresh_token_entry(env.as_str()), rt)?;
+        settings::secret_set(&settings::ebay_user_refresh_token_entry(env.as_str()), rt).await?;
     } else {
         return Err(AppError::Parse(
             "eBay didn't return a refresh_token — nothing to persist for future use".into(),

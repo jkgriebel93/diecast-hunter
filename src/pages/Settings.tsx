@@ -317,47 +317,67 @@ export function Settings() {
 
   async function refresh() {
     try {
-      const c = await api.getCredentials();
-      setCreds(c);
-      setUsername(c.diecastregistry_username ?? "");
-      const ts = await api.getSetting("dcr.last_collection_sync");
-      setLastSync(ts);
-      try {
-        const autoSync: AutoSyncSettings = await api.getAutoSyncSettings();
-        setAutoSyncEnabled(autoSync.enabled);
-        setAutoSyncInterval(String(autoSync.interval_hours));
-        setAutoSyncLastRun(autoSync.last_run);
-        setAutoSyncScheduled(autoSync.scheduled);
-        setAutoSyncPrewarmMax(String(autoSync.prewarm_max_entries));
-        setAutoSyncEnrichMax(String(autoSync.enrich_max_entries));
-      } catch {
+      // Everything in one round (DCH-60): these ten reads used to run as
+      // sequential awaits, so opening Settings paid ten back-to-back IPC
+      // round trips (several of them keyring or schtasks calls). The
+      // optional ones keep their own catches, as `null` results.
+      const [
+        c,
+        ts,
+        e,
+        ru,
+        status,
+        autoSync,
+        filterDiecastsValue,
+        buyerZipValue,
+        driversPair,
+        prewarmed,
+        searchModeValue,
+      ] = await Promise.all([
+        api.getCredentials(),
+        api.getSetting("dcr.last_collection_sync"),
+        api.getEbayCredentials(),
+        api.getEbayRuName(),
+        api.getEbayOauthStatus(),
         // not fatal — leave defaults
-      }
-      const e = await api.getEbayCredentials();
-      setEbayCreds(e);
-      setEbayEnv(e.environment === "production" ? "production" : "sandbox");
-      const ru = await api.getEbayRuName();
-      setEbayRuNameSaved(ru);
-      setEbayRuName(ru ?? "");
-      const status = await api.getEbayOauthStatus();
-      setOauthStatus(status);
-      try {
-        setFilterDiecasts(await api.getEbayFilterNonDiecasts());
-      } catch {
+        api.getAutoSyncSettings().catch(() => null),
         // not fatal — leave default
-      }
-      try {
-        setBuyerZip((await api.getEbayBuyerZip()) ?? "");
-      } catch {
+        api.getEbayFilterNonDiecasts().catch(() => null),
         // not fatal — field starts empty
-      }
-      // Drivers list is for the pre-warm picker; harmless if empty (the
-      // form-options cache hasn't been populated yet).
-      try {
-        const [ds, listingCounts] = await Promise.all([
+        api.getEbayBuyerZip().catch(() => null),
+        // Drivers list is for the pre-warm picker; harmless if empty (the
+        // form-options cache hasn't been populated yet).
+        Promise.all([
           api.listRegistryFormOptions("driver"),
           driverListingCounts(),
-        ]);
+        ]).catch(() => null),
+        // not fatal — list shows empty
+        api.listPrewarmedDrivers().catch(() => null),
+        // not fatal — leave default (remote)
+        api.getRegistrySearchMode().catch(() => null),
+      ]);
+
+      setCreds(c);
+      setUsername(c.diecastregistry_username ?? "");
+      setLastSync(ts);
+      if (autoSync !== null) {
+        const s: AutoSyncSettings = autoSync;
+        setAutoSyncEnabled(s.enabled);
+        setAutoSyncInterval(String(s.interval_hours));
+        setAutoSyncLastRun(s.last_run);
+        setAutoSyncScheduled(s.scheduled);
+        setAutoSyncPrewarmMax(String(s.prewarm_max_entries));
+        setAutoSyncEnrichMax(String(s.enrich_max_entries));
+      }
+      setEbayCreds(e);
+      setEbayEnv(e.environment === "production" ? "production" : "sandbox");
+      setEbayRuNameSaved(ru);
+      setEbayRuName(ru ?? "");
+      setOauthStatus(status);
+      if (filterDiecastsValue !== null) setFilterDiecasts(filterDiecastsValue);
+      if (buyerZipValue !== null) setBuyerZip(buyerZipValue ?? "");
+      if (driversPair !== null) {
+        const [ds, listingCounts] = driversPair;
         setDrivers(
           sortDriverOptions(
             ds,
@@ -365,19 +385,9 @@ export function Settings() {
             (x) => listingCounts.get(x.normalized) ?? 0,
           ),
         );
-      } catch {
-        // not fatal — picker shows empty
       }
-      try {
-        setPrewarmedDrivers(await api.listPrewarmedDrivers());
-      } catch {
-        // not fatal — list shows empty
-      }
-      try {
-        setSearchMode(await api.getRegistrySearchMode());
-      } catch {
-        // not fatal — leave default (remote)
-      }
+      if (prewarmed !== null) setPrewarmedDrivers(prewarmed);
+      if (searchModeValue !== null) setSearchMode(searchModeValue);
     } catch (e) {
       setError(String(e));
     }

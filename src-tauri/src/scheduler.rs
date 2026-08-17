@@ -36,10 +36,26 @@ fn schtasks() -> Command {
 }
 
 /// Reconcile the scheduled task with the desired state. Enabling (re)creates
-/// it with the given interval; disabling removes it. Idempotent.
-pub fn apply(enabled: bool, interval_hours: u32) -> AppResult<()> {
+/// it with the given interval; disabling removes it. Idempotent. Runs on
+/// the blocking pool — `schtasks.exe` is a child-process spawn plus wait,
+/// which must not park an async runtime thread (DCH-60).
+pub async fn apply(enabled: bool, interval_hours: u32) -> AppResult<()> {
+    tokio::task::spawn_blocking(move || apply_blocking(enabled, interval_hours))
+        .await
+        .map_err(|e| AppError::Config(format!("scheduler task failed: {e}")))?
+}
+
+/// Whether the task is currently registered, off the async threads for the
+/// same reason as [`apply`].
+pub async fn exists() -> bool {
+    tokio::task::spawn_blocking(exists_blocking)
+        .await
+        .unwrap_or(false)
+}
+
+fn apply_blocking(enabled: bool, interval_hours: u32) -> AppResult<()> {
     if !enabled {
-        return remove();
+        return remove_blocking();
     }
 
     let exe = std::env::current_exe()?;
@@ -74,10 +90,10 @@ pub fn apply(enabled: bool, interval_hours: u32) -> AppResult<()> {
 }
 
 /// Remove the task if present. A missing task is a no-op, not an error.
-pub fn remove() -> AppResult<()> {
+fn remove_blocking() -> AppResult<()> {
     // Check first rather than parsing locale-dependent "does not exist" text
     // out of a failed /Delete.
-    if !exists() {
+    if !exists_blocking() {
         return Ok(());
     }
     let output = schtasks()
@@ -92,8 +108,7 @@ pub fn remove() -> AppResult<()> {
     Ok(())
 }
 
-/// Whether the task is currently registered.
-pub fn exists() -> bool {
+fn exists_blocking() -> bool {
     schtasks()
         .args(["/Query", "/TN", TASK_NAME])
         .output()

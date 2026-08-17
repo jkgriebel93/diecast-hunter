@@ -231,7 +231,17 @@ export const api = {
   refreshAllEbayListings: () =>
     invoke<RefreshSummary>("refresh_all_ebay_listings"),
   syncEbayWatchlist: () => invoke<WatchlistSyncSummary>("sync_ebay_watchlist"),
+  /** One-shot startup signal: the frontend's first mount fetches are in
+   *  flight, so the backend may start its deferred backfill (DCH-60). */
+  frontendReady: () => invoke<void>("frontend_ready"),
   listListings: () => invoke<ListingRow[]>("list_listings"),
+  /** Narrow (external_id → listing_id) pairs for watched eBay listings —
+   *  what Browse and the Seller Feed badge results with, without the full
+   *  listings join + comp index that `list_listings` runs (DCH-60). */
+  listWatchedExternalIds: () =>
+    invoke<{ external_id: string; listing_id: number }[]>(
+      "list_watched_external_ids",
+    ),
   /** One row in exactly the `list_listings` shape, or null if it no longer
    *  exists. Single-row mutations re-fetch through this and splice (DCH-58). */
   getListingRow: (listingId: number) =>

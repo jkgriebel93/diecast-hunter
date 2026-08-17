@@ -20,9 +20,22 @@
 //! consecutive-token phrase matching, most-specific (longest) phrase first,
 //! so a "Color Chrome" title never lands on a bare "Chrome" option.
 
+use chrono::Utc;
 use sqlx::SqlitePool;
 
 use crate::error::AppResult;
+use crate::settings;
+
+/// The only raw_json fields detection reads, rebuilt as a small JSON object
+/// in SQL (DCH-60) so the ~38 KB/row source blob never leaves SQLite. The
+/// `json_valid` guard matters: `json_extract` on a malformed blob is a
+/// query-level error, not a NULL.
+const SLIM_RAW_JSON: &str = "CASE
+    WHEN raw_json IS NOT NULL AND json_valid(raw_json) THEN json_object(
+        'localizedAspects', json_extract(raw_json, '$.localizedAspects'),
+        'shortDescription', json_extract(raw_json, '$.shortDescription'),
+        'description', json_extract(raw_json, '$.description'))
+    ELSE NULL END";
 
 #[derive(Debug, Default, Clone)]
 pub struct AttrAssocSummary {
@@ -77,47 +90,78 @@ pub(crate) async fn associate_listing_attributes_with(
     listing_id: i64,
     vocab: &Vocab,
 ) -> AppResult<()> {
-    let row: Option<(String, Option<String>, i64)> =
-        sqlx::query_as("SELECT title, raw_json, attributes_user_set FROM listings WHERE id = ?")
-            .bind(listing_id)
-            .fetch_optional(pool)
-            .await?;
-    let Some((title, raw_json, user_set)) = row else {
+    let row: Option<(String, Option<String>, i64)> = sqlx::query_as(&format!(
+        "SELECT title, {SLIM_RAW_JSON}, attributes_user_set FROM listings WHERE id = ?"
+    ))
+    .bind(listing_id)
+    .fetch_optional(pool)
+    .await?;
+    let Some((title, slim_json, user_set)) = row else {
         return Ok(());
     };
     if user_set != 0 {
         return Ok(());
     }
-    let d = detect(&title, raw_json.as_deref(), vocab);
+    let d = detect(&title, slim_json.as_deref(), vocab);
     if d != Detected::default() {
         apply(pool, listing_id, &d).await?;
     }
+    // High-water mark (DCH-60): the startup backfill skips rows already
+    // scanned against the current vocabulary, so stamping here keeps
+    // per-add/refresh rows out of the next launch's scan.
+    sqlx::query("UPDATE listings SET attrs_scanned_at = ? WHERE id = ?")
+        .bind(Utc::now().timestamp())
+        .bind(listing_id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
-/// Re-scan every non-pinned listing, loading the vocabulary once. Run as a
-/// detached startup backfill (mirroring the driver-assoc backfill) so rows
-/// saved before this feature — or before the form-options cache was
-/// populated — get attributes without a manual pass.
+/// Startup backfill: scan non-pinned listings the current vocabulary hasn't
+/// seen yet, loading the vocabulary once. `attrs_scanned_at` is the
+/// high-water mark (DCH-60): a row is re-read only when it has never been
+/// scanned, or when the vocabulary (the registry form-options cache) has
+/// been refreshed since — a newer vocabulary can detect phrases the old one
+/// missed, so it earns one full re-scan; a quiet launch reads nothing.
 pub async fn associate_all_listing_attributes(pool: &SqlitePool) -> AppResult<AttrAssocSummary> {
+    let vocab_refreshed_at: i64 = settings::get(pool, settings::KEY_FORM_OPTIONS_REFRESHED)
+        .await?
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let scan_predicate = "attributes_user_set = 0
+           AND (attrs_scanned_at IS NULL OR attrs_scanned_at < ?)";
+
     let vocab = load_vocab(pool).await?;
-    let rows: Vec<(i64, String, Option<String>)> = sqlx::query_as(
-        "SELECT id, title, raw_json FROM listings WHERE attributes_user_set = 0 ORDER BY id",
-    )
+    let rows: Vec<(i64, String, Option<String>)> = sqlx::query_as(&format!(
+        "SELECT id, title, {SLIM_RAW_JSON} FROM listings WHERE {scan_predicate} ORDER BY id"
+    ))
+    .bind(vocab_refreshed_at)
     .fetch_all(pool)
     .await?;
     let mut summary = AttrAssocSummary {
         considered: rows.len() as u32,
         ..Default::default()
     };
-    for (id, title, raw_json) in rows {
-        let d = detect(&title, raw_json.as_deref(), &vocab);
+    let scanned_at = Utc::now().timestamp();
+    for (id, title, slim_json) in rows {
+        let d = detect(&title, slim_json.as_deref(), &vocab);
         if d == Detected::default() {
             continue;
         }
         apply(pool, id, &d).await?;
         summary.detected += 1;
     }
+    // Stamp everything this run considered — including no-detection rows,
+    // which are exactly the ones not worth re-reading next launch. Same
+    // predicate as the scan, so a row pinned mid-run is left alone by
+    // `apply`'s own guard and harmlessly stamped here.
+    sqlx::query(&format!(
+        "UPDATE listings SET attrs_scanned_at = ? WHERE {scan_predicate}"
+    ))
+    .bind(scanned_at)
+    .bind(vocab_refreshed_at)
+    .execute(pool)
+    .await?;
     Ok(summary)
 }
 
@@ -445,6 +489,151 @@ fn tokenize(s: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+    use std::str::FromStr;
+
+    async fn migrated_pool() -> SqlitePool {
+        let opts = SqliteConnectOptions::from_str("sqlite::memory:")
+            .unwrap()
+            .foreign_keys(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(opts)
+            .await
+            .expect("open in-memory db");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+        pool
+    }
+
+    async fn insert_listing(pool: &SqlitePool, external_id: &str, title: &str) -> i64 {
+        sqlx::query(
+            "INSERT INTO listings (seller_id, external_id, url, title, saved_at, last_seen_at)
+             VALUES (1, ?, 'https://example.com', ?, 0, 0)",
+        )
+        .bind(external_id)
+        .bind(title)
+        .execute(pool)
+        .await
+        .unwrap()
+        .last_insert_rowid()
+    }
+
+    async fn scanned_at(pool: &SqlitePool, id: i64) -> Option<i64> {
+        sqlx::query_as::<_, (Option<i64>,)>("SELECT attrs_scanned_at FROM listings WHERE id = ?")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+            .0
+    }
+
+    /// The DCH-60 high-water mark: a launch after a clean scan reads
+    /// nothing, and a vocabulary refresh earns exactly one full re-scan.
+    #[tokio::test]
+    async fn startup_scan_skips_stamped_rows_until_the_vocab_refreshes() {
+        let pool = migrated_pool().await;
+        let a = insert_listing(&pool, "v1|1|0", "2002 Jeff Gordon 1:24 CWC").await;
+        let b = insert_listing(&pool, "v1|2|0", "plain title").await;
+
+        // First run considers both and stamps both (detection or not).
+        let s1 = associate_all_listing_attributes(&pool).await.unwrap();
+        assert_eq!(s1.considered, 2);
+        assert!(scanned_at(&pool, a).await.is_some());
+        assert!(scanned_at(&pool, b).await.is_some());
+
+        // Second run: nothing to read.
+        let s2 = associate_all_listing_attributes(&pool).await.unwrap();
+        assert_eq!(s2.considered, 0);
+
+        // A vocabulary refresh newer than the stamps re-opens the scan once.
+        let future = chrono::Utc::now().timestamp() + 60;
+        settings::set(
+            &pool,
+            settings::KEY_FORM_OPTIONS_REFRESHED,
+            &future.to_string(),
+        )
+        .await
+        .unwrap();
+        let s3 = associate_all_listing_attributes(&pool).await.unwrap();
+        assert_eq!(s3.considered, 2);
+    }
+
+    /// New rows (never stamped) are picked up even when the vocabulary
+    /// hasn't changed, and user-pinned rows stay out entirely.
+    #[tokio::test]
+    async fn startup_scan_sees_new_rows_and_skips_pinned_ones() {
+        let pool = migrated_pool().await;
+        let first = insert_listing(&pool, "v1|1|0", "some title").await;
+        associate_all_listing_attributes(&pool).await.unwrap();
+        assert!(scanned_at(&pool, first).await.is_some());
+
+        let fresh = insert_listing(&pool, "v1|2|0", "another title").await;
+        let pinned = insert_listing(&pool, "v1|3|0", "pinned title").await;
+        sqlx::query("UPDATE listings SET attributes_user_set = 1 WHERE id = ?")
+            .bind(pinned)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let s = associate_all_listing_attributes(&pool).await.unwrap();
+        assert_eq!(s.considered, 1);
+        assert!(scanned_at(&pool, fresh).await.is_some());
+        assert_eq!(scanned_at(&pool, pinned).await, None);
+    }
+
+    /// The slimmed SQL-side JSON must feed detection the same aspects and
+    /// description text the full blob did — and survive malformed raw_json.
+    #[tokio::test]
+    async fn slim_raw_json_still_feeds_aspect_and_description_detection() {
+        let pool = migrated_pool().await;
+        // Vocabulary comes from registry_form_options.
+        for (field, display) in [("finish", "Color Chrome"), ("brand", "Elite")] {
+            sqlx::query(
+                "INSERT INTO registry_form_options (field, value, display, normalized, fetched_at)
+                 VALUES (?, ?, ?, ?, 0)",
+            )
+            .bind(field)
+            .bind(display)
+            .bind(display)
+            .bind(display.to_lowercase())
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        let id = insert_listing(&pool, "v1|1|0", "1:24 diecast bank").await;
+        sqlx::query("UPDATE listings SET raw_json = ? WHERE id = ?")
+            .bind(
+                serde_json::json!({
+                    "bulkyField": "x".repeat(10_000),
+                    "localizedAspects": [{"name": "Finish", "value": "Color Chrome"}],
+                    "description": "Rare Elite Series issue, Color Chrome variant.",
+                })
+                .to_string(),
+            )
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let bad = insert_listing(&pool, "v1|2|0", "another 1:24").await;
+        sqlx::query("UPDATE listings SET raw_json = 'not json' WHERE id = ?")
+            .bind(bad)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let s = associate_all_listing_attributes(&pool).await.unwrap();
+        assert_eq!(s.considered, 2);
+        let (finish,): (Option<String>,) =
+            sqlx::query_as("SELECT finish FROM listings WHERE id = ?")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(finish.as_deref(), Some("Color Chrome"));
+    }
 
     /// Built the same way `load_vocab` builds from the DB, with a subset of
     /// the real DCR dropdown values.

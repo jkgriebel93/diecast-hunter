@@ -142,6 +142,7 @@ mod tests {
                 .await
                 .unwrap();
         let password = crate::settings::secret_get(crate::settings::ENTRY_DCR_PASSWORD)
+            .await
             .unwrap()
             .expect("DCR password in keyring");
 

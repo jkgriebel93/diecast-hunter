@@ -81,7 +81,12 @@ pub async fn refresh_form_options(
     }
     summary.fields_seen = seen_fields.len() as u32;
 
-    crate::settings::set(pool, "dcr.last_form_options_refresh", &now.to_string()).await?;
+    crate::settings::set(
+        pool,
+        crate::settings::KEY_FORM_OPTIONS_REFRESHED,
+        &now.to_string(),
+    )
+    .await?;
     Ok(summary)
 }
 

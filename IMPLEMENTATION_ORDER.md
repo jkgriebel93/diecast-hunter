@@ -1,5 +1,18 @@
 # Implementation order for open DCH tickets
 
+Rev 26, 2026-08-17. **DCH-60 shipped**, closing the epic's substantive work. The startup
+backfill now waits for a `frontend_ready` signal (15s timeout fallback) so it queues
+behind the first paint's queries instead of racing them; the attribute scan gained an
+`attrs_scanned_at` high-water mark (migration 0033) — a quiet launch reads zero rows, and
+a vocabulary (form-options) refresh re-opens one full scan — and reads a SQL-side slim
+JSON (`localizedAspects` + descriptions via `json_extract`) instead of the ~38 KB/row
+blob. Keyring and `schtasks` now run on the blocking pool (`settings::secret_*` and
+`scheduler::apply/exists` went async; ~35 call sites). Settings' ten sequential refresh
+awaits became one `Promise.all`; Browse and the Seller Feed badge watched results via the
+narrow `list_watched_external_ids` instead of the full join + comp index. The driver
+pass's redundant per-row SELECT named in the ticket was already gone — DCH-55's batch
+path carries `driver_id`. Remaining: DCH-61, the optional politeness call.
+
 Rev 25, 2026-08-17. **DCH-59 shipped**: the Registry results pipeline's pure half moved
 to `lib/registryResults.ts` (filter + sort, unit-tested — including a pinned pre-existing
 quirk: descending sorts have always put null values first, and changing that is a design
@@ -54,15 +67,11 @@ cannot re-sync from anywhere.
 The ordering principle is unchanged: compounding work — anything that makes later tickets
 cheaper or safer — goes before work that only pays off once.
 
-## Performance epic (DCH-62) — the remaining two
-
-No Jira links between these; the dependencies below are code-level. Two tracks: DCR
-traffic (61), frontend + startup (60).
+## Performance epic (DCH-62) — one optional ticket left
 
 | # | Ticket | What | Why here |
 | --- | --- | --- | --- |
-| 1 | DCH-60 | Startup: defer + scope the backfill | Consumes both sides: 55's batched backfill writes and 58's shared `list_listings` result are two of its acceptance criteria's building blocks. What remains is the scoping (37 MB `raw_json` scan → only-unattributed rows) and `spawn_blocking` hygiene. |
-| 2 | DCH-61 | Loosen the 800 ms DCR rate floor | Deliberately last: it's a politeness-policy decision, not a bug fix, and it reshapes the same `dcr/client.rs` limiter 57 worked around. With 53's cap and 57's session reuse in, this is the remaining multiplier on walk time. Low priority — skippable if DCR politeness feels wrong. |
+| 1 | DCH-61 | Loosen the 800 ms DCR rate floor | Deliberately last: it's a politeness-policy decision, not a bug fix, and it reshapes the same `dcr/client.rs` limiter 57 worked around. With 53's cap and 57's session reuse in, this is the remaining multiplier on walk time. Low priority — skippable if DCR politeness feels wrong. |
 
 ## UI & app polish (DCH-63…68, filed 2026-08-16)
 
@@ -144,6 +153,7 @@ read-only projection.
 | DCH-55 | `synchronous=NORMAL` under WAL; hot sync loops write in transactions (per garage page, 100-row batches for prewarm/presearch, one tx for watchlist archival, 200-row batches for the driver backfill); the shared `driver_upsert` collapses INSERT+SELECT to `RETURNING id` behind a per-run memo. Cancel checks sit between batches, so no long uncancellable transaction. |
 | DCH-56 | `listing_history` only records change: an observation identical to the listing's latest row (price, shipping, status — NULLs compare equal) is skipped; first observations and reverts still write. Migration 0031 collapsed existing runs to first + last row each. The table is still write-only — nothing reads it yet — so the sparser shape constrains nothing. |
 | DCH-54 | One `EbayClient` + `EbayUserCreds` + `ListingAssocContext` per watchlist sync (and per refresh-all pass): per-item TLS handshakes, keyring reads, and drivers/vocab/alias/model reloads are gone, the 200 ms limiter finally spans items, and Trading calls take `&reqwest::Client` so they share the Browse pool. Archival's local half (`flag_ended_listings`) was split from its network half so tests never link the keyring. |
+| DCH-60 | Startup perf: backfill deferred behind `frontend_ready` (15s fallback); `attrs_scanned_at` high-water mark (migration 0033) + SQL-side slim JSON so a quiet launch reads nothing and the blob never leaves SQLite; keyring + schtasks on the blocking pool (async `settings::secret_*`, `scheduler::*`); Settings refresh via one `Promise.all`; Browse/Seller Feed on the narrow `list_watched_external_ids`. |
 | DCH-59 | Registry results perf: pure filter/sort in `lib/registryResults.ts` (tested, incl. the pinned nulls-first-on-descending quirk); one deferred value over all five narrowing inputs; 200-at-a-time bounded render with "Show more"; memoized `RegistryResultCard`; `MultiSelect` capped at 100 rendered options with a count note; match dialog uses display→GUID Maps + memoized datalists. |
 | DCH-58 | Listings page perf: one-pass faceting + precomputed search haystacks + `useDeferredValue` (`lib/listingFilters.ts`, equivalence-tested); memoized `ListingCard` behind stable id-taking handlers (`lib/useEvent.ts`); single-row mutations re-fetch one row via `get_listing_row` and splice (full refetch only for sync/refresh-all/bulk); collapsed grouped sections mount nothing; `detail_url` via `json_extract` so `re.raw_json` never leaves SQLite. |
 | DCH-57 | All DCR flows on the shared session cache via `DcrSession::with_client` (prewarm, presearch, form-options, collection sync/enrich, auto-match's DCR fallback); one login per auto-sync run and per auto-match-all pass. Login redirects surface as typed `SessionExpired` — retried once on a fresh login — instead of parsing as empty pages, which also stops zero-result searches double-walking and keeps a dead cookie from ever reading as an emptied garage (the prune guard). Anti-forgery token cached per session, killing the extra `GET /Production` per search. |

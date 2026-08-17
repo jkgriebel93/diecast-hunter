@@ -80,9 +80,11 @@ impl EbayClient {
             .await?
             .unwrap_or_else(|| "sandbox".to_string());
         let env = EbayEnvironment::from_str(&env_str);
-        let app_id = settings::secret_get(settings::ENTRY_EBAY_APP_ID)?
+        let app_id = settings::secret_get(settings::ENTRY_EBAY_APP_ID)
+            .await?
             .ok_or_else(|| AppError::NotConfigured("eBay App ID not set in Settings".into()))?;
-        let cert_id = settings::secret_get(settings::ENTRY_EBAY_CERT_ID)?
+        let cert_id = settings::secret_get(settings::ENTRY_EBAY_CERT_ID)
+            .await?
             .ok_or_else(|| AppError::NotConfigured("eBay Cert ID not set in Settings".into()))?;
 
         let mut headers = HeaderMap::new();

@@ -421,6 +421,8 @@ const REGISTRY_FORM_OPTIONS: Record<string, FormOptionRow[]> = {
 
 const RESULTS: Record<string, unknown> = {
   list_listings: LISTINGS,
+  list_watched_external_ids: [],
+  frontend_ready: null,
   list_registry_presearches: [],
   list_wishlisted_guids: [],
   search_dcr_production: REGISTRY_RESULTS,

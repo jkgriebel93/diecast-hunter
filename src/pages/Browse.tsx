@@ -144,11 +144,11 @@ export function Browse() {
 
   async function loadWatched() {
     try {
-      const rows = await api.listListings();
+      // Narrow command (DCH-60): only the id pairs — the full listings
+      // join + comp index stays with the Saved Listings page.
+      const rows = await api.listWatchedExternalIds();
       const m = new Map<string, number>();
-      for (const r of rows) {
-        if (r.seller_code === "ebay") m.set(r.external_id, r.listing_id);
-      }
+      for (const r of rows) m.set(r.external_id, r.listing_id);
       setWatchedByItemId(m);
     } catch (e) {
       // Non-fatal — Watch buttons just won't reflect existing watchlist
