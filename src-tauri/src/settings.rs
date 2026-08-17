@@ -24,6 +24,10 @@ pub const KEY_EBAY_BUYER_ZIP: &str = "ebay.buyer_zip";
 ///   filter); otherwise fall back to the live search.
 /// - "local": answer from pre-warmed local rows only; never hit the network.
 pub const KEY_REGISTRY_SEARCH_MODE: &str = "registry.search_mode";
+/// When the registry form-options cache (the attribute-detection
+/// vocabulary) was last refreshed. The attribute backfill compares its
+/// per-row `attrs_scanned_at` stamp against this (DCH-60).
+pub const KEY_FORM_OPTIONS_REFRESHED: &str = "dcr.last_form_options_refresh";
 
 /// Learned auto-match scoring model (JSON `LearnedModel`), written by
 /// `matcher_training::retrain`. Absent → hand-tuned default weights.
@@ -151,13 +155,18 @@ pub async fn delete(pool: &SqlitePool, key: &str) -> AppResult<()> {
     Ok(())
 }
 
-pub fn secret_set(entry_name: &str, value: &str) -> AppResult<()> {
+// The keyring talks to the OS credential service synchronously — a slow or
+// prompting service stalls whatever thread makes the call. Async contexts
+// therefore go through these wrappers, which move the work onto the
+// blocking pool (DCH-60) instead of parking an async runtime thread.
+
+fn secret_set_blocking(entry_name: &str, value: &str) -> AppResult<()> {
     let entry = keyring::Entry::new(KEYRING_SERVICE, entry_name)?;
     entry.set_password(value)?;
     Ok(())
 }
 
-pub fn secret_get(entry_name: &str) -> AppResult<Option<String>> {
+fn secret_get_blocking(entry_name: &str) -> AppResult<Option<String>> {
     let entry = keyring::Entry::new(KEYRING_SERVICE, entry_name)?;
     match entry.get_password() {
         Ok(v) => Ok(Some(v)),
@@ -166,11 +175,37 @@ pub fn secret_get(entry_name: &str) -> AppResult<Option<String>> {
     }
 }
 
-pub fn secret_delete(entry_name: &str) -> AppResult<()> {
+fn secret_delete_blocking(entry_name: &str) -> AppResult<()> {
     let entry = keyring::Entry::new(KEYRING_SERVICE, entry_name)?;
     match entry.delete_credential() {
         Ok(()) => Ok(()),
         Err(keyring::Error::NoEntry) => Ok(()),
         Err(e) => Err(e.into()),
     }
+}
+
+fn join_err(e: tokio::task::JoinError) -> crate::error::AppError {
+    crate::error::AppError::Config(format!("keyring task failed: {e}"))
+}
+
+pub async fn secret_set(entry_name: &str, value: &str) -> AppResult<()> {
+    let name = entry_name.to_string();
+    let value = value.to_string();
+    tokio::task::spawn_blocking(move || secret_set_blocking(&name, &value))
+        .await
+        .map_err(join_err)?
+}
+
+pub async fn secret_get(entry_name: &str) -> AppResult<Option<String>> {
+    let name = entry_name.to_string();
+    tokio::task::spawn_blocking(move || secret_get_blocking(&name))
+        .await
+        .map_err(join_err)?
+}
+
+pub async fn secret_delete(entry_name: &str) -> AppResult<()> {
+    let name = entry_name.to_string();
+    tokio::task::spawn_blocking(move || secret_delete_blocking(&name))
+        .await
+        .map_err(join_err)?
 }

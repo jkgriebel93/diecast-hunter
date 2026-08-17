@@ -90,8 +90,12 @@ pub async fn app_status(state: State<'_, AppState>) -> AppResult<AppStatus> {
 #[tauri::command]
 pub async fn get_credentials(state: State<'_, AppState>) -> AppResult<CredentialState> {
     let username = settings::get(&state.db.pool, settings::KEY_DCR_USERNAME).await?;
-    let has_password = settings::secret_get(settings::ENTRY_DCR_PASSWORD)?.is_some();
-    let ebay_connected = settings::secret_get(settings::ENTRY_EBAY_OAUTH)?.is_some();
+    let has_password = settings::secret_get(settings::ENTRY_DCR_PASSWORD)
+        .await?
+        .is_some();
+    let ebay_connected = settings::secret_get(settings::ENTRY_EBAY_OAUTH)
+        .await?
+        .is_some();
     Ok(CredentialState {
         diecastregistry_username: username,
         diecastregistry_has_password: has_password,
@@ -106,7 +110,7 @@ pub async fn save_diecastregistry_credentials(
     password: String,
 ) -> AppResult<()> {
     settings::set(&state.db.pool, settings::KEY_DCR_USERNAME, &username).await?;
-    settings::secret_set(settings::ENTRY_DCR_PASSWORD, &password)?;
+    settings::secret_set(settings::ENTRY_DCR_PASSWORD, &password).await?;
     state.dcr_session.invalidate().await;
     Ok(())
 }
@@ -114,7 +118,7 @@ pub async fn save_diecastregistry_credentials(
 #[tauri::command]
 pub async fn clear_diecastregistry_credentials(state: State<'_, AppState>) -> AppResult<()> {
     settings::delete(&state.db.pool, settings::KEY_DCR_USERNAME).await?;
-    settings::secret_delete(settings::ENTRY_DCR_PASSWORD)?;
+    settings::secret_delete(settings::ENTRY_DCR_PASSWORD).await?;
     state.dcr_session.invalidate().await;
     Ok(())
 }
@@ -174,7 +178,7 @@ pub async fn get_auto_sync_settings(state: State<'_, AppState>) -> AppResult<Aut
         enabled,
         interval_hours,
         last_run,
-        scheduled: crate::scheduler::exists(),
+        scheduled: crate::scheduler::exists().await,
         prewarm_max_entries,
         enrich_max_entries,
     })
@@ -197,7 +201,7 @@ pub async fn set_auto_sync_settings(
     // Register/update (or remove) the OS scheduled task first. If that fails
     // — e.g. group policy blocks Task Scheduler — surface the error and leave
     // the persisted settings untouched so the UI keeps reflecting reality.
-    crate::scheduler::apply(enabled, clamped)?;
+    crate::scheduler::apply(enabled, clamped).await?;
 
     settings::set(
         pool,
@@ -302,8 +306,12 @@ pub async fn get_ebay_credentials(state: State<'_, AppState>) -> AppResult<EbayC
     let environment = settings::get(&state.db.pool, settings::KEY_EBAY_ENVIRONMENT)
         .await?
         .unwrap_or_else(|| "sandbox".to_string());
-    let has_app_id = settings::secret_get(settings::ENTRY_EBAY_APP_ID)?.is_some();
-    let has_cert_id = settings::secret_get(settings::ENTRY_EBAY_CERT_ID)?.is_some();
+    let has_app_id = settings::secret_get(settings::ENTRY_EBAY_APP_ID)
+        .await?
+        .is_some();
+    let has_cert_id = settings::secret_get(settings::ENTRY_EBAY_CERT_ID)
+        .await?
+        .is_some();
     Ok(EbayCredentialsState {
         environment,
         has_app_id,
@@ -323,8 +331,8 @@ pub async fn save_ebay_credentials(
         _ => "sandbox".to_string(),
     };
     settings::set(&state.db.pool, settings::KEY_EBAY_ENVIRONMENT, &env).await?;
-    settings::secret_set(settings::ENTRY_EBAY_APP_ID, &app_id)?;
-    settings::secret_set(settings::ENTRY_EBAY_CERT_ID, &cert_id)?;
+    settings::secret_set(settings::ENTRY_EBAY_APP_ID, &app_id).await?;
+    settings::secret_set(settings::ENTRY_EBAY_CERT_ID, &cert_id).await?;
     // Invalidate cached tokens — they were issued against the previous keys.
     let _ = settings::delete(&state.db.pool, "ebay.sandbox.access_token").await;
     let _ = settings::delete(&state.db.pool, "ebay.sandbox.access_token_expires_at").await;
@@ -335,8 +343,8 @@ pub async fn save_ebay_credentials(
 
 #[tauri::command]
 pub async fn clear_ebay_credentials(state: State<'_, AppState>) -> AppResult<()> {
-    settings::secret_delete(settings::ENTRY_EBAY_APP_ID)?;
-    settings::secret_delete(settings::ENTRY_EBAY_CERT_ID)?;
+    settings::secret_delete(settings::ENTRY_EBAY_APP_ID).await?;
+    settings::secret_delete(settings::ENTRY_EBAY_CERT_ID).await?;
     settings::delete(&state.db.pool, "ebay.sandbox.access_token").await?;
     settings::delete(&state.db.pool, "ebay.sandbox.access_token_expires_at").await?;
     settings::delete(&state.db.pool, "ebay.production.access_token").await?;
@@ -392,7 +400,8 @@ pub async fn start_ebay_oauth(state: State<'_, AppState>) -> AppResult<String> {
         .await?
         .unwrap_or_else(|| "sandbox".to_string());
     let env = crate::ebay::EbayEnvironment::from_str(&env_str);
-    let app_id = settings::secret_get(settings::ENTRY_EBAY_APP_ID)?
+    let app_id = settings::secret_get(settings::ENTRY_EBAY_APP_ID)
+        .await?
         .ok_or_else(|| AppError::NotConfigured("eBay App ID not set".into()))?;
     let ru_name = settings::get(&state.db.pool, &settings::ebay_ru_name_key(env.as_str()))
         .await?
@@ -422,9 +431,11 @@ pub async fn complete_ebay_oauth(state: State<'_, AppState>, code: String) -> Ap
         .await?
         .unwrap_or_else(|| "sandbox".to_string());
     let env = crate::ebay::EbayEnvironment::from_str(&env_str);
-    let app_id = settings::secret_get(settings::ENTRY_EBAY_APP_ID)?
+    let app_id = settings::secret_get(settings::ENTRY_EBAY_APP_ID)
+        .await?
         .ok_or_else(|| AppError::NotConfigured("eBay App ID not set".into()))?;
-    let cert_id = settings::secret_get(settings::ENTRY_EBAY_CERT_ID)?
+    let cert_id = settings::secret_get(settings::ENTRY_EBAY_CERT_ID)
+        .await?
         .ok_or_else(|| AppError::NotConfigured("eBay Cert ID not set".into()))?;
     let ru_name = settings::get(&state.db.pool, &settings::ebay_ru_name_key(env.as_str()))
         .await?
@@ -739,9 +750,50 @@ struct ListingRowRaw {
     attributes_user_set: i64,
 }
 
+/// Frontend's one-shot "my first mount fetches are in flight" signal. The
+/// startup backfill waits on this so it queues behind the first paint's
+/// queries instead of racing them for the connection pool (DCH-60).
+#[tauri::command]
+pub async fn frontend_ready(state: State<'_, AppState>) -> AppResult<()> {
+    state.frontend_ready.notify_one();
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn list_listings(state: State<'_, AppState>) -> AppResult<Vec<ListingRow>> {
     load_listing_rows(&state.db.pool).await
+}
+
+#[derive(Serialize)]
+pub struct WatchedExternalId {
+    pub external_id: String,
+    pub listing_id: i64,
+}
+
+/// Just the (external_id → listing_id) pairs for watched eBay listings —
+/// what Browse and the Seller Feed need to badge already-watched results.
+/// They used to call `list_listings` for this, which runs the full 5-table
+/// join and rebuilds the comp index; at startup with several tabs restored
+/// that work was done once per tab (DCH-60).
+#[tauri::command]
+pub async fn list_watched_external_ids(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<WatchedExternalId>> {
+    let rows: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT l.external_id, l.id
+         FROM listings l
+         JOIN sellers s ON s.id = l.seller_id
+         WHERE s.code = 'ebay'",
+    )
+    .fetch_all(&state.db.pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(external_id, listing_id)| WatchedExternalId {
+            external_id,
+            listing_id,
+        })
+        .collect())
 }
 
 /// One listing in exactly the shape `list_listings` returns it, or None if
@@ -1257,7 +1309,9 @@ pub async fn get_listing_receiver_status(
     state: State<'_, AppState>,
 ) -> AppResult<ListingReceiverStatus> {
     let port = crate::listing_receiver::configured_port(&state.db.pool).await?;
-    let has_secret = settings::secret_get(settings::ENTRY_LISTING_RECEIVER_SECRET)?.is_some();
+    let has_secret = settings::secret_get(settings::ENTRY_LISTING_RECEIVER_SECRET)
+        .await?
+        .is_some();
     Ok(ListingReceiverStatus {
         url: format!("http://localhost:{port}"),
         port,
@@ -1266,13 +1320,13 @@ pub async fn get_listing_receiver_status(
 }
 
 #[tauri::command]
-pub fn get_listing_receiver_secret() -> AppResult<String> {
-    crate::listing_receiver::ensure_secret()
+pub async fn get_listing_receiver_secret() -> AppResult<String> {
+    crate::listing_receiver::ensure_secret().await
 }
 
 #[tauri::command]
-pub fn regenerate_listing_receiver_secret() -> AppResult<String> {
-    crate::listing_receiver::regenerate_secret()
+pub async fn regenerate_listing_receiver_secret() -> AppResult<String> {
+    crate::listing_receiver::regenerate_secret().await
 }
 
 // ----- Background mode (tray + autostart) -----
@@ -2685,7 +2739,9 @@ pub struct ShareSettings {
 pub async fn get_share_settings(state: State<'_, AppState>) -> AppResult<ShareSettings> {
     Ok(ShareSettings {
         worker_url: settings::get(&state.db.pool, settings::KEY_SHARE_WORKER_URL).await?,
-        has_secret: settings::secret_get(settings::ENTRY_SHARE_WORKER_SECRET)?.is_some(),
+        has_secret: settings::secret_get(settings::ENTRY_SHARE_WORKER_SECRET)
+            .await?
+            .is_some(),
     })
 }
 
@@ -2701,7 +2757,7 @@ pub async fn save_share_settings(
     let url = worker_url.trim().trim_end_matches('/');
     settings::set(&state.db.pool, settings::KEY_SHARE_WORKER_URL, url).await?;
     if !secret.trim().is_empty() {
-        settings::secret_set(settings::ENTRY_SHARE_WORKER_SECRET, secret.trim())?;
+        settings::secret_set(settings::ENTRY_SHARE_WORKER_SECRET, secret.trim()).await?;
     }
     get_share_settings(state).await
 }
@@ -2709,7 +2765,7 @@ pub async fn save_share_settings(
 #[tauri::command]
 pub async fn clear_share_settings(state: State<'_, AppState>) -> AppResult<ShareSettings> {
     settings::set(&state.db.pool, settings::KEY_SHARE_WORKER_URL, "").await?;
-    settings::secret_delete(settings::ENTRY_SHARE_WORKER_SECRET)?;
+    settings::secret_delete(settings::ENTRY_SHARE_WORKER_SECRET).await?;
     get_share_settings(state).await
 }
 

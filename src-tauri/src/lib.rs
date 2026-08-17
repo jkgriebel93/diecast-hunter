@@ -48,6 +48,12 @@ pub struct AppState {
     /// close-requested handler can read it synchronously. When true,
     /// closing the window hides to the tray instead of exiting.
     pub run_in_background: AtomicBool,
+    /// Signalled once by the frontend after its first mount fetches have
+    /// been issued (`frontend_ready` command). The startup backfill waits
+    /// on this (with a timeout fallback) so it never competes with the
+    /// first paint for the connection pool (DCH-60). `Notify` stores the
+    /// permit, so a signal that arrives before the wait still releases it.
+    pub frontend_ready: tokio::sync::Notify,
 }
 
 fn show_main_window(app: &tauri::AppHandle) {
@@ -95,6 +101,7 @@ pub fn run() {
                     active_op_cancel: Mutex::new(None),
                     dcr_session: dcr::DcrSession::new(),
                     run_in_background: AtomicBool::new(run_in_background),
+                    frontend_ready: tokio::sync::Notify::new(),
                 });
                 Ok::<_, error::AppError>(pool)
             })?;
@@ -169,10 +176,24 @@ pub fn run() {
             // or rows imported while the drivers table was sparse) gets a
             // fresh attempt on every launch. Non-forcing — won't overwrite
             // existing values. Runs detached so a slow scan never blocks the
-            // UI from showing up.
+            // UI from showing up — and deferred (DCH-60) until the frontend
+            // reports its first mount fetches issued, so the backfill queues
+            // behind the first paint's queries on the connection pool
+            // instead of racing them. The timeout is the safety net for a
+            // frontend that never signals (crashed webview, stale build).
             let backfill_pool = pool.clone();
             let events_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
+                {
+                    let state = events_handle.state::<AppState>();
+                    let ready = state.frontend_ready.notified();
+                    tokio::select! {
+                        _ = ready => {}
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => {
+                            tracing::debug!("backfill: no frontend-ready signal after 15s, proceeding");
+                        }
+                    }
+                }
                 let progress = progress::ProgressEmitter::null("driver_assoc_backfill");
                 match sync::driver_assoc::associate_all_listings(
                     &backfill_pool,
@@ -270,7 +291,9 @@ pub fn run() {
             commands::refresh_ebay_listing,
             commands::refresh_all_ebay_listings,
             commands::sync_ebay_watchlist,
+            commands::frontend_ready,
             commands::list_listings,
+            commands::list_watched_external_ids,
             commands::get_listing_row,
             commands::clear_listing_match,
             commands::reject_listing_match,

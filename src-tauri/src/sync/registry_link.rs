@@ -299,9 +299,11 @@ async fn load_dcr_credentials(pool: &SqlitePool) -> AppResult<(String, String)> 
         .ok_or_else(|| {
             AppError::NotConfigured("diecastregistry.com username not set in Settings".into())
         })?;
-    let password = settings::secret_get(settings::ENTRY_DCR_PASSWORD)?.ok_or_else(|| {
-        AppError::NotConfigured("diecastregistry.com password not set in Settings".into())
-    })?;
+    let password = settings::secret_get(settings::ENTRY_DCR_PASSWORD)
+        .await?
+        .ok_or_else(|| {
+            AppError::NotConfigured("diecastregistry.com password not set in Settings".into())
+        })?;
     Ok((username, password))
 }
 

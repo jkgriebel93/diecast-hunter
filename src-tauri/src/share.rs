@@ -65,7 +65,7 @@ struct ShareResponse {
 /// missing. Both are required; half-configured is not a usable state.
 async fn share_config(pool: &SqlitePool) -> AppResult<Option<(String, String)>> {
     let url = settings::get(pool, settings::KEY_SHARE_WORKER_URL).await?;
-    let secret = settings::secret_get(settings::ENTRY_SHARE_WORKER_SECRET)?;
+    let secret = settings::secret_get(settings::ENTRY_SHARE_WORKER_SECRET).await?;
     match (url, secret) {
         (Some(u), Some(s)) if !u.trim().is_empty() && !s.trim().is_empty() => {
             Ok(Some((u.trim().trim_end_matches('/').to_string(), s)))

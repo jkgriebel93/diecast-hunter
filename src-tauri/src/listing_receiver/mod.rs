@@ -58,24 +58,24 @@ pub async fn configured_port(pool: &SqlitePool) -> AppResult<u16> {
 /// Generate-on-first-use accessor. Returns the existing keyring entry if
 /// present; otherwise generates a 32-hex-char secret, stores it, and
 /// returns it.
-pub fn ensure_secret() -> AppResult<String> {
-    if let Some(s) = settings::secret_get(settings::ENTRY_LISTING_RECEIVER_SECRET)? {
+pub async fn ensure_secret() -> AppResult<String> {
+    if let Some(s) = settings::secret_get(settings::ENTRY_LISTING_RECEIVER_SECRET).await? {
         return Ok(s);
     }
-    regenerate_secret()
+    regenerate_secret().await
 }
 
-pub fn regenerate_secret() -> AppResult<String> {
+pub async fn regenerate_secret() -> AppResult<String> {
     let secret: String = (0..32)
         .map(|_| format!("{:02x}", fastrand::u8(..)))
         .collect();
-    settings::secret_set(settings::ENTRY_LISTING_RECEIVER_SECRET, &secret)?;
+    settings::secret_set(settings::ENTRY_LISTING_RECEIVER_SECRET, &secret).await?;
     Ok(secret)
 }
 
 pub async fn run(pool: SqlitePool) -> AppResult<()> {
     let port = configured_port(&pool).await?;
-    let _secret = ensure_secret()?;
+    let _secret = ensure_secret().await?;
 
     let state = Arc::new(ServerState { pool });
 
@@ -162,7 +162,7 @@ async fn match_preview(
     headers: HeaderMap,
     body: String,
 ) -> Response {
-    if let Err(resp) = check_auth(&headers) {
+    if let Err(resp) = check_auth(&headers).await {
         return resp;
     }
     let req: PreviewRequest = match serde_json::from_str(&body) {
@@ -270,7 +270,7 @@ async fn match_confirm(
     headers: HeaderMap,
     body: String,
 ) -> Response {
-    if let Err(resp) = check_auth(&headers) {
+    if let Err(resp) = check_auth(&headers).await {
         return resp;
     }
     let req: ConfirmRequest = match serde_json::from_str(&body) {
@@ -341,7 +341,7 @@ async fn match_reject(
     headers: HeaderMap,
     body: String,
 ) -> Response {
-    if let Err(resp) = check_auth(&headers) {
+    if let Err(resp) = check_auth(&headers).await {
         return resp;
     }
     let req: RejectRequest = match serde_json::from_str(&body) {
@@ -405,7 +405,7 @@ async fn watch_listing(
     headers: HeaderMap,
     body: String,
 ) -> Response {
-    if let Err(resp) = check_auth(&headers) {
+    if let Err(resp) = check_auth(&headers).await {
         return resp;
     }
     let req: WatchRequest = match serde_json::from_str(&body) {
@@ -455,8 +455,8 @@ fn internal_error(e: AppError) -> Response {
 // request and buy nothing — this is a local control-flow type, never stored
 // or returned across a boundary.
 #[allow(clippy::result_large_err)]
-fn check_auth(headers: &HeaderMap) -> Result<(), Response> {
-    let secret = match settings::secret_get(settings::ENTRY_LISTING_RECEIVER_SECRET) {
+async fn check_auth(headers: &HeaderMap) -> Result<(), Response> {
+    let secret = match settings::secret_get(settings::ENTRY_LISTING_RECEIVER_SECRET).await {
         Ok(Some(s)) => s,
         _ => {
             return Err((
