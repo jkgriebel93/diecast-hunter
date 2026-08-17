@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormOptionRow } from "@/lib/tauri";
 
+/** Most options rendered in the dropdown at once (DCH-59). The DCR driver
+ *  list alone is ~2,900 entries; mounting them all froze the control on
+ *  open. Anything past the cap is reachable by narrowing — a note row says
+ *  how much is hidden. */
+export const MAX_RENDERED_OPTIONS = 100;
+
 /**
  * Chip-style multi-select combobox over registry form options. Type to
  * filter, click or Enter to toggle; selected values render as removable
@@ -48,6 +54,14 @@ export function MultiSelect({
   const shortlisted =
     shortlist !== undefined && !showAll && query.trim() === "";
 
+  // Bounded render (DCH-59): keyboard navigation and Enter operate on the
+  // rendered slice, so the highlight can never sit on an unmounted option.
+  const rendered = useMemo(
+    () => filtered.slice(0, MAX_RENDERED_OPTIONS),
+    [filtered],
+  );
+  const hiddenCount = filtered.length - rendered.length;
+
   useEffect(() => {
     setHighlight(0);
   }, [query, showAll]);
@@ -76,13 +90,13 @@ export function MultiSelect({
     if (e.key === "ArrowDown") {
       e.preventDefault();
       if (!open) setOpen(true);
-      else setHighlight((h) => Math.min(h + 1, filtered.length - 1));
+      else setHighlight((h) => Math.min(h + 1, rendered.length - 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setHighlight((h) => Math.max(h - 1, 0));
     } else if (e.key === "Enter") {
       e.preventDefault();
-      if (open && filtered[highlight]) toggle(filtered[highlight].value);
+      if (open && rendered[highlight]) toggle(rendered[highlight].value);
     } else if (e.key === "Escape") {
       setOpen(false);
       setQuery("");
@@ -139,10 +153,10 @@ export function MultiSelect({
       </div>
       {open && (
         <div className="absolute z-30 mt-1 w-full max-h-60 overflow-auto rounded-md border border-border bg-bg-panel shadow-lg">
-          {filtered.length === 0 ? (
+          {rendered.length === 0 ? (
             <div className="px-3 py-2 text-xs text-fg-subtle">No matches.</div>
           ) : (
-            filtered.map((o, i) => {
+            rendered.map((o, i) => {
               const isSelected = selected.includes(o.value);
               return (
                 <button
@@ -159,6 +173,12 @@ export function MultiSelect({
                 </button>
               );
             })
+          )}
+          {hiddenCount > 0 && (
+            <div className="px-3 py-1.5 text-xs text-fg-subtle border-t border-border">
+              {hiddenCount} more match{hiddenCount === 1 ? "" : "es"} — keep
+              typing to narrow.
+            </div>
           )}
           {shortlisted && (
             <button

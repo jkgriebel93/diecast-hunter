@@ -49,6 +49,8 @@ underneath it and does nothing).
 | `listing-sharing/` | DCH-48 | Share selection dialog, the created link, the unconfigured state, and Settings' Active links |
 | `helper-adoption/` | DCH-34 | Shared formatters on the list screens |
 | `listing-panel/` | DCH-20 | Listing cards collapsed by default |
+| `listings-perf/` | DCH-58 | What must not have changed: the flat list, the search-narrowed list with faceted counts, and the by-driver view fully collapsed (which now mounts no cards) |
+| `registry-results-perf/` | DCH-59 | The bounded results render ("Show 200 more" under the 200th card), the deferred results filter narrowing 450 → 225, and the MultiSelect's capped dropdown with its "N more matches" note |
 | `manual-collection-entry/` | DCH-12 | Adding a car DCR doesn't list |
 | `seller-feed-chrome/` | DCH-16 | The reworked Seller Feed: Browse-shaped filter card with the shared Clear filters control, Manage Saved Sellers as a modal, FilteredEmpty, and the bottom pager |
 | `seller-feed-image-sizes/` | DCH-49 | The feed's gallery grid before (fixed 19rem columns crushing the md/lg cards) and after (columns sized to the image) |

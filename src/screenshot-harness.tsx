@@ -26,15 +26,18 @@ import { Wishlist } from "./pages/Wishlist";
 import { WorkspaceProvider } from "./lib/workspace";
 import { Settings } from "./pages/Settings";
 import { SellerFeed } from "./pages/SellerFeed";
+import { Registry } from "./pages/Registry";
 import { resetMinimized, setManyMinimized } from "./lib/minimized";
 import { facetSectionKey } from "./lib/facetSections";
 import type {
   DriverOption,
   EbaySearchItem,
   EbaySearchPage,
+  FormOptionRow,
   HiddenFeedListing,
   ListingGroup,
   ListingRow,
+  ProductionSearchResult,
   SavedSeller,
   ShareRecord,
   ShareStatus,
@@ -365,8 +368,62 @@ const HIDDEN_FEED: HiddenFeedListing[] = [2, 3].map((i) => ({
   hidden_at: NOW - DAY,
 }));
 
+/** DCH-59's presets need volume: enough results that the bounded render's
+ *  "Show more" footer is real, and enough driver options that the
+ *  MultiSelect's cap note appears. Deterministic — no randomness. */
+function registryResult(i: number): ProductionSearchResult {
+  const driver = DRIVERS[i % DRIVERS.length];
+  return {
+    registry_guid: `res-${i}`,
+    detail_url: `/diecast/x/y/res-${i}`,
+    image_url: null,
+    driver_name: driver,
+    driver_normalized: driver.toLowerCase().replace(/ /g, "-"),
+    year: 2015 + (i % 10),
+    oem: "Action / Lionel",
+    brand: i % 3 === 0 ? "Elite" : "ARC",
+    scale: i % 2 === 0 ? "1:24" : "1:64",
+    make: "CWC",
+    scheme_text: `#${(i % 90) + 1} ${i % 2 === 0 ? "Valvoline" : "HendrickCars.com"} Scheme ${i}`,
+    seq_produced_total: 504 + (i % 40) * 100,
+    retail_value_cents: 3500 + (i % 60) * 250,
+    wholesale_value_cents: 1200 + (i % 60) * 90,
+  };
+}
+const REGISTRY_RESULTS: ProductionSearchResult[] = Array.from(
+  { length: 450 },
+  (_, i) => registryResult(i),
+);
+
+const opt = (value: string, display: string): FormOptionRow => ({
+  value,
+  display,
+  normalized: display.toLowerCase().replace(/ /g, "-"),
+});
+const REGISTRY_FORM_OPTIONS: Record<string, FormOptionRow[]> = {
+  driver: [
+    ...DRIVERS.map((d, i) => opt(`drv-${i}`, d)),
+    // Filler names so the driver dropdown crosses the DCH-59 render cap the
+    // way the real ~2,900-entry DCR list does.
+    ...Array.from({ length: 300 }, (_, i) =>
+      opt(`drv-x-${i}`, `Driver ${String(i + 1).padStart(3, "0")}`),
+    ),
+  ],
+  year: Array.from({ length: 10 }, (_, i) =>
+    opt(String(2015 + i), String(2015 + i)),
+  ),
+  oem: [opt("oem-1", "Action / Lionel"), opt("oem-2", "Revell")],
+  scale: [opt("sc-1", "1:24"), opt("sc-2", "1:64")],
+  brand: [opt("br-1", "ARC"), opt("br-2", "Elite")],
+  make: [opt("mk-1", "CWC"), opt("mk-2", "BWB")],
+  finish: [opt("fn-1", "(Standard)"), opt("fn-2", "Color Chrome")],
+};
+
 const RESULTS: Record<string, unknown> = {
   list_listings: LISTINGS,
+  list_registry_presearches: [],
+  list_wishlisted_guids: [],
+  search_dcr_production: REGISTRY_RESULTS,
   list_saved_sellers: SAVED_SELLERS,
   // DCH-16's filtered-empty preset needs a feed the filters can "exclude":
   // an empty page plus one clicked chip is the FilteredEmpty state.
@@ -473,10 +530,15 @@ const RESULTS: Record<string, unknown> = {
 // The `any` is deliberate: this is the object Tauri injects at runtime, and
 // typing it would mean exporting a bridge type the app itself never needs.
 (window as any).__TAURI_INTERNALS__ = {
-  invoke: (cmd: string) =>
-    cmd in RESULTS
-      ? Promise.resolve(RESULTS[cmd])
-      : Promise.reject(new Error(`unstubbed command: ${cmd}`)),
+  invoke: (cmd: string, args?: Record<string, unknown>) =>
+    // The one arg-sensitive stub: registry form options come back per field.
+    cmd === "list_registry_form_options"
+      ? Promise.resolve(
+          REGISTRY_FORM_OPTIONS[(args?.field as string) ?? ""] ?? [],
+        )
+      : cmd in RESULTS
+        ? Promise.resolve(RESULTS[cmd])
+        : Promise.reject(new Error(`unstubbed command: ${cmd}`)),
   transformCallback: () => 0,
   unregisterCallback: () => {},
   convertFileSrc: (p: string) => p,
@@ -626,6 +688,77 @@ function Harness() {
           await step(() => clickByText("button", "Exclude"));
           return;
         }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+    // DCH-59: pick a driver (enables Search), run the stubbed 450-result
+    // search, then per preset show the bounded footer, the narrowed list,
+    // or the MultiSelect's capped dropdown.
+    if (preset.startsWith("registry")) {
+      let cancelled = false;
+      void (async () => {
+        const step = async (fn: () => void, ms = 250) => {
+          await new Promise((r) => setTimeout(r, ms));
+          if (!cancelled) fn();
+        };
+        // Open the driver MultiSelect (first "Any (type to search…)" input).
+        await step(() => {
+          document
+            .querySelector<HTMLInputElement>(
+              'input[placeholder="Any (type to search…)"]',
+            )
+            ?.focus();
+        }, 400);
+        if (preset === "registry-multiselect") {
+          // Leave the dropdown open and park it at its foot so the render
+          // cap's "N more matches" note is in frame.
+          await step(() => {
+            const menu = document.querySelector<HTMLElement>(
+              ".max-h-60.overflow-auto",
+            );
+            if (menu) menu.scrollTop = menu.scrollHeight;
+          });
+          return;
+        }
+        // Narrow first — the driver list is render-capped (that's the DCH-59
+        // point), so the option has to be typed into view before clicking.
+        await step(() => {
+          const input = document.activeElement as HTMLInputElement | null;
+          if (input?.tagName === "INPUT") {
+            Object.getOwnPropertyDescriptor(
+              window.HTMLInputElement.prototype,
+              "value",
+            )!.set!.call(input, "larson");
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+        });
+        await step(() => clickByText("button", "Kyle Larson"));
+        await step(() => clickByText("button", "Search"));
+        if (preset === "registry-filtered") {
+          await step(() => {
+            const input = document.querySelector<HTMLInputElement>(
+              'input[aria-label="Search results"]',
+            );
+            if (input) {
+              Object.getOwnPropertyDescriptor(
+                window.HTMLInputElement.prototype,
+                "value",
+              )!.set!.call(input, "valvoline");
+              input.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+          }, 400);
+          return;
+        }
+        // registry-bounded: park at the page foot so the "Show more"
+        // footer under the 200th card is the subject.
+        await step(() => {
+          const port = document.querySelector(
+            ".absolute.inset-0.overflow-auto",
+          );
+          if (port) port.scrollTop = port.scrollHeight;
+        }, 600);
       })();
       return () => {
         cancelled = true;
@@ -844,7 +977,9 @@ function Harness() {
               ? "Wishlist"
               : preset.startsWith("feed")
                 ? "Seller Feed"
-                : "Saved Listings"}
+                : preset.startsWith("registry")
+                  ? "Registry Search"
+                  : "Saved Listings"}
         </div>
       </div>
       <div className="relative flex-1 min-h-0">
@@ -855,6 +990,8 @@ function Harness() {
             <Wishlist />
           ) : preset.startsWith("feed") ? (
             <SellerFeed />
+          ) : preset.startsWith("registry") ? (
+            <Registry />
           ) : (
             <Listings />
           )}
