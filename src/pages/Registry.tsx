@@ -40,7 +40,11 @@ import {
   type RegistrySortMode,
 } from "@/lib/registryResults";
 import { useEvent } from "@/lib/useEvent";
-import { useMinimized, MinimizeToggle } from "@/lib/minimized";
+import {
+  ExpandCollapseAllButton,
+  MinimizeToggle,
+  useMinimized,
+} from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { Thumbnail } from "@/components/Thumbnail";
 import { DCR_BASE } from "@/lib/dcr";
@@ -810,6 +814,15 @@ export function Registry() {
               )}
             </div>
             <div className="flex items-center gap-3">
+              {/* Bounded to the rendered page (DCH-59's "Show more") on
+                  purpose: writing stored state for thousands of unmounted
+                  results would bloat the persisted map for cards the user
+                  never saw. */}
+              <ExpandCollapseAllButton
+                keys={(visibleResults ?? []).map(
+                  (r) => `registry:${r.registry_guid}`,
+                )}
+              />
               <div className="flex items-center gap-1.5">
                 <span>Sort:</span>
                 <select

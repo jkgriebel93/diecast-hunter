@@ -42,6 +42,7 @@ underneath it and does nothing).
 | `archive-ended-listings/` | DCH-10 | Archived rows and the end-reason labels |
 | `danger-actions/` | DCH-33 | `.btn-danger` / `.link-danger` at rest |
 | `enrichment-cap/` | DCH-53 | Settings' Sync tab with the "Max detail pages per sync" cap beside the pre-warm cap |
+| `expand-all/` | DCH-68 | The paired Expand/Collapse all: Saved Listings' flat view with every card expanded and the label flipped, and Registry results collapsed with "Expand all" offered |
 | `error-messages/` | DCH-18 | `ErrorBanner` titles and the details disclosure |
 | `extension-match-verdicts/` | — | The eBay extension's in-page verdict |
 | `facet-collapse/` | DCH-43 | Saved Listings' collapsible filter facets — **superseded by `filter-pane/`**; kept as the record of that PR, and its `expanded` / `badges` presets are gone |

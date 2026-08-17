@@ -94,3 +94,44 @@ describe("bulk set", () => {
     ).toBe(true);
   });
 });
+
+describe("allExpanded / the Expand-all pair (DCH-68)", () => {
+  it("honors the screen default for keys with no stored opinion", async () => {
+    const { mod } = await loadStore();
+    // Default-open screen (Collection/Registry): untouched cards count as
+    // expanded, so the button offers "Collapse all".
+    expect(mod.allExpanded(["collection:1", "collection:2"], false)).toBe(true);
+    // Default-collapsed screen (Saved Listings): the same absence means
+    // collapsed, so the button offers "Expand all".
+    expect(mod.allExpanded(["listing:1", "listing:2"], true)).toBe(false);
+  });
+
+  it("expand-all on a default-collapsed screen writes explicit false entries", async () => {
+    // The DCH-68 trap: clearing keys instead of writing false would make
+    // Saved Listings spring back to collapsed on the next render.
+    const { mod } = await loadStore();
+    const keys = ["listing:1", "listing:2", "listing:3"];
+    expect(mod.allExpanded(keys, true)).toBe(false);
+    mod.setManyMinimized(keys, false);
+    for (const k of keys) expect(mod.minimizedState(k)).toBe(false);
+    expect(mod.allExpanded(keys, true)).toBe(true);
+  });
+
+  it("one collapsed card flips the aggregate back to not-all-expanded", async () => {
+    const { mod } = await loadStore();
+    const keys = ["registry:a", "registry:b"];
+    expect(mod.allExpanded(keys, false)).toBe(true);
+    mod.setMinimized("registry:b", true);
+    expect(mod.allExpanded(keys, false)).toBe(false);
+    mod.setMinimized("registry:b", false);
+    expect(mod.allExpanded(keys, false)).toBe(true);
+  });
+
+  it("an empty key list is never 'all expanded'", async () => {
+    // Guards the button's disabled state: no cards on screen means the
+    // control has nothing to do, not "Collapse all".
+    const { mod } = await loadStore();
+    expect(mod.allExpanded([], false)).toBe(false);
+    expect(mod.allExpanded([], true)).toBe(false);
+  });
+});

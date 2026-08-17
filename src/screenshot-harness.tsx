@@ -751,6 +751,11 @@ function Harness() {
         });
         await step(() => clickByText("button", "Kyle Larson"));
         await step(() => clickByText("button", "Search"));
+        if (preset === "registry-collapseall") {
+          // Cards default open, so the pair offers "Collapse all" first.
+          await step(() => clickByText("button", "Collapse all"), 400);
+          return;
+        }
         if (preset === "registry-filtered") {
           await step(() => {
             const input = document.querySelector<HTMLInputElement>(
@@ -778,6 +783,11 @@ function Harness() {
       return () => {
         cancelled = true;
       };
+    }
+    // DCH-68: the flat view's paired control drives the cards themselves.
+    if (preset === "expandall-flat") {
+      const t = setTimeout(() => clickByText("button", "Expand all"), 400);
+      return () => clearTimeout(t);
     }
     // DCH-58's perf presets photograph what must NOT have changed: the
     // search-filtered flat list with its facet counts, and the by-driver
