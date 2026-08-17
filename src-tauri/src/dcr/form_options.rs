@@ -11,9 +11,10 @@ use scraper::{Html, Selector};
 use serde::Serialize;
 use sqlx::SqlitePool;
 
+use crate::dcr::client::looks_like_login_page;
 use crate::dcr::parse::normalize_driver_name;
 use crate::dcr::DcrClient;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 
 /// Logical name → form field name on the page. The DB stores logical names.
 const FIELD_MAP: &[(&str, &str)] = &[
@@ -44,6 +45,12 @@ pub async fn refresh_form_options(
     client: &DcrClient,
 ) -> AppResult<RefreshOptionsSummary> {
     let html = client.get_html("/Production").await?;
+    // On a cached session with a dead cookie this fetch is the login form,
+    // which parses as zero options; surface the expiry instead of silently
+    // "refreshing" nothing (DCH-57).
+    if looks_like_login_page(&html) {
+        return Err(AppError::SessionExpired);
+    }
     let parsed = parse_form_options(&html);
     let mut summary = RefreshOptionsSummary::default();
     let now = Utc::now().timestamp();

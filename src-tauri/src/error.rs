@@ -29,6 +29,13 @@ pub enum AppError {
     #[error("login failed: {0}")]
     LoginFailed(String),
 
+    /// A DCR request came back as the login page — the session cookie the
+    /// request rode on is no longer valid. Distinct from `LoginFailed` (bad
+    /// credentials): `DcrSession::with_client` reacts to this by invalidating
+    /// the cached session and retrying the operation once on a fresh login.
+    #[error("diecastregistry.com session expired")]
+    SessionExpired,
+
     #[error("parse error: {0}")]
     Parse(String),
 

@@ -28,6 +28,7 @@ use regex::Regex;
 use serde::Serialize;
 use sqlx::SqlitePool;
 
+use crate::dcr::DcrSession;
 use crate::error::{AppError, AppResult};
 use crate::progress::ProgressEmitter;
 use crate::settings;
@@ -405,7 +406,11 @@ pub(crate) async fn auto_match_listing_with(
     let mut candidates = load_candidates(pool, driver_id).await?;
     if candidates.is_empty() {
         if let Some(progress) = network {
-            if prewarm_driver(pool, driver_id, progress).await? {
+            // Call-scoped session: at most one pre-warm happens here, and
+            // threading the app-wide session through the auto-match API would
+            // drag it into every watchlist-sync and extension call site.
+            let session = DcrSession::new();
+            if prewarm_driver(pool, &session, driver_id, progress).await? {
                 candidates = load_candidates(pool, driver_id).await?;
             }
         }
@@ -460,6 +465,9 @@ pub async fn auto_match_all(
     let mut cache: HashMap<i64, Vec<Candidate>> = HashMap::new();
     let mut prewarm_attempted: HashSet<i64> = HashSet::new();
     let mut network_ok = allow_network;
+    // Run-scoped session: every driver pre-warmed by this pass shares one
+    // login instead of paying the two login round trips each (DCH-57).
+    let dcr_session = DcrSession::new();
 
     for (idx, (listing_id,)) in rows.into_iter().enumerate() {
         progress.check_cancelled()?;
@@ -484,7 +492,7 @@ pub async fn auto_match_all(
             e.insert(load_candidates(pool, driver_id).await?);
         }
         if cache[&driver_id].is_empty() && network_ok && prewarm_attempted.insert(driver_id) {
-            match prewarm_driver(pool, driver_id, progress).await {
+            match prewarm_driver(pool, &dcr_session, driver_id, progress).await {
                 Ok(true) => {
                     summary.prewarmed_drivers += 1;
                     cache.insert(driver_id, load_candidates(pool, driver_id).await?);
@@ -795,6 +803,7 @@ pub(crate) async fn load_candidates(
 /// only exists locally).
 async fn prewarm_driver(
     pool: &SqlitePool,
+    session: &DcrSession,
     driver_id: i64,
     progress: &ProgressEmitter,
 ) -> AppResult<bool> {
@@ -810,7 +819,7 @@ async fn prewarm_driver(
     let Some((guid,)) = guid else {
         return Ok(false);
     };
-    registry_prewarm::prewarm_by_driver(pool, &guid, progress).await?;
+    registry_prewarm::prewarm_by_driver(pool, session, &guid, progress).await?;
     Ok(true)
 }
 

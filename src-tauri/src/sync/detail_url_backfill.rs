@@ -10,9 +10,10 @@
 use serde::Serialize;
 use sqlx::SqlitePool;
 
-use crate::error::AppResult;
+use crate::dcr::DcrSession;
+use crate::error::{AppError, AppResult};
 use crate::progress::ProgressEmitter;
-use crate::sync::registry_prewarm::{logged_in_client, prewarm_driver_with_client};
+use crate::sync::registry_prewarm::prewarm_driver_with_client;
 
 #[derive(Debug, Default, Serialize, Clone)]
 pub struct DetailUrlBackfillSummary {
@@ -40,6 +41,7 @@ const MISSING_DETAIL_URL: &str = "re.source <> 'local'
 
 pub async fn backfill_detail_urls(
     pool: &SqlitePool,
+    session: &DcrSession,
     progress: &ProgressEmitter,
 ) -> AppResult<DetailUrlBackfillSummary> {
     let missing_before = count_missing(pool).await?;
@@ -76,26 +78,28 @@ pub async fn backfill_detail_urls(
         });
     }
 
-    progress.step("Logging in to diecastregistry.com…", None, None);
-    let client = logged_in_client(pool).await?;
-
-    let total = drivers.len() as u32;
-    let mut drivers_processed = 0u32;
-    for (i, (guid, name)) in drivers.iter().enumerate() {
-        progress.check_cancelled()?;
-        progress.step(
-            format!("Recovering links for {name} ({} of {total})…", i + 1),
-            Some(i as u32),
-            Some(total),
-        );
-        match prewarm_driver_with_client(pool, &client, guid, progress).await {
-            Ok(_) => drivers_processed += 1,
-            Err(crate::error::AppError::Cancelled) => {
-                return Err(crate::error::AppError::Cancelled)
+    progress.step("Connecting to diecastregistry.com…", None, None);
+    let drivers = &drivers;
+    let drivers_processed = session
+        .with_client(pool, progress, |client| async move {
+            let total = drivers.len() as u32;
+            let mut processed = 0u32;
+            for (i, (guid, name)) in drivers.iter().enumerate() {
+                progress.check_cancelled()?;
+                progress.step(
+                    format!("Recovering links for {name} ({} of {total})…", i + 1),
+                    Some(i as u32),
+                    Some(total),
+                );
+                match prewarm_driver_with_client(pool, &client, guid, progress).await {
+                    Ok(_) => processed += 1,
+                    Err(e @ (AppError::Cancelled | AppError::SessionExpired)) => return Err(e),
+                    Err(e) => tracing::warn!("detail-url backfill: {name} failed: {e}"),
+                }
             }
-            Err(e) => tracing::warn!("detail-url backfill: {name} failed: {e}"),
-        }
-    }
+            Ok(processed)
+        })
+        .await?;
 
     let still_missing = count_missing(pool).await?;
     let entries_patched = missing_before.saturating_sub(still_missing);

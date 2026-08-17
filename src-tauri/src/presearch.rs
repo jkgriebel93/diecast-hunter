@@ -24,10 +24,10 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-use crate::dcr::{search_all_pages_with_progress, DcrClient, ProductionSearchFilter};
+use crate::dcr::{search_all_pages_with_progress, DcrClient, DcrSession, ProductionSearchFilter};
 use crate::error::{AppError, AppResult};
 use crate::progress::ProgressEmitter;
-use crate::sync::registry_prewarm::{logged_in_client, upsert_stubs_batched};
+use crate::sync::registry_prewarm::upsert_stubs_batched;
 
 /// A pre-search whose last refresh is older than this is due for another.
 /// Matches `PREWARM_STALE_AFTER_SECONDS` — both walk the same catalog, which
@@ -207,10 +207,19 @@ pub async fn delete(pool: &SqlitePool, id: i64) -> AppResult<()> {
 }
 
 /// Walk DCR for one pre-search and upsert every hit. Returns entries upserted.
-pub async fn refresh_one(pool: &SqlitePool, id: i64, progress: &ProgressEmitter) -> AppResult<u32> {
-    let client = logged_in_client(pool).await?;
+pub async fn refresh_one(
+    pool: &SqlitePool,
+    session: &DcrSession,
+    id: i64,
+    progress: &ProgressEmitter,
+) -> AppResult<u32> {
     let ps = get(pool, id).await?;
-    let upserted = refresh_with_client(pool, &client, &ps, progress).await?;
+    let ps = &ps;
+    let upserted = session
+        .with_client(pool, progress, |client| async move {
+            refresh_with_client(pool, &client, ps, progress).await
+        })
+        .await?;
     progress.done(format!(
         "\"{}\" cached: {upserted} entries ready to filter locally.",
         ps.name
@@ -235,7 +244,12 @@ async fn refresh_with_client(
     let (results, _pages) = match walk {
         Ok(v) => v,
         Err(e) => {
-            record_failure(pool, ps.id, &e.to_string()).await;
+            // An expired session isn't this pre-search's fault, and the
+            // caller retries the whole thing on a fresh login — recording
+            // it as the row's last_error would blame a filter for a cookie.
+            if !matches!(e, AppError::SessionExpired) {
+                record_failure(pool, ps.id, &e.to_string()).await;
+            }
             return Err(e);
         }
     };
@@ -279,6 +293,7 @@ async fn record_failure(pool: &SqlitePool, id: i64, message: &str) {
 /// and the run continues, so a single bad filter can't starve the others.
 pub async fn refresh_stale(
     pool: &SqlitePool,
+    session: &DcrSession,
     progress: &ProgressEmitter,
 ) -> AppResult<PresearchRefreshSummary> {
     let cutoff = Utc::now().timestamp() - PRESEARCH_STALE_AFTER_SECONDS;
@@ -299,22 +314,40 @@ pub async fn refresh_stale(
         return Ok(summary);
     }
 
-    // Log in once for the whole batch rather than per pre-search.
-    let client = logged_in_client(pool).await?;
-    for raw in rows.into_iter().take(MAX_REFRESH_PER_RUN) {
-        let ps = raw.into_presearch();
-        progress.check_cancelled()?;
-        match refresh_with_client(pool, &client, &ps, progress).await {
-            Ok(n) => {
-                summary.refreshed += 1;
-                summary.registry_entries_upserted += n;
+    // One session for the whole batch. A dead cached session surfaces on the
+    // first fetch (as SessionExpired, not a per-row failure) and with_client
+    // restarts the batch once on a fresh login.
+    let batch: Vec<Presearch> = rows
+        .into_iter()
+        .take(MAX_REFRESH_PER_RUN)
+        .map(|raw| raw.into_presearch())
+        .collect();
+    let batch = &batch;
+    let (refreshed, failed, entries_upserted) = session
+        .with_client(pool, progress, |client| async move {
+            let mut refreshed = 0u32;
+            let mut failed = 0u32;
+            let mut upserted = 0u32;
+            for ps in batch {
+                progress.check_cancelled()?;
+                match refresh_with_client(pool, &client, ps, progress).await {
+                    Ok(n) => {
+                        refreshed += 1;
+                        upserted += n;
+                    }
+                    Err(e @ (AppError::Cancelled | AppError::SessionExpired)) => return Err(e),
+                    Err(e) => {
+                        failed += 1;
+                        tracing::warn!("presearch refresh failed for \"{}\": {e}", ps.name);
+                    }
+                }
             }
-            Err(e) => {
-                summary.failed += 1;
-                tracing::warn!("presearch refresh failed for \"{}\": {e}", ps.name);
-            }
-        }
-    }
+            Ok((refreshed, failed, upserted))
+        })
+        .await?;
+    summary.refreshed = refreshed;
+    summary.failed = failed;
+    summary.registry_entries_upserted = entries_upserted;
     Ok(summary)
 }
 
