@@ -656,8 +656,9 @@ if (preset.startsWith("filter-")) {
 }
 // DCH-63: the collection presets shoot the flat view, so every row's note
 // affordance is on screen without first expanding driver groups. The page
-// reads this once at state init.
-if (preset.startsWith("collection")) {
+// reads this once at state init. `collection-grouped` is the exception —
+// DCH-66's subject is the grouped toolbar's two sort controls.
+if (preset.startsWith("collection") && preset !== "collection-grouped") {
   localStorage.setItem("collection:group-by-driver", "0");
 }
 // DCH-72: the match dialog opens from a card body, and cards default
