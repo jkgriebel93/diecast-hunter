@@ -4,6 +4,7 @@ import {
   formatCents,
   formatCount,
   formatDateTime,
+  formatResultCount,
   formatUntil,
 } from "./format";
 
@@ -25,6 +26,38 @@ describe("formatCents", () => {
 
   it("renders missing values as an em dash", () => {
     expect(formatCents(null)).toBe("—");
+  });
+});
+
+describe("formatResultCount", () => {
+  it("shows the total alone when nothing is narrowed", () => {
+    expect(formatResultCount(12, 12)).toBe("12 results.");
+    expect(formatResultCount(0, 0)).toBe("0 results.");
+  });
+
+  it("pluralizes the total form by count", () => {
+    expect(formatResultCount(1, 1)).toBe("1 result.");
+  });
+
+  it("shows X of N when the filters exclude something", () => {
+    expect(formatResultCount(48, 300)).toBe("48 of 300 results.");
+  });
+
+  it("keeps the plural noun in the narrowed form even at one shown", () => {
+    // "1 of 3 result" reads as a typo; the reference screen always says
+    // "results" when narrowed.
+    expect(formatResultCount(1, 3)).toBe("1 of 3 results.");
+    expect(formatResultCount(0, 3)).toBe("0 of 3 results.");
+  });
+
+  it("separates thousands on both numbers", () => {
+    expect(formatResultCount(1250, 12500)).toBe("1,250 of 12,500 results.");
+  });
+
+  it("takes custom noun pairs for irregular plurals", () => {
+    expect(formatResultCount(1, 1, "entry", "entries")).toBe("1 entry.");
+    expect(formatResultCount(2, 5, "entry", "entries")).toBe("2 of 5 entries.");
+    expect(formatResultCount(3, 3, "listing")).toBe("3 listings.");
   });
 });
 

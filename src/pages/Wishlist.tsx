@@ -5,6 +5,7 @@ import {
   api,
   formatCents,
   formatCount,
+  formatResultCount,
   type ListingRow,
   type WishlistEntry,
   type WishlistInfo,
@@ -536,9 +537,12 @@ export function Wishlist() {
           </FilterCard>
 
           <div className="text-xs text-fg-subtle">
-            {filtersActive
-              ? `${formatCount(visible.length)} of ${formatCount(entries.length)} entr${entries.length === 1 ? "y" : "ies"}.`
-              : `${formatCount(entries.length)} entr${entries.length === 1 ? "y" : "ies"}.`}
+            {formatResultCount(
+              visible.length,
+              entries.length,
+              "entry",
+              "entries",
+            )}
             {entries.length > 1 && !filtersActive && (
               <span className="ml-2 text-fg-faint">
                 Drag the ⠿ handle to stack-rank by priority.

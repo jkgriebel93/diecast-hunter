@@ -54,6 +54,7 @@ underneath it and does nothing).
 | `listings-perf/` | DCH-58 | What must not have changed: the flat list, the search-narrowed list with faceted counts, and the by-driver view fully collapsed (which now mounts no cards) |
 | `registry-results-perf/` | DCH-59 | The bounded results render ("Show 200 more" under the 200th card), the deferred results filter narrowing 450 → 225, and the MultiSelect's capped dropdown with its "N more matches" note |
 | `manual-collection-entry/` | DCH-12 | Adding a car DCR doesn't list |
+| `result-counts/` | DCH-72 | The match dialog's result count pinned above its scroll region (the surface that had none), and Saved Listings' "4 of 24 listings." while a search narrows the flat list |
 | `seller-feed-chrome/` | DCH-16 | The reworked Seller Feed: Browse-shaped filter card with the shared Clear filters control, Manage Saved Sellers as a modal, FilteredEmpty, and the bottom pager |
 | `seller-feed-image-sizes/` | DCH-49 | The feed's gallery grid before (fixed 19rem columns crushing the md/lg cards) and after (columns sized to the image) |
 | `seller-feed-details/` | DCH-52 | An expanded card: live image carousel (2/3), Item specifics grid, plain-text description — and the per-card inline error state |
