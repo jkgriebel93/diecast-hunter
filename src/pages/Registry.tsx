@@ -41,6 +41,7 @@ import {
   type RegistrySortMode,
 } from "@/lib/registryResults";
 import { useEvent } from "@/lib/useEvent";
+import { emitDataChanged, useDataChanged } from "@/lib/dataEvents";
 import {
   ExpandCollapseAllButton,
   MinimizeToggle,
@@ -202,6 +203,13 @@ export function Registry() {
     [sortedResults, visibleCount],
   );
 
+  // Re-fetch the criteria dropdowns when any page refreshes the
+  // form-options cache (DCH-71) — including this one: onRefreshOptions
+  // emits instead of reloading directly, so there is one reload path.
+  // loadOptions only replaces state on success, so a failed re-fetch
+  // keeps the lists already loaded.
+  useDataChanged("registry-options", () => void loadOptions());
+
   useEffect(() => {
     void loadOptions();
     void loadPresearches();
@@ -298,7 +306,9 @@ export function Registry() {
       setInfo(
         `Cached ${summary.options_upserted} options across ${summary.fields_seen} fields.`,
       );
-      await loadOptions();
+      // Reloads this page's own dropdowns (the subscription above) and
+      // every other mounted page's — Settings' pre-warm picker, notably.
+      emitDataChanged("registry-options");
     } catch (e) {
       setError(String(e));
     } finally {
@@ -383,6 +393,9 @@ export function Registry() {
       const n = await api.refreshRegistryPresearch(ps.id);
       setInfo(`Cached ${n} entries for "${ps.name}".`);
       await loadPresearches();
+      // The walk upserts registry stubs AND their drivers — Listings'
+      // driver autocomplete learns the new names (DCH-71).
+      emitDataChanged("drivers");
     } catch (e) {
       setError(String(e));
       await loadPresearches();

@@ -94,6 +94,7 @@ import {
   type TypeOption,
 } from "@/lib/listingFilters";
 import { filterRegistryResults } from "@/lib/registryResults";
+import { emitDataChanged, useDataChanged } from "@/lib/dataEvents";
 import { useEvent } from "@/lib/useEvent";
 import {
   EMPTY_YEAR_RANGE,
@@ -375,6 +376,11 @@ export function Listings() {
     void loadGroups();
     void loadLocalDrivers();
   }, []);
+
+  // A pre-warm or pre-search refresh elsewhere upserts driver rows this
+  // page's assignment autocomplete should know about (DCH-71).
+  // loadLocalDrivers already keeps the old list if the re-fetch fails.
+  useDataChanged("drivers", () => void loadLocalDrivers());
 
   async function loadLocalDrivers() {
     try {
@@ -5003,6 +5009,9 @@ function RegistrySearchDialog({
         `Cached ${summary.options_upserted} options across ${summary.fields_seen} fields.`,
       );
       await loadOptions();
+      // The dialog reloaded itself; mounted pages holding the same cache
+      // (Registry, Settings' pre-warm picker) refresh too (DCH-71).
+      emitDataChanged("registry-options");
     } catch (e) {
       setDialogError(String(e));
     } finally {

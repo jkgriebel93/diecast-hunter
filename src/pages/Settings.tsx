@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { NoticeBanner } from "@/components/NoticeBanner";
+import { emitDataChanged, useDataChanged } from "@/lib/dataEvents";
 import { describeExpiry } from "@/lib/shareLinks";
 import {
   api,
@@ -468,6 +469,9 @@ export function Settings() {
     try {
       const s = await api.prewarmRegistryByDriver(prewarmDriverGuid);
       setPrewarmSummary(s);
+      // The walk upserted a driver row and their entries — mounted driver
+      // lists elsewhere (Listings' autocomplete) refresh now (DCH-71).
+      emitDataChanged("drivers");
       try {
         setPrewarmedDrivers(await api.listPrewarmedDrivers());
       } catch {
@@ -639,6 +643,30 @@ export function Settings() {
     void loadShares();
   }, []);
 
+  // The pre-warm picker's vocabulary is the form-options driver list; when
+  // any page refreshes that cache — including this one's own button, which
+  // previously left this very picker stale — re-fetch it (DCH-71). Failure
+  // keeps the vocabulary already loaded.
+  useDataChanged("registry-options", () => void reloadPrewarmVocabulary());
+
+  async function reloadPrewarmVocabulary() {
+    try {
+      const [ds, listingCounts] = await Promise.all([
+        api.listRegistryFormOptions("driver"),
+        driverListingCounts(),
+      ]);
+      setDrivers(
+        sortDriverOptions(
+          ds,
+          (x) => x.display,
+          (x) => listingCounts.get(x.normalized) ?? 0,
+        ),
+      );
+    } catch {
+      // Keep the previously loaded list — never blank a working dropdown.
+    }
+  }
+
   async function onSave(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
@@ -765,6 +793,9 @@ export function Settings() {
       setOptionsMessage(
         `Cached ${summary.options_upserted} dropdown options across ${summary.fields_seen} fields.`,
       );
+      // Every criteria dropdown fed by the cache — the Registry page's and
+      // this page's own pre-warm picker — re-fetches (DCH-71).
+      emitDataChanged("registry-options");
     } catch (e) {
       setOptionsError(String(e));
     } finally {

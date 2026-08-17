@@ -1,5 +1,19 @@
 # Implementation order for open DCH tickets
 
+Rev 35, 2026-08-17. **DCH-71 shipped.** The mechanism is `lib/dataEvents.ts` — a tiny
+frontend pub/sub (topics `drivers` and `registry-options`) that makes the mutate→list
+refresh cycle deliberate: the mutating page emits after success, and every mounted page
+holding a list fed by that data re-fetches. Frontend-only on purpose — every mutation
+in the inventory starts as an `invoke()` from this window, so completion is observable
+exactly where the emit belongs. Wired: pre-warm and pre-search refresh → `drivers`
+(Listings' assignment autocomplete re-fetches); form-options refresh from Registry,
+Settings, or the match dialog → `registry-options` (Registry's criteria dropdowns and
+Settings' pre-warm picker re-fetch — Settings' own refresh button previously left its
+own picker stale). The failed-refresh guarantee is structural: subscribers re-run their
+existing load functions, which only replace state on success. Waived cycles are on the
+ticket (dialogs that load on open, same-page ad-hoc reloads that already work, the
+headless overnight auto-sync). Remaining in the polish epic: DCH-66 → 65 → 64.
+
 Rev 34, 2026-08-17. **DCH-63 shipped**, and the decisions it queued are made. The
 schema needed nothing: `my_collection.notes` has existed since 0001 and the sync's
 DO UPDATE SET list never included it — the gap was purely a write path and UI. The
