@@ -1,5 +1,18 @@
 # Implementation order for open DCH tickets
 
+Rev 27, 2026-08-17. **DCH-61 shipped — the performance epic (DCH-62) is complete.** The
+politeness call was made deliberately: reads (GETs) now pace at 300 ms between request
+starts, while every mutation (login, UpdateFilter, register, delete) keeps the original
+800 ms; both are named constants in `dcr/client.rs`, and `READ_INTERVAL` is THE knob to
+turn back up if DCR ever objects. Production-search page walks additionally run through
+`dcr/walk.rs::walk_pages_buffered` — at most `WALK_CONCURRENCY` (3) fetches in flight,
+delivered strictly in page order (registry order survives), with a fetch error, login
+redirect, or cancellation aborting the walk and dropping in-flight requests. A 40-page
+walk's enforced idle drops from ~31 s to ~12 s with fetch latency overlapped on top.
+The collection walk stays sequential (it inherits the 300 ms floor's 2.7× anyway) —
+concurrency there would complicate the prune-safety path for little gain. The UI batch
+(DCH-67 first) is now the front of the queue.
+
 Rev 26, 2026-08-17. **DCH-60 shipped**, closing the epic's substantive work. The startup
 backfill now waits for a `frontend_ready` signal (15s timeout fallback) so it queues
 behind the first paint's queries instead of racing them; the attribute scan gained an
@@ -66,12 +79,6 @@ cannot re-sync from anywhere.
 
 The ordering principle is unchanged: compounding work — anything that makes later tickets
 cheaper or safer — goes before work that only pays off once.
-
-## Performance epic (DCH-62) — one optional ticket left
-
-| # | Ticket | What | Why here |
-| --- | --- | --- | --- |
-| 1 | DCH-61 | Loosen the 800 ms DCR rate floor | Deliberately last: it's a politeness-policy decision, not a bug fix, and it reshapes the same `dcr/client.rs` limiter 57 worked around. With 53's cap and 57's session reuse in, this is the remaining multiplier on walk time. Low priority — skippable if DCR politeness feels wrong. |
 
 ## UI & app polish (DCH-63…68, filed 2026-08-16)
 
@@ -153,6 +160,7 @@ read-only projection.
 | DCH-55 | `synchronous=NORMAL` under WAL; hot sync loops write in transactions (per garage page, 100-row batches for prewarm/presearch, one tx for watchlist archival, 200-row batches for the driver backfill); the shared `driver_upsert` collapses INSERT+SELECT to `RETURNING id` behind a per-run memo. Cancel checks sit between batches, so no long uncancellable transaction. |
 | DCH-56 | `listing_history` only records change: an observation identical to the listing's latest row (price, shipping, status — NULLs compare equal) is skipped; first observations and reverts still write. Migration 0031 collapsed existing runs to first + last row each. The table is still write-only — nothing reads it yet — so the sparser shape constrains nothing. |
 | DCH-54 | One `EbayClient` + `EbayUserCreds` + `ListingAssocContext` per watchlist sync (and per refresh-all pass): per-item TLS handshakes, keyring reads, and drivers/vocab/alias/model reloads are gone, the 200 ms limiter finally spans items, and Trading calls take `&reqwest::Client` so they share the Browse pool. Archival's local half (`flag_ended_listings`) was split from its network half so tests never link the keyring. |
+| DCH-61 | DCR pacing: reads at 300 ms between starts, mutations keep 800 ms (named constants; `READ_INTERVAL` is the back-off knob); production-search walks fetch up to 3 pages in flight via `dcr/walk.rs` — ordered delivery, bounded window, error/cancel drops in-flight requests. Closed epic DCH-62. |
 | DCH-60 | Startup perf: backfill deferred behind `frontend_ready` (15s fallback); `attrs_scanned_at` high-water mark (migration 0033) + SQL-side slim JSON so a quiet launch reads nothing and the blob never leaves SQLite; keyring + schtasks on the blocking pool (async `settings::secret_*`, `scheduler::*`); Settings refresh via one `Promise.all`; Browse/Seller Feed on the narrow `list_watched_external_ids`. |
 | DCH-59 | Registry results perf: pure filter/sort in `lib/registryResults.ts` (tested, incl. the pinned nulls-first-on-descending quirk); one deferred value over all five narrowing inputs; 200-at-a-time bounded render with "Show more"; memoized `RegistryResultCard`; `MultiSelect` capped at 100 rendered options with a count note; match dialog uses display→GUID Maps + memoized datalists. |
 | DCH-58 | Listings page perf: one-pass faceting + precomputed search haystacks + `useDeferredValue` (`lib/listingFilters.ts`, equivalence-tested); memoized `ListingCard` behind stable id-taking handlers (`lib/useEvent.ts`); single-row mutations re-fetch one row via `get_listing_row` and splice (full refetch only for sync/refresh-all/bulk); collapsed grouped sections mount nothing; `detail_url` via `json_extract` so `re.raw_json` never leaves SQLite. |

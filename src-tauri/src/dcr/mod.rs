@@ -9,6 +9,7 @@ pub mod parse;
 pub mod production_search;
 pub mod register;
 pub mod session;
+pub mod walk;
 
 pub use client::DcrClient;
 pub use collection::{CollectionItem, CollectionPage};
