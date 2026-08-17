@@ -51,6 +51,9 @@ pub async fn cancel_active_operation(state: State<'_, AppState>) -> AppResult<bo
 
 #[derive(Serialize)]
 pub struct AppStatus {
+    /// Build-time CalVer + commit (DCH-67) — what a bug report should quote.
+    pub app_version: String,
+    pub build_commit: String,
     pub db_path: String,
     pub schema_version: i64,
     pub registry_count: i64,
@@ -79,6 +82,8 @@ pub async fn app_status(state: State<'_, AppState>) -> AppResult<AppStatus> {
             .fetch_one(pool)
             .await?;
     Ok(AppStatus {
+        app_version: crate::APP_VERSION.to_string(),
+        build_commit: crate::BUILD_COMMIT.to_string(),
         db_path: state.db.path.to_string_lossy().into_owned(),
         schema_version: schema_version.0,
         registry_count: count(pool, "registry_entries").await?,

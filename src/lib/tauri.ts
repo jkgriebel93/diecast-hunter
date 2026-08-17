@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export interface AppStatus {
+  /** Build-time CalVer + commit (DCH-67) — what a bug report should quote. */
+  app_version: string;
+  build_commit: string;
   db_path: string;
   schema_version: number;
   registry_count: number;

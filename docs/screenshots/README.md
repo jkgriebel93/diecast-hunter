@@ -38,6 +38,7 @@ underneath it and does nothing).
 
 | Folder | Ticket | What it shows |
 | --- | --- | --- |
+| `app-version/` | DCH-67 | The Dashboard diagnostics card's `app: 26.8.17 (cd658ea)` line — the in-app face of the build-derived CalVer + commit that also titles the window |
 | `archive-ended-listings/` | DCH-10 | Archived rows and the end-reason labels |
 | `danger-actions/` | DCH-33 | `.btn-danger` / `.link-danger` at rest |
 | `enrichment-cap/` | DCH-53 | Settings' Sync tab with the "Max detail pages per sync" cap beside the pre-warm cap |

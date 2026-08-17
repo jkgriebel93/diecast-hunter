@@ -1,5 +1,16 @@
 # Implementation order for open DCH tickets
 
+Rev 29, 2026-08-17. **DCH-67 shipped** — the polish epic (DCH-69) is underway. The
+decisions the ticket queued: **CalVer `YY.M.D`** (two-digit year deliberately — the MSI
+ProductVersion major field caps at 255, so `2026.x.y` would break the installer bundle),
+**version + short commit** in the title (`Diecast Hunter 26.8.17 (cd658ea)`; commit is
+what tells two same-day CI builds apart, `-dirty` marks unclean local builds), and
+**derived at build time** in `build.rs` — build date → CalVer, `git rev-parse` → commit;
+nothing hand-edited. CI stamps the same CalVer into the installers via
+`tauri build --config`; the static version in `tauri.conf.json` is only a fallback for
+local builds. Also surfaced as `app:` in the Dashboard diagnostics card and in
+`app_status`, so a bug report can quote it (the DCH-24 tie-in). Next: DCH-68.
+
 Rev 28, 2026-08-17. **The 2026-08-17 FEATURES.md pass became five tickets and an epic.**
 New epic **DCH-69 "UI & app polish"** now holds the whole polish backlog: the existing
 DCH-63…68 were re-parented under it, and four new members joined — DCH-70 (extension
@@ -99,16 +110,15 @@ small-and-decided before large-and-undecided.
 
 | # | Ticket | What | Why here |
 | --- | --- | --- | --- |
-| 1 | DCH-67 | Version number in the title bar | Small and compounding: every bug report from here on can name its build (feeds DCH-24's docs). Decisions are calver-vs-semver and deriving the number at build time rather than hand-editing `tauri.conf.json`. |
-| 2 | DCH-68 | Expand All beside every Collapse All | Small and mechanical: `useMinimized`'s map already supports it via `setManyMinimized`. The one trap is written down in the ticket — expand-all writes explicit `false` entries, or Saved Listings' collapsed-by-default springs back. |
-| 3 | DCH-72 | Result counts on every search surface | Small, and the freshest recorded pain (the countless match-dialog list). The Registry page is the reference; mostly a matter of applying it. |
-| 4 | DCH-73 | Free-text narrowing on every search vector | Same dialog as 72 and the same session that surfaced it — one branch can plausibly carry both. Inventory first; live Browse/Seller Feed may already be covered by eBay's own `q`. |
-| 5 | DCH-70 | Extension overlay starts minimized | Small but a separate codebase (`extension/`), with extension-side persistence for the choice. DCH-20's scan-first philosophy applied to the overlay. |
-| 6 | DCH-63 | Edit collection entries, incl. notes | The most-wanted of the batch, but needs a schema decision first: notes are user-authored data with no DCR equivalent, and `my_collection.raw_json` is rebuilt on every sync, so they need their own column plus a protect-on-sync rule (the `driver_id_user_set` pattern). Whatever ships here widens DCH-42's at-risk slice again. |
-| 7 | DCH-71 | Refresh stale option lists after mutations | The named instance (driver lists after pre-warm) plus an inventory of the mutate→list cycles. Medium: the fix is per-cycle wiring, and the inventory decides how many cycles there are. |
-| 8 | DCH-66 | Separate driver / within-driver sorts | Design question before code: the reporter's own note asks whether two sort dropdowns is too busy. Answer that (maybe a fixed within-group order suffices), then any new values follow the DCH-35 vocabulary. |
-| 9 | DCH-65 | Standardize the Collection display header | Not yet actionable — the FEATURES.md sub-bullet was empty, so the specific complaint needs capturing before anything is built. Same posture as DCH-26: needs a problem statement, not a guess. |
-| 10 | DCH-64 | Open a view in a new window | Largest and least defined: a second window needs its own workspace state (`workspace.v1` is one shared blob) and a defined interaction with tray-mode close. Worth a short design note before a branch. |
+| 1 | DCH-68 | Expand All beside every Collapse All | Small and mechanical: `useMinimized`'s map already supports it via `setManyMinimized`. The one trap is written down in the ticket — expand-all writes explicit `false` entries, or Saved Listings' collapsed-by-default springs back. |
+| 2 | DCH-72 | Result counts on every search surface | Small, and the freshest recorded pain (the countless match-dialog list). The Registry page is the reference; mostly a matter of applying it. |
+| 3 | DCH-73 | Free-text narrowing on every search vector | Same dialog as 72 and the same session that surfaced it — one branch can plausibly carry both. Inventory first; live Browse/Seller Feed may already be covered by eBay's own `q`. |
+| 4 | DCH-70 | Extension overlay starts minimized | Small but a separate codebase (`extension/`), with extension-side persistence for the choice. DCH-20's scan-first philosophy applied to the overlay. |
+| 5 | DCH-63 | Edit collection entries, incl. notes | The most-wanted of the batch, but needs a schema decision first: notes are user-authored data with no DCR equivalent, and `my_collection.raw_json` is rebuilt on every sync, so they need their own column plus a protect-on-sync rule (the `driver_id_user_set` pattern). Whatever ships here widens DCH-42's at-risk slice again. |
+| 6 | DCH-71 | Refresh stale option lists after mutations | The named instance (driver lists after pre-warm) plus an inventory of the mutate→list cycles. Medium: the fix is per-cycle wiring, and the inventory decides how many cycles there are. |
+| 7 | DCH-66 | Separate driver / within-driver sorts | Design question before code: the reporter's own note asks whether two sort dropdowns is too busy. Answer that (maybe a fixed within-group order suffices), then any new values follow the DCH-35 vocabulary. |
+| 8 | DCH-65 | Standardize the Collection display header | Not yet actionable — the FEATURES.md sub-bullet was empty, so the specific complaint needs capturing before anything is built. Same posture as DCH-26: needs a problem statement, not a guess. |
+| 9 | DCH-64 | Open a view in a new window | Largest and least defined: a second window needs its own workspace state (`workspace.v1` is one shared blob) and a defined interaction with tray-mode close. Worth a short design note before a branch. |
 
 ## Next up (after those)
 
@@ -177,6 +187,7 @@ read-only projection.
 | DCH-55 | `synchronous=NORMAL` under WAL; hot sync loops write in transactions (per garage page, 100-row batches for prewarm/presearch, one tx for watchlist archival, 200-row batches for the driver backfill); the shared `driver_upsert` collapses INSERT+SELECT to `RETURNING id` behind a per-run memo. Cancel checks sit between batches, so no long uncancellable transaction. |
 | DCH-56 | `listing_history` only records change: an observation identical to the listing's latest row (price, shipping, status — NULLs compare equal) is skipped; first observations and reverts still write. Migration 0031 collapsed existing runs to first + last row each. The table is still write-only — nothing reads it yet — so the sparser shape constrains nothing. |
 | DCH-54 | One `EbayClient` + `EbayUserCreds` + `ListingAssocContext` per watchlist sync (and per refresh-all pass): per-item TLS handshakes, keyring reads, and drivers/vocab/alias/model reloads are gone, the 200 ms limiter finally spans items, and Trading calls take `&reqwest::Client` so they share the Browse pool. Archival's local half (`flag_ended_listings`) was split from its network half so tests never link the keyring. |
+| DCH-67 | CalVer `YY.M.D` + short commit, derived at build time (`build.rs` → `DCH_BUILD_VERSION`/`DCH_BUILD_COMMIT`): window title `Diecast Hunter 26.8.17 (abc1234)`, `app:` line on the Dashboard diagnostics card, `app_version`/`build_commit` in `app_status`. CI stamps installers via `tauri build --config`; conf's static version is a local-build fallback. Two-digit year because MSI caps the major field at 255. |
 | DCH-61 | DCR pacing: reads at 300 ms between starts, mutations keep 800 ms (named constants; `READ_INTERVAL` is the back-off knob); production-search walks fetch up to 3 pages in flight via `dcr/walk.rs` — ordered delivery, bounded window, error/cancel drops in-flight requests. Closed epic DCH-62. |
 | DCH-60 | Startup perf: backfill deferred behind `frontend_ready` (15s fallback); `attrs_scanned_at` high-water mark (migration 0033) + SQL-side slim JSON so a quiet launch reads nothing and the blob never leaves SQLite; keyring + schtasks on the blocking pool (async `settings::secret_*`, `scheduler::*`); Settings refresh via one `Promise.all`; Browse/Seller Feed on the narrow `list_watched_external_ids`. |
 | DCH-59 | Registry results perf: pure filter/sort in `lib/registryResults.ts` (tested, incl. the pinned nulls-first-on-descending quirk); one deferred value over all five narrowing inputs; 200-at-a-time bounded render with "Show more"; memoized `RegistryResultCard`; `MultiSelect` capped at 100 rendered options with a count note; match dialog uses display→GUID Maps + memoized datalists. |
