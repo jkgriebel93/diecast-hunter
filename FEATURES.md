@@ -41,3 +41,10 @@
 - Add Expand All everywhere there is a Collapse All
 - Auto/learned grouping?
   - Have I written this somewhere else?
+- Minimize DCH FF plugin display by default
+- Auto-reload driver select list after adding a new one via pre-warm
+  - And other similar reload-update cycles
+- Display search result counts everywhere
+  - Surfaced when attempting to manually match a 1987 Darrell Waltrip tide ride
+- Should string search be added to all search vectors?
+- Add Lionel PN as an attribute?

@@ -1,5 +1,17 @@
 # Implementation order for open DCH tickets
 
+Rev 28, 2026-08-17. **The 2026-08-17 FEATURES.md pass became five tickets and an epic.**
+New epic **DCH-69 "UI & app polish"** now holds the whole polish backlog: the existing
+DCH-63…68 were re-parented under it, and four new members joined — DCH-70 (extension
+overlay starts minimized), DCH-71 (refresh stale option lists after pre-warm and similar
+mutate→list cycles), DCH-72 (result counts on every search surface — surfaced by a
+countless match-dialog result list during a 1987 Waltrip Tide session), and DCH-73
+(free-text narrowing on every search vector; same dialog, so it pairs with 72). The
+fifth, **DCH-74 (Lionel part number as an attribute — scope first)**, went under epic
+DCH-7 and is linked to DCH-26, whose use-case question its scoping note should help
+answer. 72→73 are slotted early: small, reference implementations exist (DCH-35/58/59),
+and they fix the freshest recorded pain.
+
 Rev 27, 2026-08-17. **DCH-61 shipped — the performance epic (DCH-62) is complete.** The
 politeness call was made deliberately: reads (GETs) now pace at 300 ms between request
 starts, while every mutation (login, UpdateFilter, register, delete) keeps the original
@@ -80,26 +92,31 @@ cannot re-sync from anywhere.
 The ordering principle is unchanged: compounding work — anything that makes later tickets
 cheaper or safer — goes before work that only pays off once.
 
-## UI & app polish (DCH-63…68, filed 2026-08-16)
+## UI & app polish (epic DCH-69)
 
-The FEATURES.md batch. Ordered small-and-decided before large-and-undecided; none blocks
-the perf epic, and 67/68 are small enough to interleave with it as palate cleansers.
+The FEATURES.md batches (2026-08-16 and 2026-08-17), all under epic DCH-69. Ordered
+small-and-decided before large-and-undecided.
 
 | # | Ticket | What | Why here |
 | --- | --- | --- | --- |
 | 1 | DCH-67 | Version number in the title bar | Small and compounding: every bug report from here on can name its build (feeds DCH-24's docs). Decisions are calver-vs-semver and deriving the number at build time rather than hand-editing `tauri.conf.json`. |
 | 2 | DCH-68 | Expand All beside every Collapse All | Small and mechanical: `useMinimized`'s map already supports it via `setManyMinimized`. The one trap is written down in the ticket — expand-all writes explicit `false` entries, or Saved Listings' collapsed-by-default springs back. |
-| 3 | DCH-63 | Edit collection entries, incl. notes | The most-wanted of the batch, but needs a schema decision first: notes are user-authored data with no DCR equivalent, and `my_collection.raw_json` is rebuilt on every sync, so they need their own column plus a protect-on-sync rule (the `driver_id_user_set` pattern). Whatever ships here widens DCH-42's at-risk slice again. |
-| 4 | DCH-66 | Separate driver / within-driver sorts | Design question before code: the reporter's own note asks whether two sort dropdowns is too busy. Answer that (maybe a fixed within-group order suffices), then any new values follow the DCH-35 vocabulary. |
-| 5 | DCH-65 | Standardize the Collection display header | Not yet actionable — the FEATURES.md sub-bullet was empty, so the specific complaint needs capturing before anything is built. Same posture as DCH-26: needs a problem statement, not a guess. |
-| 6 | DCH-64 | Open a view in a new window | Largest and least defined: a second window needs its own workspace state (`workspace.v1` is one shared blob) and a defined interaction with tray-mode close. Worth a short design note before a branch. |
+| 3 | DCH-72 | Result counts on every search surface | Small, and the freshest recorded pain (the countless match-dialog list). The Registry page is the reference; mostly a matter of applying it. |
+| 4 | DCH-73 | Free-text narrowing on every search vector | Same dialog as 72 and the same session that surfaced it — one branch can plausibly carry both. Inventory first; live Browse/Seller Feed may already be covered by eBay's own `q`. |
+| 5 | DCH-70 | Extension overlay starts minimized | Small but a separate codebase (`extension/`), with extension-side persistence for the choice. DCH-20's scan-first philosophy applied to the overlay. |
+| 6 | DCH-63 | Edit collection entries, incl. notes | The most-wanted of the batch, but needs a schema decision first: notes are user-authored data with no DCR equivalent, and `my_collection.raw_json` is rebuilt on every sync, so they need their own column plus a protect-on-sync rule (the `driver_id_user_set` pattern). Whatever ships here widens DCH-42's at-risk slice again. |
+| 7 | DCH-71 | Refresh stale option lists after mutations | The named instance (driver lists after pre-warm) plus an inventory of the mutate→list cycles. Medium: the fix is per-cycle wiring, and the inventory decides how many cycles there are. |
+| 8 | DCH-66 | Separate driver / within-driver sorts | Design question before code: the reporter's own note asks whether two sort dropdowns is too busy. Answer that (maybe a fixed within-group order suffices), then any new values follow the DCH-35 vocabulary. |
+| 9 | DCH-65 | Standardize the Collection display header | Not yet actionable — the FEATURES.md sub-bullet was empty, so the specific complaint needs capturing before anything is built. Same posture as DCH-26: needs a problem statement, not a guess. |
+| 10 | DCH-64 | Open a view in a new window | Largest and least defined: a second window needs its own workspace state (`workspace.v1` is one shared blob) and a defined interaction with tray-mode close. Worth a short design note before a branch. |
 
 ## Next up (after those)
 
 | # | Ticket | What | Why here |
 | --- | --- | --- | --- |
-| 1 | DCH-26 | Lionel website integration | Scope still open — needs a use case before an implementation. |
-| 2 | DCH-27 | Revive Facebook Marketplace | Its stated precondition (matching/valuation epics) is met, but the real blocker was never sequencing: FB has no API, and the previous integration was removed deliberately. |
+| 1 | DCH-74 | Lionel part number as an attribute (scope first) | New (2026-08-17), under DCH-7 and linked to DCH-26. Deliberately ahead of 26: its scoping note — where PNs come from, where they'd live, whether they feed matching — is the concrete use case 26 has been waiting for. A PN is potentially the strongest single match signal available. |
+| 2 | DCH-26 | Lionel website integration | Scope still open — needs a use case before an implementation; DCH-74's scoping should supply one. |
+| 3 | DCH-27 | Revive Facebook Marketplace | Its stated precondition (matching/valuation epics) is met, but the real blocker was never sequencing: FB has no API, and the previous integration was removed deliberately. |
 | — | DCH-42 | Database backup and restore | Filed from DCH-25. Only the manually-entered slice is genuinely at risk — DCR data re-syncs — but the sold-listings archive can't be backfilled at all. **Rev 21 widened this**: collection photos live as files in `<data dir>/images/`, not as rows, so "back up the database" is no longer the whole job. A backup that takes the `.sqlite` and leaves `images/` behind restores rows pointing at files that aren't there. DCH-63's notes will add another slice when they land. |
 
 ## Remote access (DCH-25's output)
