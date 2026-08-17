@@ -287,6 +287,7 @@ pub fn run() {
             commands::list_all_collection_items,
             commands::create_local_collection_entry,
             commands::update_local_collection_entry,
+            commands::set_collection_notes,
             commands::set_collection_photo,
             commands::clear_collection_photo,
             commands::allow_photo_preview,

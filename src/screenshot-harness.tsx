@@ -28,9 +28,11 @@ import { Settings } from "./pages/Settings";
 import { SellerFeed } from "./pages/SellerFeed";
 import { Registry } from "./pages/Registry";
 import { Dashboard } from "./pages/Dashboard";
+import { Collection } from "./pages/Collection";
 import { resetMinimized, setManyMinimized } from "./lib/minimized";
 import { facetSectionKey } from "./lib/facetSections";
 import type {
+  CollectionRow,
   DriverOption,
   EbaySearchItem,
   EbaySearchPage,
@@ -420,6 +422,52 @@ const REGISTRY_FORM_OPTIONS: Record<string, FormOptionRow[]> = {
   finish: [opt("fn-1", "(Standard)"), opt("fn-2", "Color Chrome")],
 };
 
+/** DCH-63's presets: a small collection where some entries carry notes, so
+ *  the Add/Edit note affordance and the note text are both in frame. Two
+ *  DCR-synced rows with notes prove the affordance isn't local-only. */
+function collectionItem(i: number): CollectionRow {
+  const driver = DRIVERS[i % DRIVERS.length];
+  const local = i === 5;
+  return {
+    collection_id: i,
+    asset_guid: `asset-${i}`,
+    driver_id: (i % DRIVERS.length) + 1,
+    driver_name: driver,
+    year: 2015 + (i % 8),
+    year_raced: null,
+    car_number: String(5 + i),
+    diecast_type: null,
+    registration_number: null,
+    oem: "Action / Lionel",
+    brand: i % 2 === 0 ? "Elite" : "ARC",
+    scale: "1:24",
+    make: "CWC",
+    finish: i % 2 === 0 ? "Elite" : null,
+    production_qty: 2400 + i * 100,
+    scheme_text: `#${5 + i} ${i % 2 === 0 ? "Valvoline" : "HendrickCars.com"}`,
+    image_url: null,
+    detail_url: local ? null : `/diecast/x/y/asset-${i}`,
+    retail_value_cents: local ? null : 8999 + i * 500,
+    wholesale_value_cents: local ? null : 3200 + i * 200,
+    registry_int_id: local ? null : 90000 + i,
+    enriched: !local,
+    is_local: local,
+    paid_cents: i % 3 === 0 ? 6500 + i * 300 : null,
+    condition: null,
+    notes:
+      i === 1
+        ? "Box has shelf wear — bought at the Hendrick museum gift shop."
+        : i === 5
+          ? "Display case #3, top row."
+          : null,
+    din: i % 4 === 0 ? 1832 : null,
+    local_image_path: null,
+  };
+}
+const COLLECTION: CollectionRow[] = Array.from({ length: 6 }, (_, i) =>
+  collectionItem(i + 1),
+);
+
 const RESULTS: Record<string, unknown> = {
   // DCH-67: the diagnostics card's version line. Fixed values — a live
   // date would make the capture non-deterministic.
@@ -434,6 +482,7 @@ const RESULTS: Record<string, unknown> = {
     listing_count: 1093,
   },
   list_listings: LISTINGS,
+  list_all_collection_items: COLLECTION,
   list_watched_external_ids: [],
   frontend_ready: null,
   list_registry_presearches: [],
@@ -604,6 +653,12 @@ const ALL_SECTIONS = [
 // depicts a UI that exists.
 if (preset.startsWith("filter-")) {
   setManyMinimized(ALL_SECTIONS, false);
+}
+// DCH-63: the collection presets shoot the flat view, so every row's note
+// affordance is on screen without first expanding driver groups. The page
+// reads this once at state init.
+if (preset.startsWith("collection")) {
+  localStorage.setItem("collection:group-by-driver", "0");
 }
 // DCH-72: the match dialog opens from a card body, and cards default
 // collapsed (DCH-20) — expand them pre-mount so "Match…" is clickable.
@@ -791,6 +846,11 @@ function Harness() {
       return () => {
         cancelled = true;
       };
+    }
+    // DCH-63: open the note editor on the first row that already has one.
+    if (preset === "collection-notes-dialog") {
+      const t = setTimeout(() => clickByText("button", "Edit note"), 400);
+      return () => clearTimeout(t);
     }
     // DCH-72: open the match dialog from the first unmatched card and run
     // the stubbed 450-result search, so the count line above the results is
@@ -1051,9 +1111,11 @@ function Harness() {
                 ? "Seller Feed"
                 : preset.startsWith("registry")
                   ? "Registry Search"
-                  : preset === "dashboard"
-                    ? "Dashboard"
-                    : "Saved Listings"}
+                  : preset.startsWith("collection")
+                    ? "My Collection"
+                    : preset === "dashboard"
+                      ? "Dashboard"
+                      : "Saved Listings"}
         </div>
       </div>
       <div className="relative flex-1 min-h-0">
@@ -1066,6 +1128,8 @@ function Harness() {
             <SellerFeed />
           ) : preset.startsWith("registry") ? (
             <Registry />
+          ) : preset.startsWith("collection") ? (
+            <Collection />
           ) : preset === "dashboard" ? (
             <Dashboard />
           ) : (

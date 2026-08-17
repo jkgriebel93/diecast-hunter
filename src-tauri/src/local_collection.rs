@@ -297,6 +297,28 @@ pub async fn create_local_entry(
     })
 }
 
+/// Set or clear the user's note on a collection entry — ANY entry, not just
+/// a manually-added one (DCH-63). Notes are user-authored data with no DCR
+/// equivalent, the same standing as a photo of the copy on the shelf
+/// (`collection_photo`): the column belongs to the user, and the collection
+/// sync's upsert never writes it, so nothing here needs the local-only guard
+/// that protects the DCR-owned fields below.
+pub async fn set_entry_notes(
+    pool: &SqlitePool,
+    collection_id: i64,
+    notes: Option<String>,
+) -> AppResult<()> {
+    let res = sqlx::query("UPDATE my_collection SET notes = ? WHERE id = ?")
+        .bind(clean(&notes))
+        .bind(collection_id)
+        .execute(pool)
+        .await?;
+    if res.rows_affected() == 0 {
+        return Err(AppError::Config("collection entry no longer exists".into()));
+    }
+    Ok(())
+}
+
 /// Edit a manually-added entry. Refuses rows that came from DCR: those are
 /// a cache of someone else's data, and an edit would be silently reverted by
 /// the next sync — a worse outcome than being told no.
@@ -673,5 +695,52 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(notes, None);
+    }
+
+    async fn stored_notes(pool: &SqlitePool, collection_id: i64) -> Option<String> {
+        let (notes,): (Option<String>,) =
+            sqlx::query_as("SELECT notes FROM my_collection WHERE id = ?")
+                .bind(collection_id)
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        notes
+    }
+
+    #[tokio::test]
+    async fn set_entry_notes_trims_stores_and_clears() {
+        let pool = migrated_pool().await;
+        let created = create_local_entry(&pool, input("Jeff Gordon", "DuPont"))
+            .await
+            .unwrap();
+
+        set_entry_notes(
+            &pool,
+            created.collection_id,
+            Some("  box has shelf wear  ".into()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            stored_notes(&pool, created.collection_id).await.as_deref(),
+            Some("box has shelf wear"),
+        );
+
+        // A blanked textarea clears the note rather than storing "".
+        set_entry_notes(&pool, created.collection_id, Some("   ".into()))
+            .await
+            .unwrap();
+        assert_eq!(stored_notes(&pool, created.collection_id).await, None);
+    }
+
+    #[tokio::test]
+    async fn set_entry_notes_rejects_a_missing_row() {
+        // A stale dialog (row removed in another pane) should say so, not
+        // report success against nothing.
+        let pool = migrated_pool().await;
+        let err = set_entry_notes(&pool, 9999, Some("note".into()))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("no longer exists"), "{err}");
     }
 }

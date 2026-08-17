@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { Modal } from "@/components/Modal";
 import { ManualEntryDialog } from "@/components/ManualEntryDialog";
 import { findLocalDuplicates } from "@/lib/localEntry";
 import { YearRangeFilter } from "@/components/YearRangeFilter";
@@ -85,6 +86,9 @@ export function Collection() {
   const [manualEntry, setManualEntry] = useState<CollectionRow | "new" | null>(
     null,
   );
+  /** Row whose note is being edited — any entry, DCR-synced included; the
+   *  sync never touches the notes column (DCH-63). */
+  const [notesTarget, setNotesTarget] = useState<CollectionRow | null>(null);
 
   async function load() {
     setError(null);
@@ -261,6 +265,7 @@ export function Collection() {
           it.make,
           it.year != null ? String(it.year) : null,
           it.car_number,
+          it.notes,
         ]
           .filter(Boolean)
           .join(" ")
@@ -464,6 +469,17 @@ export function Collection() {
         </div>
       </header>
 
+      {notesTarget && (
+        <NotesDialog
+          item={notesTarget}
+          onClose={() => setNotesTarget(null)}
+          onSaved={() => {
+            setNotesTarget(null);
+            void load();
+          }}
+        />
+      )}
+
       {manualEntry && (
         <ManualEntryDialog
           editing={manualEntry === "new" ? null : manualEntry}
@@ -493,7 +509,7 @@ export function Collection() {
             <input
               type="text"
               className="input flex-1"
-              placeholder="Search driver, scheme, year, OEM, brand, scale, car #…"
+              placeholder="Search driver, scheme, year, OEM, brand, scale, car #, notes…"
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
             />
@@ -650,6 +666,7 @@ export function Collection() {
                   imgSizeClass={IMG_CLASS[imgSize]}
                   onRemove={onRemove}
                   onEdit={setManualEntry}
+                  onNotes={setNotesTarget}
                   removingId={removingId}
                   duplicates={duplicates}
                 />
@@ -664,6 +681,7 @@ export function Collection() {
                   imgSizeClass={IMG_CLASS[imgSize]}
                   onRemove={onRemove}
                   onEdit={setManualEntry}
+                  onNotes={setNotesTarget}
                   removingId={removingId}
                   duplicateOf={duplicates.get(item.collection_id)}
                   showDriver
@@ -684,6 +702,7 @@ function DriverCard({
   imgSizeClass,
   onRemove,
   onEdit,
+  onNotes,
   removingId,
   duplicates,
 }: {
@@ -693,6 +712,7 @@ function DriverCard({
   imgSizeClass: string;
   onRemove: (item: CollectionRow) => void;
   onEdit: (item: CollectionRow) => void;
+  onNotes: (item: CollectionRow) => void;
   removingId: number | null;
   duplicates: Map<number, CollectionRow>;
 }) {
@@ -731,6 +751,7 @@ function DriverCard({
                 imgSizeClass={imgSizeClass}
                 onRemove={onRemove}
                 onEdit={onEdit}
+                onNotes={onNotes}
                 removingId={removingId}
                 duplicateOf={duplicates.get(item.collection_id)}
               />
@@ -747,6 +768,7 @@ function CollectionItemRow({
   imgSizeClass,
   onRemove,
   onEdit,
+  onNotes,
   removingId,
   duplicateOf,
   showDriver = false,
@@ -755,6 +777,7 @@ function CollectionItemRow({
   imgSizeClass: string;
   onRemove: (item: CollectionRow) => void;
   onEdit: (item: CollectionRow) => void;
+  onNotes: (item: CollectionRow) => void;
   removingId: number | null;
   /** Set when this manually-added row now also exists as a synced DCR row —
    *  see findLocalDuplicates. */
@@ -913,6 +936,21 @@ function CollectionItemRow({
               Edit
             </button>
           )}
+          {/* On every row, not just manual ones: the note is the user's own
+              data, and the sync never touches it (DCH-63). */}
+          <button
+            type="button"
+            className="text-fg-subtle hover:text-fg disabled:opacity-50"
+            disabled={removingId !== null}
+            onClick={() => onNotes(item)}
+            title={
+              item.notes
+                ? "Edit the note on this entry"
+                : "Add a note to this entry"
+            }
+          >
+            {item.notes ? "Edit note" : "Add note"}
+          </button>
           <button
             type="button"
             className="link-danger disabled:opacity-50"
@@ -956,4 +994,83 @@ function useGroupByDriver(): [boolean, (v: boolean) => void] {
     }
   }, [value]);
   return [value, setValue];
+}
+
+/** Edit the free-text note on one entry (DCH-63). Deliberately not part of
+ *  ManualEntryDialog: that dialog edits the car's catalog fields and is
+ *  local-only, while a note is the user's own data and belongs on every
+ *  row — DCR-synced included, since the sync never writes the column. */
+function NotesDialog({
+  item,
+  onClose,
+  onSaved,
+}: {
+  item: CollectionRow;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [draft, setDraft] = useState(item.notes ?? "");
+  const [busy, setBusy] = useState(false);
+  const [dialogError, setDialogError] = useState<string | null>(null);
+
+  const carLine = [
+    item.year != null ? String(item.year) : null,
+    item.driver_name,
+    item.scheme_text,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  async function onSave() {
+    setBusy(true);
+    setDialogError(null);
+    try {
+      // The backend trims and stores a blanked textarea as NULL, so "select
+      // all, delete, save" is how a note is removed.
+      await api.setCollectionNotes(
+        item.collection_id,
+        draft.trim() === "" ? null : draft,
+      );
+      onSaved();
+    } catch (e) {
+      setDialogError(String(e));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={item.notes ? "Edit note" : "Add note"}
+      description={carLine || undefined}
+      onClose={onClose}
+      busy={busy}
+      onSubmit={() => void onSave()}
+      footer={
+        <>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={onClose}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+          <button type="submit" className="btn-primary" disabled={busy}>
+            {busy ? "Saving…" : "Save note"}
+          </button>
+        </>
+      }
+    >
+      {dialogError && (
+        <ErrorBanner error={dialogError} variant="inline" className="mb-3" />
+      )}
+      <textarea
+        className="input w-full min-h-28"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder="e.g. box has shelf wear · bought at Hendrick museum · display case #3"
+        autoFocus
+      />
+    </Modal>
+  );
 }

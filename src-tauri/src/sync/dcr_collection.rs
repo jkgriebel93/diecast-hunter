@@ -575,4 +575,46 @@ mod tests {
         assert_eq!(summary.drivers_upserted, 2);
         assert_eq!(summary.collection_rows_upserted, 4);
     }
+
+    /// The DCH-63 guarantee: notes (and the other user-owned columns) live
+    /// on `my_collection` but are NOT in the upsert's DO UPDATE SET list, so
+    /// a routine re-sync of the same garage item must leave them intact.
+    /// If someone later adds a column to that SET list, this is the test
+    /// that asks whether the user owns it.
+    #[tokio::test]
+    async fn resync_preserves_user_owned_columns() {
+        let pool = migrated_pool().await;
+        let mut summary = SyncSummary::default();
+        let mut driver_ids = DriverIdCache::new();
+        let item = garage_item("asset-1", Some("guid-1"), "Jeff Gordon");
+
+        persist_page(
+            &pool,
+            std::slice::from_ref(&item),
+            &mut driver_ids,
+            &mut summary,
+        )
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE my_collection SET notes = 'box has shelf wear', paid_cents = 4500
+             WHERE external_id = 'asset-1'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        persist_page(&pool, &[item], &mut driver_ids, &mut summary)
+            .await
+            .unwrap();
+
+        let (notes, paid): (Option<String>, Option<i64>) = sqlx::query_as(
+            "SELECT notes, paid_cents FROM my_collection WHERE external_id = 'asset-1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(notes.as_deref(), Some("box has shelf wear"));
+        assert_eq!(paid, Some(4500));
+    }
 }
