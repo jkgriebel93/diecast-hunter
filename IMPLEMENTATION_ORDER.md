@@ -1,5 +1,17 @@
 # Implementation order for open DCH tickets
 
+Rev 25, 2026-08-17. **DCH-59 shipped**: the Registry results pipeline's pure half moved
+to `lib/registryResults.ts` (filter + sort, unit-tested — including a pinned pre-existing
+quirk: descending sorts have always put null values first, and changing that is a design
+call for its own ticket, not a perf side effect). The page defers all five narrowing
+inputs with one `useDeferredValue`, renders results 200 at a time behind "Show more",
+and memoizes `RegistryResultCard` behind result-taking stable handlers. `MultiSelect`
+render-caps its dropdown at 100 options with a "N more matches" note (the DCR driver
+list is ~2,900 entries), and the Listings match dialog got display→GUID Maps plus
+memoized `<datalist>`s in place of six full per-keystroke reconciliations. The optional
+SQL LIMIT was skipped — the bounded render is the fix; a LIMIT would change results.
+Next: DCH-60, then the optional DCH-61.
+
 Rev 24, 2026-08-16. **DCH-58 shipped**: the Listings page's per-keystroke work collapsed
 to one pass — a per-row search haystack built once per load, `useDeferredValue` on the
 search text, and every sidebar aggregate (12 facet counts, driver combobox, seller rows)
@@ -42,16 +54,15 @@ cannot re-sync from anywhere.
 The ordering principle is unchanged: compounding work — anything that makes later tickets
 cheaper or safer — goes before work that only pays off once.
 
-## Performance epic (DCH-62) — the remaining three
+## Performance epic (DCH-62) — the remaining two
 
 No Jira links between these; the dependencies below are code-level. Two tracks: DCR
-traffic (61), frontend + startup (59, 60).
+traffic (61), frontend + startup (60).
 
 | # | Ticket | What | Why here |
 | --- | --- | --- | --- |
-| 1 | DCH-59 | Registry results: bound + memoize | Same medicine as 58 (`useDeferredValue`, `React.memo`, bounded lists) applied to Registry — cheapest done now, while 58's patterns (`lib/useEvent.ts`, the haystack-map shape) are fresh and reusable. |
-| 2 | DCH-60 | Startup: defer + scope the backfill | Consumes both sides: 55's batched backfill writes and 58's shared `list_listings` result are two of its acceptance criteria's building blocks. What remains is the scoping (37 MB `raw_json` scan → only-unattributed rows) and `spawn_blocking` hygiene. |
-| 3 | DCH-61 | Loosen the 800 ms DCR rate floor | Deliberately last: it's a politeness-policy decision, not a bug fix, and it reshapes the same `dcr/client.rs` limiter 57 worked around. With 53's cap and 57's session reuse in, this is the remaining multiplier on walk time. Low priority — skippable if DCR politeness feels wrong. |
+| 1 | DCH-60 | Startup: defer + scope the backfill | Consumes both sides: 55's batched backfill writes and 58's shared `list_listings` result are two of its acceptance criteria's building blocks. What remains is the scoping (37 MB `raw_json` scan → only-unattributed rows) and `spawn_blocking` hygiene. |
+| 2 | DCH-61 | Loosen the 800 ms DCR rate floor | Deliberately last: it's a politeness-policy decision, not a bug fix, and it reshapes the same `dcr/client.rs` limiter 57 worked around. With 53's cap and 57's session reuse in, this is the remaining multiplier on walk time. Low priority — skippable if DCR politeness feels wrong. |
 
 ## UI & app polish (DCH-63…68, filed 2026-08-16)
 
@@ -133,6 +144,7 @@ read-only projection.
 | DCH-55 | `synchronous=NORMAL` under WAL; hot sync loops write in transactions (per garage page, 100-row batches for prewarm/presearch, one tx for watchlist archival, 200-row batches for the driver backfill); the shared `driver_upsert` collapses INSERT+SELECT to `RETURNING id` behind a per-run memo. Cancel checks sit between batches, so no long uncancellable transaction. |
 | DCH-56 | `listing_history` only records change: an observation identical to the listing's latest row (price, shipping, status — NULLs compare equal) is skipped; first observations and reverts still write. Migration 0031 collapsed existing runs to first + last row each. The table is still write-only — nothing reads it yet — so the sparser shape constrains nothing. |
 | DCH-54 | One `EbayClient` + `EbayUserCreds` + `ListingAssocContext` per watchlist sync (and per refresh-all pass): per-item TLS handshakes, keyring reads, and drivers/vocab/alias/model reloads are gone, the 200 ms limiter finally spans items, and Trading calls take `&reqwest::Client` so they share the Browse pool. Archival's local half (`flag_ended_listings`) was split from its network half so tests never link the keyring. |
+| DCH-59 | Registry results perf: pure filter/sort in `lib/registryResults.ts` (tested, incl. the pinned nulls-first-on-descending quirk); one deferred value over all five narrowing inputs; 200-at-a-time bounded render with "Show more"; memoized `RegistryResultCard`; `MultiSelect` capped at 100 rendered options with a count note; match dialog uses display→GUID Maps + memoized datalists. |
 | DCH-58 | Listings page perf: one-pass faceting + precomputed search haystacks + `useDeferredValue` (`lib/listingFilters.ts`, equivalence-tested); memoized `ListingCard` behind stable id-taking handlers (`lib/useEvent.ts`); single-row mutations re-fetch one row via `get_listing_row` and splice (full refetch only for sync/refresh-all/bulk); collapsed grouped sections mount nothing; `detail_url` via `json_extract` so `re.raw_json` never leaves SQLite. |
 | DCH-57 | All DCR flows on the shared session cache via `DcrSession::with_client` (prewarm, presearch, form-options, collection sync/enrich, auto-match's DCR fallback); one login per auto-sync run and per auto-match-all pass. Login redirects surface as typed `SessionExpired` — retried once on a fresh login — instead of parsing as empty pages, which also stops zero-result searches double-walking and keeps a dead cookie from ever reading as an emptied garage (the prune guard). Anti-forgery token cached per session, killing the extra `GET /Production` per search. |
 | DCH-16 | Seller Feed brought up to the list-screen conventions (closed 2026-08-12, with DCH-49…52 below covering the rest of SELLER_FEED_REVIEW.md): DCH-35 filter contract with clear-refetches-the-Browse-query, "Manage Saved Sellers" moved into a `Modal`, pagination reachable from the bottom of the page. |

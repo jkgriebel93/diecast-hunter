@@ -4786,6 +4786,34 @@ function GroupMigrationWizard({
   );
 }
 
+/** Display text → form GUID for a registry option list (DCH-59). */
+function useDisplayToValueMap(options: FormOptionRow[]): Map<string, string> {
+  return useMemo(
+    () => new Map(options.map((o) => [o.display, o.value])),
+    [options],
+  );
+}
+
+/** A registry-option `<datalist>` that only re-renders when its options
+ *  change (DCH-59) — the match dialog re-renders per keystroke, and
+ *  reconciling six full option lists (one of them ~2,900 entries) each
+ *  time is what made typing in it drag. */
+const OptionDatalist = memo(function OptionDatalist({
+  id,
+  options,
+}: {
+  id: string;
+  options: FormOptionRow[];
+}) {
+  return (
+    <datalist id={id}>
+      {options.map((o) => (
+        <option key={o.value} value={o.display} />
+      ))}
+    </datalist>
+  );
+});
+
 function RegistrySearchDialog({
   listing,
   onClose,
@@ -4826,6 +4854,23 @@ function RegistrySearchDialog({
   const [linkingGuid, setLinkingGuid] = useState<string | null>(null);
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+
+  // Display → GUID maps, so each keystroke in a criteria input is one hash
+  // lookup instead of a linear scan over the option list (~2,900 drivers)
+  // (DCH-59).
+  const driverGuids = useDisplayToValueMap(drivers);
+  const oemGuids = useDisplayToValueMap(oems);
+  const brandGuids = useDisplayToValueMap(brands);
+  const makeGuids = useDisplayToValueMap(makes);
+  const finishGuids = useDisplayToValueMap(finishes);
+  // The OEM datalist's shortlist, memoized so the <datalist> below only
+  // re-renders when the shortlist flips or the options load.
+  const oemShortlisted = oemInput.trim() === "" && !showAllOems;
+  const oemListOptions = useMemo(
+    () =>
+      oemShortlisted ? oems.filter((o) => isPreferredOem(o.display)) : oems,
+    [oems, oemShortlisted],
+  );
 
   useEffect(() => {
     void loadOptions();
@@ -5051,20 +5096,15 @@ function RegistrySearchDialog({
                   value={driverInput}
                   onChange={(e) => {
                     setDriverInput(e.target.value);
-                    const match = drivers.find(
-                      (d) => d.display === e.target.value,
+                    setSelectedDriverGuid(
+                      driverGuids.get(e.target.value) ?? "",
                     );
-                    setSelectedDriverGuid(match?.value ?? "");
                   }}
                   className="input"
                   placeholder="Type to search…"
                   autoComplete="off"
                 />
-                <datalist id="dcr-drivers-list">
-                  {drivers.map((d) => (
-                    <option key={d.value} value={d.display} />
-                  ))}
-                </datalist>
+                <OptionDatalist id="dcr-drivers-list" options={drivers} />
               </div>
               <div>
                 <label className="label">Year</label>
@@ -5088,22 +5128,14 @@ function RegistrySearchDialog({
                   onChange={(e) => {
                     const v = e.target.value;
                     setOemInput(v);
-                    const match = oems.find((o) => o.display === v);
-                    setSelectedOemGuid(match?.value ?? "");
+                    setSelectedOemGuid(oemGuids.get(v) ?? "");
                   }}
                   className="input"
                   placeholder="Any (type to search…)"
                   autoComplete="off"
                 />
-                <datalist id="dcr-oems-list">
-                  {(oemInput.trim() === "" && !showAllOems
-                    ? oems.filter((o) => isPreferredOem(o.display))
-                    : oems
-                  ).map((o) => (
-                    <option key={o.value} value={o.display} />
-                  ))}
-                </datalist>
-                {oemInput.trim() === "" && !showAllOems && (
+                <OptionDatalist id="dcr-oems-list" options={oemListOptions} />
+                {oemShortlisted && (
                   <button
                     type="button"
                     className="text-xs text-fg-subtle hover:text-fg-muted mt-1"
@@ -5137,18 +5169,13 @@ function RegistrySearchDialog({
                   onChange={(e) => {
                     const v = e.target.value;
                     setBrandInput(v);
-                    const match = brands.find((b) => b.display === v);
-                    setSelectedBrandGuid(match?.value ?? "");
+                    setSelectedBrandGuid(brandGuids.get(v) ?? "");
                   }}
                   className="input"
                   placeholder="Any (type to search…)"
                   autoComplete="off"
                 />
-                <datalist id="dcr-brands-list">
-                  {brands.map((b) => (
-                    <option key={b.value} value={b.display} />
-                  ))}
-                </datalist>
+                <OptionDatalist id="dcr-brands-list" options={brands} />
               </div>
               <div>
                 <label className="label">Make</label>
@@ -5159,18 +5186,13 @@ function RegistrySearchDialog({
                   onChange={(e) => {
                     const v = e.target.value;
                     setMakeInput(v);
-                    const match = makes.find((m) => m.display === v);
-                    setSelectedMakeGuid(match?.value ?? "");
+                    setSelectedMakeGuid(makeGuids.get(v) ?? "");
                   }}
                   className="input"
                   placeholder="Any (type to search…)"
                   autoComplete="off"
                 />
-                <datalist id="dcr-makes-list">
-                  {makes.map((m) => (
-                    <option key={m.value} value={m.display} />
-                  ))}
-                </datalist>
+                <OptionDatalist id="dcr-makes-list" options={makes} />
               </div>
               <div>
                 <label className="label">Finish</label>
@@ -5181,18 +5203,13 @@ function RegistrySearchDialog({
                   onChange={(e) => {
                     const v = e.target.value;
                     setFinishInput(v);
-                    const match = finishes.find((f) => f.display === v);
-                    setSelectedFinishGuid(match?.value ?? "");
+                    setSelectedFinishGuid(finishGuids.get(v) ?? "");
                   }}
                   className="input"
                   placeholder="Any (type to search…)"
                   autoComplete="off"
                 />
-                <datalist id="dcr-finishes-list">
-                  {finishes.map((f) => (
-                    <option key={f.value} value={f.display} />
-                  ))}
-                </datalist>
+                <OptionDatalist id="dcr-finishes-list" options={finishes} />
               </div>
             </div>
           )}

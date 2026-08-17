@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { describeError } from "@/lib/errors";
@@ -33,6 +33,13 @@ import {
   type YearRange,
 } from "@/lib/yearRange";
 import { ViewLink } from "@/components/ViewLink";
+import {
+  filterRegistryResults,
+  sortRegistryResults,
+  REGISTRY_RESULTS_PAGE,
+  type RegistrySortMode,
+} from "@/lib/registryResults";
+import { useEvent } from "@/lib/useEvent";
 import { useMinimized, MinimizeToggle } from "@/lib/minimized";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { Thumbnail } from "@/components/Thumbnail";
@@ -44,39 +51,9 @@ const IMG_CLASS: Record<ImageSize, string> = {
   lg: "w-72 h-72",
 };
 
-type SortMode =
-  | "registry"
-  | "driver-asc"
-  | "year-desc"
-  | "year-asc"
-  | "retail-value-desc"
-  | "retail-value-asc"
-  | "production-qty-asc"
-  | "production-qty-desc";
-
-/** Parse a user-typed dollar amount ("25", "$12.50") into cents; null when
- *  blank or unparseable, which means "no bound". */
-function parseDollars(s: string): number | null {
-  const t = s.trim().replace(/^\$/, "");
-  if (t === "") return null;
-  const v = Number(t);
-  if (!Number.isFinite(v) || v < 0) return null;
-  return Math.round(v * 100);
-}
-
-/** True when the value satisfies the bounds. With no bounds set, a null
- *  value passes; once either bound is set, unvalued items are excluded. */
-function inRange(
-  cents: number | null,
-  min: number | null,
-  max: number | null,
-): boolean {
-  if (min === null && max === null) return true;
-  if (cents === null) return false;
-  if (min !== null && cents < min) return false;
-  if (max !== null && cents > max) return false;
-  return true;
-}
+// Sort modes, dollar parsing and the filter/sort themselves live in
+// @/lib/registryResults (DCH-59) so they stay unit-tested while the page
+// defers and bounds the render.
 
 const CONDITION_OPTIONS: { value: Condition; label: string }[] = [
   { value: "mint", label: "Mint" },
@@ -147,7 +124,7 @@ export function Registry() {
     lists: WishlistInfo[];
   } | null>(null);
   const [imgSize, setImgSize] = useImageSize("registry");
-  const [sortMode, setSortMode] = useState<SortMode>("registry");
+  const [sortMode, setSortMode] = useState<RegistrySortMode>("registry");
   const [presearches, setPresearches] = useState<Presearch[]>([]);
   /** Which pre-search action is in flight ("save", "refresh-3", "delete-3"),
    *  so only the affected row shows a spinner. */
@@ -180,75 +157,45 @@ export function Registry() {
     setWholesaleMax("");
   }
 
-  const filteredResults = useMemo(() => {
-    if (!results) return null;
-    const rMin = parseDollars(retailMin);
-    const rMax = parseDollars(retailMax);
-    const wMin = parseDollars(wholesaleMin);
-    const wMax = parseDollars(wholesaleMax);
-    const q = resultSearch.trim().toLowerCase();
-    if (
-      rMin === null &&
-      rMax === null &&
-      wMin === null &&
-      wMax === null &&
-      !q
-    ) {
-      return results;
-    }
-    const matchesText = (r: ProductionSearchResult) =>
-      !q ||
-      [
-        r.driver_name,
-        r.scheme_text,
-        r.oem,
-        r.brand,
-        r.scale,
-        r.make,
-        r.year === null ? null : String(r.year),
-      ]
-        .filter(Boolean)
-        .some((f) => (f as string).toLowerCase().includes(q));
-    return results.filter(
-      (r) =>
-        matchesText(r) &&
-        inRange(r.retail_value_cents, rMin, rMax) &&
-        inRange(r.wholesale_value_cents, wMin, wMax),
-    );
-  }, [results, retailMin, retailMax, wholesaleMin, wholesaleMax, resultSearch]);
+  // The narrowing inputs as one memoized object, so a single
+  // `useDeferredValue` covers all five: the inputs themselves stay
+  // immediately responsive while re-filtering 2,000 rows runs at deferred
+  // priority (DCH-59).
+  const resultFilterInputs = useMemo(
+    () => ({
+      q: resultSearch,
+      retailMin,
+      retailMax,
+      wholesaleMin,
+      wholesaleMax,
+    }),
+    [resultSearch, retailMin, retailMax, wholesaleMin, wholesaleMax],
+  );
+  const deferredFilterInputs = useDeferredValue(resultFilterInputs);
 
-  const sortedResults = useMemo(() => {
-    if (!filteredResults || sortMode === "registry") return filteredResults;
-    const nullsLast = (av: number | null, bv: number | null) => {
-      if (av === null && bv === null) return 0;
-      if (av === null) return 1;
-      if (bv === null) return -1;
-      return av - bv;
-    };
-    const list = [...filteredResults];
-    list.sort((a, b) => {
-      switch (sortMode) {
-        case "driver-asc":
-          return (
-            a.driver_name.localeCompare(b.driver_name) ||
-            (b.year ?? 0) - (a.year ?? 0)
-          );
-        case "year-desc":
-          return nullsLast(b.year, a.year);
-        case "year-asc":
-          return nullsLast(a.year, b.year);
-        case "retail-value-desc":
-          return nullsLast(b.retail_value_cents, a.retail_value_cents);
-        case "retail-value-asc":
-          return nullsLast(a.retail_value_cents, b.retail_value_cents);
-        case "production-qty-asc":
-          return nullsLast(a.seq_produced_total, b.seq_produced_total);
-        case "production-qty-desc":
-          return nullsLast(b.seq_produced_total, a.seq_produced_total);
-      }
-    });
-    return list;
-  }, [filteredResults, sortMode]);
+  const filteredResults = useMemo(
+    () =>
+      results ? filterRegistryResults(results, deferredFilterInputs) : null,
+    [results, deferredFilterInputs],
+  );
+
+  const sortedResults = useMemo(
+    () =>
+      filteredResults ? sortRegistryResults(filteredResults, sortMode) : null,
+    [filteredResults, sortMode],
+  );
+
+  // Bounded render (DCH-59): a broad search mounts cards a page at a time.
+  // The count resets whenever the underlying list changes — narrowing or
+  // re-sorting starts back at the first page.
+  const [visibleCount, setVisibleCount] = useState(REGISTRY_RESULTS_PAGE);
+  useEffect(() => {
+    setVisibleCount(REGISTRY_RESULTS_PAGE);
+  }, [sortedResults]);
+  const visibleResults = useMemo(
+    () => (sortedResults ? sortedResults.slice(0, visibleCount) : null),
+    [sortedResults, visibleCount],
+  );
 
   useEffect(() => {
     void loadOptions();
@@ -265,6 +212,12 @@ export function Registry() {
   /** One list → add straight to it; several → open the picker. Lists are
    *  fetched fresh on each click so a list created in another pane shows
    *  up without a page reload. */
+  // Render-stable identity for the memoized cards; `setAddTarget` is a
+  // setState and already stable.
+  const addToWishlist = useEvent((r: ProductionSearchResult) => {
+    void onAddToWishlist(r);
+  });
+
   async function onAddToWishlist(r: ProductionSearchResult) {
     setWishing(r.registry_guid);
     setError(null);
@@ -862,7 +815,9 @@ export function Registry() {
                 <select
                   className="input !w-auto !py-0.5 !text-[11px]"
                   value={sortMode}
-                  onChange={(e) => setSortMode(e.target.value as SortMode)}
+                  onChange={(e) =>
+                    setSortMode(e.target.value as RegistrySortMode)
+                  }
                   title="Sort results"
                 >
                   <option value="registry">Registry order</option>
@@ -889,19 +844,47 @@ export function Registry() {
           {sortedResults!.length === 0 ? (
             <FilteredEmpty onClear={clearResultFilters} />
           ) : (
-            <ul className="space-y-2">
-              {sortedResults!.map((r) => (
-                <RegistryResultCard
-                  key={r.registry_guid}
-                  r={r}
-                  imgClass={IMG_CLASS[imgSize]}
-                  onAddToGarage={() => setAddTarget(r)}
-                  inWishlist={wishlistGuids.has(r.registry_guid)}
-                  wishing={wishing === r.registry_guid}
-                  onAddToWishlist={() => onAddToWishlist(r)}
-                />
-              ))}
-            </ul>
+            <>
+              <ul className="space-y-2">
+                {visibleResults!.map((r) => (
+                  <RegistryResultCard
+                    key={r.registry_guid}
+                    r={r}
+                    imgClass={IMG_CLASS[imgSize]}
+                    onAddToGarage={setAddTarget}
+                    inWishlist={wishlistGuids.has(r.registry_guid)}
+                    wishing={wishing === r.registry_guid}
+                    onAddToWishlist={addToWishlist}
+                  />
+                ))}
+              </ul>
+              {sortedResults!.length > visibleResults!.length && (
+                <div className="flex items-center justify-center gap-3 text-xs text-fg-subtle">
+                  <button
+                    type="button"
+                    className="btn-secondary !px-3 !py-1 !text-xs"
+                    onClick={() =>
+                      setVisibleCount((n) => n + REGISTRY_RESULTS_PAGE)
+                    }
+                  >
+                    Show{" "}
+                    {formatCount(
+                      Math.min(
+                        REGISTRY_RESULTS_PAGE,
+                        sortedResults!.length - visibleResults!.length,
+                      ),
+                    )}{" "}
+                    more
+                  </button>
+                  <span>
+                    {formatCount(
+                      sortedResults!.length - visibleResults!.length,
+                    )}{" "}
+                    not shown
+                  </span>
+                </div>
+              )}
+            </>
           )}
         </>
       )}
@@ -967,7 +950,11 @@ export function Registry() {
   );
 }
 
-function RegistryResultCard({
+// Memoized (DCH-59): the callbacks take the result itself, so the page
+// passes the same render-stable handlers to every card and a keystroke in
+// the results filter re-renders only the cards whose row entered or left
+// the visible list.
+const RegistryResultCard = memo(function RegistryResultCard({
   r,
   imgClass,
   onAddToGarage,
@@ -977,10 +964,10 @@ function RegistryResultCard({
 }: {
   r: ProductionSearchResult;
   imgClass: string;
-  onAddToGarage: () => void;
+  onAddToGarage: (r: ProductionSearchResult) => void;
   inWishlist: boolean;
   wishing: boolean;
-  onAddToWishlist: () => void;
+  onAddToWishlist: (r: ProductionSearchResult) => void;
 }) {
   const [minimized, toggleMinimized] = useMinimized(
     `registry:${r.registry_guid}`,
@@ -1031,7 +1018,7 @@ function RegistryResultCard({
               <button
                 type="button"
                 className="text-xs text-accent hover:underline"
-                onClick={onAddToGarage}
+                onClick={() => onAddToGarage(r)}
                 title="Register this diecast to your diecastregistry.com garage"
               >
                 + Add to garage
@@ -1048,7 +1035,7 @@ function RegistryResultCard({
                 <button
                   type="button"
                   className="text-xs text-accent hover:underline"
-                  onClick={onAddToWishlist}
+                  onClick={() => onAddToWishlist(r)}
                   disabled={wishing}
                   title="Add this entry to your wishlist"
                 >
@@ -1071,7 +1058,7 @@ function RegistryResultCard({
       </div>
     </li>
   );
-}
+});
 
 function ValueRangeFilter({
   label,
