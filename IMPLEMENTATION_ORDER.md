@@ -1,5 +1,19 @@
 # Implementation order for open DCH tickets
 
+Rev 24, 2026-08-16. **DCH-58 shipped**: the Listings page's per-keystroke work collapsed
+to one pass — a per-row search haystack built once per load, `useDeferredValue` on the
+search text, and every sidebar aggregate (12 facet counts, driver combobox, seller rows)
+from a single walk in `lib/listingFilters.ts`, equivalence-tested against the naive
+recount. `ListingCard` is memoized behind render-stable id-taking handlers
+(`lib/useEvent.ts`); single-row mutations splice via the new `get_listing_row` command
+instead of refetching the table (full refetch remains for sync/refresh-all/bulk);
+collapsed grouped sections mount no cards; and `detail_url` comes out of
+`registry_entries.raw_json` via `json_extract` in SQL, so the blob never leaves SQLite.
+DCH-59 consumes these patterns next; one deviation from the sketch is recorded there —
+mutations don't return the row, the frontend re-fetches one row and splices, keeping 11
+command signatures unchanged. No flat-list virtualization: memo + deferral hit the frame
+budget without a new dependency.
+
 Rev 23, 2026-08-16. **DCH-57 shipped**: every DCR flow now runs on the shared 15-minute
 session cache through `DcrSession::with_client` — prewarm, presearch, form-options, the
 collection sync/enrichment, and the auto-match pull-from-DCR fallback — and the overnight
@@ -28,20 +42,16 @@ cannot re-sync from anywhere.
 The ordering principle is unchanged: compounding work — anything that makes later tickets
 cheaper or safer — goes before work that only pays off once.
 
-## Performance epic (DCH-62) — the remaining four
+## Performance epic (DCH-62) — the remaining three
 
 No Jira links between these; the dependencies below are code-level. Two tracks: DCR
-traffic (61), frontend + startup (58, 59, 60).
+traffic (61), frontend + startup (59, 60).
 
 | # | Ticket | What | Why here |
 | --- | --- | --- | --- |
-| 1 | DCH-61 | Loosen the 800 ms DCR rate floor | Deliberately last on the DCR track: it's a politeness-policy decision, not a bug fix, and it reshapes the same `dcr/client.rs` limiter 57 worked around. With 53's cap and 57's session reuse in, this is the remaining multiplier on walk time. Low priority — skippable if DCR politeness feels wrong. |
-| 2 | DCH-58 | Listings page: keystroke + mutation work | Biggest frontend payoff (the page everyone lives in), and it establishes the patterns 59 and 60 consume: `memo` + deferred search, mutations returning the updated row, `detail_url` promoted out of `raw_json`. |
-| 3 | DCH-59 | Registry results: bound + memoize | Same medicine as 58 (`useDeferredValue`, `React.memo`, bounded lists) applied to Registry — cheaper done immediately after, while the patterns are fresh and reusable. |
-| 4 | DCH-60 | Startup: defer + scope the backfill | Last because it consumes both sides: 55's batched backfill writes (now in) and 58's shared `list_listings` result are two of its acceptance criteria's building blocks. What remains is the scoping (37 MB `raw_json` scan → only-unattributed rows) and `spawn_blocking` hygiene. |
-
-Track note: the two frontend tickets (58, 59) share no files with the backend track, so if a
-backend PR is waiting on review, 58 can start early without rebasing risk.
+| 1 | DCH-59 | Registry results: bound + memoize | Same medicine as 58 (`useDeferredValue`, `React.memo`, bounded lists) applied to Registry — cheapest done now, while 58's patterns (`lib/useEvent.ts`, the haystack-map shape) are fresh and reusable. |
+| 2 | DCH-60 | Startup: defer + scope the backfill | Consumes both sides: 55's batched backfill writes and 58's shared `list_listings` result are two of its acceptance criteria's building blocks. What remains is the scoping (37 MB `raw_json` scan → only-unattributed rows) and `spawn_blocking` hygiene. |
+| 3 | DCH-61 | Loosen the 800 ms DCR rate floor | Deliberately last: it's a politeness-policy decision, not a bug fix, and it reshapes the same `dcr/client.rs` limiter 57 worked around. With 53's cap and 57's session reuse in, this is the remaining multiplier on walk time. Low priority — skippable if DCR politeness feels wrong. |
 
 ## UI & app polish (DCH-63…68, filed 2026-08-16)
 
@@ -123,6 +133,7 @@ read-only projection.
 | DCH-55 | `synchronous=NORMAL` under WAL; hot sync loops write in transactions (per garage page, 100-row batches for prewarm/presearch, one tx for watchlist archival, 200-row batches for the driver backfill); the shared `driver_upsert` collapses INSERT+SELECT to `RETURNING id` behind a per-run memo. Cancel checks sit between batches, so no long uncancellable transaction. |
 | DCH-56 | `listing_history` only records change: an observation identical to the listing's latest row (price, shipping, status — NULLs compare equal) is skipped; first observations and reverts still write. Migration 0031 collapsed existing runs to first + last row each. The table is still write-only — nothing reads it yet — so the sparser shape constrains nothing. |
 | DCH-54 | One `EbayClient` + `EbayUserCreds` + `ListingAssocContext` per watchlist sync (and per refresh-all pass): per-item TLS handshakes, keyring reads, and drivers/vocab/alias/model reloads are gone, the 200 ms limiter finally spans items, and Trading calls take `&reqwest::Client` so they share the Browse pool. Archival's local half (`flag_ended_listings`) was split from its network half so tests never link the keyring. |
+| DCH-58 | Listings page perf: one-pass faceting + precomputed search haystacks + `useDeferredValue` (`lib/listingFilters.ts`, equivalence-tested); memoized `ListingCard` behind stable id-taking handlers (`lib/useEvent.ts`); single-row mutations re-fetch one row via `get_listing_row` and splice (full refetch only for sync/refresh-all/bulk); collapsed grouped sections mount nothing; `detail_url` via `json_extract` so `re.raw_json` never leaves SQLite. |
 | DCH-57 | All DCR flows on the shared session cache via `DcrSession::with_client` (prewarm, presearch, form-options, collection sync/enrich, auto-match's DCR fallback); one login per auto-sync run and per auto-match-all pass. Login redirects surface as typed `SessionExpired` — retried once on a fresh login — instead of parsing as empty pages, which also stops zero-result searches double-walking and keeps a dead cookie from ever reading as an emptied garage (the prune guard). Anti-forgery token cached per session, killing the extra `GET /Production` per search. |
 | DCH-16 | Seller Feed brought up to the list-screen conventions (closed 2026-08-12, with DCH-49…52 below covering the rest of SELLER_FEED_REVIEW.md): DCH-35 filter contract with clear-refetches-the-Browse-query, "Manage Saved Sellers" moved into a `Modal`, pagination reachable from the bottom of the page. |
 | DCH-49 | Fixed medium/large `ImageSizeToggle` sizes breaking Seller Feed cards; layout now matches Saved Listings at every size. |

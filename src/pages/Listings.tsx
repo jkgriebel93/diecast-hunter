@@ -2,6 +2,8 @@ import {
   Fragment,
   type ReactNode,
   FormEvent,
+  memo,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -70,15 +72,25 @@ import { AnchoredMenu, AnchoredMenuList } from "@/components/AnchoredMenu";
 import { Thumbnail } from "@/components/Thumbnail";
 import { DCR_BASE, resolveDcrUrl } from "@/lib/dcr";
 import {
-  passesSellerFilter,
   sellerFilterLabel,
   sellerOptions,
   type SellerKey,
   type SellerOption,
 } from "@/lib/sellerFilter";
 import {
+  buildSearchHaystack,
+  computeListingFacetData,
+  legacyIdFromExternalId,
+  passesFacetFilters,
+  type ListingFacetFilters,
+  type MatchOption,
+  type OfferOption,
+  type StatusOption,
+  type TypeOption,
+} from "@/lib/listingFilters";
+import { useEvent } from "@/lib/useEvent";
+import {
   EMPTY_YEAR_RANGE,
-  inYearRange,
   isEmptyRange,
   parseYear,
   yearsInRange,
@@ -87,9 +99,9 @@ import {
 
 type ViewMode = "flat" | "byDriver" | "byGroup";
 // The checkbox facets (status, match, offer, type) hold the set of checked
-// options. Empty set = facet off = show everything; multiple checks OR
-// together within the facet.
-type StatusOption = "active" | "ended" | "archived";
+// options — types and predicates live in @/lib/listingFilters (DCH-58).
+// Empty set = facet off = show everything; multiple checks OR together
+// within the facet.
 
 /** Human labels for `listings.end_reason` on archived rows. */
 const END_REASON_LABELS: Record<string, string> = {
@@ -97,13 +109,6 @@ const END_REASON_LABELS: Record<string, string> = {
   ended: "ended unsold",
   removed: "removed from eBay",
 };
-/** "confirmed"/"unconfirmed" split matched listings by user verification;
- *  "unmatched" = no registry entry (including user-marked no-match rows). */
-type MatchOption = "confirmed" | "unconfirmed" | "unmatched";
-type OfferOption = "unresponded" | "with" | "without";
-/** Buying-format facet. "bin" = fixed price that does NOT take offers;
- *  "offers" = accepts Best Offers (fixed or auction). */
-type TypeOption = "auction" | "bin" | "offers";
 /** "all" = no group filter; "none" = listings with zero groups; otherwise the
  *  numeric group id as a string. */
 type GroupFilter = string;
@@ -174,120 +179,6 @@ function partitionGroupsByDrivers(
     (hit ? preferred : others).push(g);
   }
   return { preferred, others };
-}
-
-interface ListingFilterState {
-  /** Lower-cased, trimmed search text; empty = no text filter. */
-  q: string;
-  status: Set<StatusOption>;
-  match: Set<MatchOption>;
-  offer: Set<OfferOption>;
-  type: Set<TypeOption>;
-  group: GroupFilter;
-  excluded: Set<number>;
-  /** "all", "none", or `d:<lowercased driver name>`. */
-  driver: string;
-  /** Lower-cased seller usernames, `null` for rows with no seller. Empty =
-   *  facet off; multiple sellers OR together. */
-  seller: Set<SellerKey>;
-  /** Bounds on the matched registry entry's year; unset = no year filter. */
-  year: YearRange;
-  offersByItemId: Map<string, ReceivedOffer>;
-}
-
-/** Single predicate behind both the visible listing list and the sidebar
- *  facet counts. The driver filter matches the registry-match driver first,
- *  then the auto/manual tag — the same precedence the by-driver view uses. */
-function listingPassesFilters(row: ListingRow, f: ListingFilterState): boolean {
-  if (f.q) {
-    const hay = [
-      row.title,
-      row.matched_driver_name,
-      row.matched_scheme_text,
-      row.seller_username,
-      row.matched_oem,
-      row.matched_brand,
-      row.oem,
-      row.brand,
-      row.finish,
-      row.make,
-      row.is_race_win && "race win",
-      row.is_autographed && "autograph autographed",
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-    if (!hay.includes(f.q)) return false;
-  }
-  if (f.status.size > 0) {
-    // Archived is its own bucket: "Ended" means ended-but-not-yet-archived
-    // (a transient state between enrichment and the sync's archive pass),
-    // so the default active-only filter keeps archived history out of the
-    // deal-hunting views until explicitly requested.
-    const ok =
-      (f.status.has("active") && row.status === "active") ||
-      (f.status.has("ended") && row.status === "ended" && !row.is_archived) ||
-      (f.status.has("archived") && row.is_archived);
-    if (!ok) return false;
-  }
-  if (f.match.size > 0) {
-    const matched = row.registry_entry_id !== null;
-    const ok =
-      (f.match.has("confirmed") && matched && row.match_user_confirmed) ||
-      (f.match.has("unconfirmed") && matched && !row.match_user_confirmed) ||
-      (f.match.has("unmatched") && !matched);
-    if (!ok) return false;
-  }
-  if (f.type.size > 0) {
-    const ok =
-      (f.type.has("auction") && row.listing_type === "auction") ||
-      (f.type.has("bin") &&
-        row.listing_type === "fixed" &&
-        !row.accepts_offers) ||
-      (f.type.has("offers") && row.accepts_offers);
-    if (!ok) return false;
-  }
-  // Year comes from the registry match: a listing's own title year is
-  // unreliable (race season vs. release year), and an unmatched row has no
-  // trustworthy year at all — so it drops out once a bound is set.
-  if (!inYearRange(row.matched_year, f.year)) return false;
-  if (f.driver !== "all") {
-    const name = row.matched_driver_name ?? row.auto_driver_name;
-    if (f.driver === "none") {
-      if (name !== null) return false;
-    } else if (!name || `d:${name.toLowerCase()}` !== f.driver) {
-      return false;
-    }
-  }
-  if (!passesSellerFilter(row.seller_username, f.seller)) return false;
-  if (f.group !== "all") {
-    if (f.group === "none") {
-      if (row.group_ids.length > 0) return false;
-    } else {
-      const wanted = Number(f.group);
-      if (!row.group_ids.includes(wanted)) return false;
-    }
-  }
-  if (f.excluded.size > 0 && row.group_ids.some((id) => f.excluded.has(id)))
-    return false;
-  if (f.offer.size > 0) {
-    const offer = f.offersByItemId.get(legacyIdFromExternalId(row.external_id));
-    const hasOffer = offer !== undefined;
-    // Heuristic for "user already responded": either the notification
-    // was opened (eBay flips <Read> on the inbox UI when you open the
-    // message — which the web accept/decline flow does), or the
-    // underlying listing has ended (signal that the offer was accepted
-    // and the item sold). Conservative: a missing listing is treated as
-    // "still active" so users who haven't run watchlist sync still see
-    // their offers.
-    const responded = hasOffer && (offer.is_read || row.status === "ended");
-    const ok =
-      (f.offer.has("with") && hasOffer) ||
-      (f.offer.has("without") && !hasOffer) ||
-      (f.offer.has("unresponded") && hasOffer && !responded);
-    if (!ok) return false;
-  }
-  return true;
 }
 
 /** Fresh Set with `v` added or removed — checkbox-facet toggle. */
@@ -457,6 +348,21 @@ export function Listings() {
     }
   }
 
+  // Re-fetch ONE listing and splice it into the loaded rows. Single-row
+  // mutations (group add/remove, match confirm/clear, driver tag, attribute
+  // edit, per-listing refresh) go through this instead of `load()` — the
+  // full-table refetch is reserved for actions that can touch many rows
+  // (watchlist sync, refresh all, auto-match all, bulk edits) (DCH-58).
+  const reloadRow = useEvent(async (listingId: number) => {
+    const updated = await api.getListingRow(listingId);
+    setRows((prev) => {
+      if (!prev) return prev;
+      if (updated === null)
+        return prev.filter((r) => r.listing_id !== listingId);
+      return prev.map((r) => (r.listing_id === listingId ? updated : r));
+    });
+  });
+
   useEffect(() => {
     load();
     void loadOffers();
@@ -479,62 +385,62 @@ export function Listings() {
     }
   }
 
-  async function onSetDriver(
-    listingId: number,
-    name: string,
-    normalized: string,
-  ) {
-    setError(null);
-    try {
-      await api.setListingDriver(listingId, name, normalized);
-      setTagDriverId(null);
-      await Promise.all([load(), loadLocalDrivers()]);
-    } catch (e) {
-      setError(String(e));
-    }
-  }
+  const onSetDriver = useEvent(
+    async (listingId: number, name: string, normalized: string) => {
+      setError(null);
+      try {
+        await api.setListingDriver(listingId, name, normalized);
+        setTagDriverId(null);
+        await Promise.all([reloadRow(listingId), loadLocalDrivers()]);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+  );
 
-  async function onClearDriver(listingId: number) {
+  const onClearDriver = useEvent(async (listingId: number) => {
     setError(null);
     try {
       await api.clearListingDriver(listingId);
       setTagDriverId(null);
-      await load();
+      await reloadRow(listingId);
     } catch (e) {
       setError(String(e));
     }
-  }
+  });
 
-  async function onResetDriver(listingId: number) {
+  const onResetDriver = useEvent(async (listingId: number) => {
     setError(null);
     try {
       await api.resetListingDriver(listingId);
       setTagDriverId(null);
-      await load();
+      await reloadRow(listingId);
     } catch (e) {
       setError(String(e));
     }
-  }
+  });
 
-  async function onSetAttributes(listingId: number, attrs: ListingAttributes) {
-    setError(null);
-    try {
-      await api.setListingAttributes(listingId, attrs);
-      await load();
-    } catch (e) {
-      setError(String(e));
-    }
-  }
+  const onSetAttributes = useEvent(
+    async (listingId: number, attrs: ListingAttributes) => {
+      setError(null);
+      try {
+        await api.setListingAttributes(listingId, attrs);
+        await reloadRow(listingId);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+  );
 
-  async function onResetAttributes(listingId: number) {
+  const onResetAttributes = useEvent(async (listingId: number) => {
     setError(null);
     try {
       await api.resetListingAttributes(listingId);
-      await load();
+      await reloadRow(listingId);
     } catch (e) {
       setError(String(e));
     }
-  }
+  });
 
   async function loadGroups() {
     try {
@@ -546,15 +452,17 @@ export function Listings() {
     }
   }
 
-  async function onAddListingToGroup(listingId: number, groupId: number) {
-    setError(null);
-    try {
-      await api.addListingToGroup(groupId, listingId);
-      await Promise.all([load(), loadGroups()]);
-    } catch (e) {
-      setError(String(e));
-    }
-  }
+  const onAddListingToGroup = useEvent(
+    async (listingId: number, groupId: number) => {
+      setError(null);
+      try {
+        await api.addListingToGroup(groupId, listingId);
+        await Promise.all([reloadRow(listingId), loadGroups()]);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+  );
 
   // Apply a just-created group to the single listing it was created from.
   async function onCreatedGroupForListing(
@@ -568,28 +476,30 @@ export function Listings() {
     } catch (e) {
       setError(String(e));
     } finally {
-      await Promise.all([load(), loadGroups()]);
+      await Promise.all([reloadRow(listingId), loadGroups()]);
     }
   }
 
-  async function onRemoveListingFromGroup(listingId: number, groupId: number) {
-    setError(null);
-    try {
-      await api.removeListingFromGroup(groupId, listingId);
-      await Promise.all([load(), loadGroups()]);
-    } catch (e) {
-      setError(String(e));
-    }
-  }
+  const onRemoveListingFromGroup = useEvent(
+    async (listingId: number, groupId: number) => {
+      setError(null);
+      try {
+        await api.removeListingFromGroup(groupId, listingId);
+        await Promise.all([reloadRow(listingId), loadGroups()]);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+  );
 
-  function toggleSelected(listingId: number) {
+  const toggleSelected = useEvent((listingId: number) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(listingId)) next.delete(listingId);
       else next.add(listingId);
       return next;
     });
-  }
+  });
 
   function clearSelection() {
     setSelectedIds(new Set());
@@ -714,19 +624,19 @@ export function Listings() {
     }
   }
 
-  async function onRefreshOne(id: number) {
+  const onRefreshOne = useEvent(async (id: number) => {
     setRefreshingId(id);
     try {
       await api.refreshEbayListing(id);
-      await load();
+      await reloadRow(id);
     } catch (e) {
       setError(String(e));
     } finally {
       setRefreshingId(null);
     }
-  }
+  });
 
-  async function onUnwatch(row: ListingRow) {
+  const onUnwatch = useEvent(async (row: ListingRow) => {
     const ok = window.confirm(
       `Remove this listing from your eBay watchlist and delete its local row (including price history)?\n\n${row.title}`,
     );
@@ -735,13 +645,16 @@ export function Listings() {
     setError(null);
     try {
       await api.unwatchEbayListing(row.listing_id);
-      await load();
+      // The row is gone; drop it from state rather than refetching the table.
+      setRows((prev) =>
+        prev ? prev.filter((r) => r.listing_id !== row.listing_id) : prev,
+      );
     } catch (e) {
       setError(String(e));
     } finally {
       setUnwatchingId(null);
     }
-  }
+  });
 
   async function onRefreshAll() {
     setBulkRefreshing(true);
@@ -807,7 +720,7 @@ export function Listings() {
     }
   }
 
-  async function onAutoMatchOne(listingId: number) {
+  const onAutoMatchOne = useEvent(async (listingId: number) => {
     setAutoMatchingId(listingId);
     setError(null);
     try {
@@ -822,50 +735,52 @@ export function Listings() {
           );
         return next;
       });
-      await load();
+      await reloadRow(listingId);
     } catch (e) {
       setError(String(e));
     } finally {
       setAutoMatchingId(null);
     }
-  }
+  });
 
-  async function onConfirmMatch(listingId: number) {
+  const onConfirmMatch = useEvent(async (listingId: number) => {
     setError(null);
     try {
       await api.confirmListingMatch(listingId);
-      await load();
+      await reloadRow(listingId);
     } catch (e) {
       setError(String(e));
     }
-  }
+  });
 
-  async function onClearMatch(listingId: number) {
+  const onClearMatch = useEvent(async (listingId: number) => {
     setError(null);
     try {
       await api.clearListingMatch(listingId);
-      await load();
+      await reloadRow(listingId);
     } catch (e) {
       setError(String(e));
     }
-  }
+  });
 
-  async function onRejectMatch(listingId: number) {
+  const onRejectMatch = useEvent(async (listingId: number) => {
     setError(null);
     try {
       await api.rejectListingMatch(listingId);
-      await load();
+      await reloadRow(listingId);
     } catch (e) {
       setError(String(e));
     }
-  }
+  });
 
-  // Current filter state in the shape listingPassesFilters consumes. The
-  // facet-count memos override single fields of this to answer "what would
-  // I see if I picked that option instead?".
-  const filterState = useMemo<ListingFilterState>(
+  const onCancelTagDriver = useEvent(() => setTagDriverId(null));
+
+  // Current facet-filter state in the shape the @/lib/listingFilters
+  // predicates consume. Search text is deliberately not in here: it gets
+  // its own precomputed haystack + deferred value below, so a keystroke
+  // never invalidates the facet-filter identity.
+  const facetFilters = useMemo<ListingFacetFilters>(
     () => ({
-      q: searchText.trim().toLowerCase(),
       status: statusFilter,
       match: matchFilter,
       offer: offerFilter,
@@ -878,7 +793,6 @@ export function Listings() {
       offersByItemId,
     }),
     [
-      searchText,
       statusFilter,
       matchFilter,
       offerFilter,
@@ -892,9 +806,34 @@ export function Listings() {
     ],
   );
 
-  const filteredRows = useMemo(() => {
+  // Per-row searchable text, built once per load instead of once per
+  // keystroke per row (DCH-58). Keyed by listing id so a spliced-in row
+  // update rebuilds the map but nothing else.
+  const searchHaystacks = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const r of rows ?? []) m.set(r.listing_id, buildSearchHaystack(r));
+    return m;
+  }, [rows]);
+
+  // The search input stays perfectly responsive: the text state updates
+  // immediately, while the row filtering below runs against this deferred
+  // copy — React can interrupt the (already cheap) list re-render if more
+  // keystrokes arrive.
+  const deferredSearch = useDeferredValue(searchText.trim().toLowerCase());
+
+  const searchedRows = useMemo(() => {
     if (!rows) return null;
-    const sorted = rows.filter((row) => listingPassesFilters(row, filterState));
+    if (!deferredSearch) return rows;
+    return rows.filter((r) =>
+      (searchHaystacks.get(r.listing_id) ?? "").includes(deferredSearch),
+    );
+  }, [rows, searchHaystacks, deferredSearch]);
+
+  const filteredRows = useMemo(() => {
+    if (!searchedRows) return null;
+    const sorted = searchedRows.filter((row) =>
+      passesFacetFilters(row, facetFilters),
+    );
     sorted.sort((a, b) => {
       const totalA =
         a.price_cents !== null ? a.price_cents + (a.shipping_cents ?? 0) : null;
@@ -929,70 +868,19 @@ export function Listings() {
       }
     });
     return sorted;
-  }, [rows, filterState, sortMode]);
+  }, [searchedRows, facetFilters, sortMode]);
 
-  // Per-option result counts for the sidebar facets. Each count answers
-  // "how many listings would I see if I picked this option?" — i.e. it is
-  // computed with the search text and every OTHER filter still applied.
-  const facetCounts = useMemo(() => {
-    const all = rows ?? [];
-    const count = (ov: Partial<ListingFilterState>) => {
-      const f = { ...filterState, ...ov };
-      let n = 0;
-      for (const r of all) if (listingPassesFilters(r, f)) n++;
-      return n;
-    };
-    return {
-      status: {
-        active: count({ status: new Set(["active"]) }),
-        ended: count({ status: new Set(["ended"]) }),
-        archived: count({ status: new Set(["archived"]) }),
-      },
-      match: {
-        confirmed: count({ match: new Set(["confirmed"]) }),
-        unconfirmed: count({ match: new Set(["unconfirmed"]) }),
-        unmatched: count({ match: new Set(["unmatched"]) }),
-      },
-      offer: {
-        unresponded: count({ offer: new Set(["unresponded"]) }),
-        with: count({ offer: new Set(["with"]) }),
-        without: count({ offer: new Set(["without"]) }),
-      },
-      type: {
-        auction: count({ type: new Set(["auction"]) }),
-        bin: count({ type: new Set(["bin"]) }),
-        offers: count({ type: new Set(["offers"]) }),
-      },
-    };
-  }, [rows, filterState]);
-
-  // Driver options for the sidebar combobox, derived from the loaded rows
-  // with the same precedence the by-driver view uses (registry-match driver
-  // first, then the auto/manual tag). Counts are faceted: they apply every
-  // filter except the driver filter itself.
-  const driverOptions = useMemo(() => {
-    const f: ListingFilterState = { ...filterState, driver: "all" };
-    const byKey = new Map<string, { name: string; count: number }>();
-    let noneCount = 0;
-    let allCount = 0;
-    for (const r of rows ?? []) {
-      if (!listingPassesFilters(r, f)) continue;
-      allCount++;
-      const name = r.matched_driver_name ?? r.auto_driver_name;
-      if (!name) {
-        noneCount++;
-        continue;
-      }
-      const key = name.toLowerCase();
-      const entry = byKey.get(key);
-      if (entry) entry.count++;
-      else byKey.set(key, { name, count: 1 });
-    }
-    const options = Array.from(byKey.entries())
-      .map(([key, v]) => ({ value: `d:${key}`, name: v.name, count: v.count }))
-      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-    return { options, noneCount, allCount };
-  }, [rows, filterState]);
+  // Every sidebar aggregate — the 12 facet counts, the driver combobox
+  // options, and the seller-popover input rows — in one pass over the
+  // search-filtered rows (DCH-58; previously ~15 separate passes). Each
+  // count still answers "how many listings would I see if I picked this
+  // option?", i.e. with the search text and every OTHER filter applied.
+  const facetData = useMemo(
+    () => computeListingFacetData(searchedRows ?? [], facetFilters),
+    [searchedRows, facetFilters],
+  );
+  const facetCounts = facetData.counts;
+  const driverOptions = facetData.driver;
 
   const driverFilterLabel = useMemo(() => {
     if (driverFilter === "all") return "All drivers";
@@ -1005,16 +893,13 @@ export function Listings() {
     return key;
   }, [driverFilter, rows]);
 
-  // Seller options for the sidebar popover, derived from the loaded rows the
-  // same way the driver options are: every filter applies except the seller
-  // facet itself, so a count answers "how many would I see if I picked this
-  // seller?".
-  const sellerFilterOptions = useMemo(() => {
-    const f: ListingFilterState = { ...filterState, seller: new Set() };
-    return sellerOptions(
-      (rows ?? []).filter((r) => listingPassesFilters(r, f)),
-    );
-  }, [rows, filterState]);
+  // Seller options for the sidebar popover, derived the same way the driver
+  // options are: every filter applies except the seller facet itself, so a
+  // count answers "how many would I see if I picked this seller?".
+  const sellerFilterOptions = useMemo(
+    () => sellerOptions(facetData.sellerRows),
+    [facetData],
+  );
 
   /** Years present on the loaded listings' registry matches, newest-first.
    *  Derived from the rows rather than the DCR form options so the dropdown
@@ -1676,40 +1561,30 @@ export function Listings() {
                       )}
                       refreshing={refreshingId === r.listing_id}
                       unwatching={unwatchingId === r.listing_id}
-                      onRefresh={() => onRefreshOne(r.listing_id)}
-                      onUnwatch={() => onUnwatch(r)}
-                      onClearMatch={() => onClearMatch(r.listing_id)}
-                      onRejectMatch={() => onRejectMatch(r.listing_id)}
-                      onConfirmMatch={() => onConfirmMatch(r.listing_id)}
-                      onChangeMatch={() => setRegistrySearchListing(r)}
+                      onRefresh={onRefreshOne}
+                      onUnwatch={onUnwatch}
+                      onClearMatch={onClearMatch}
+                      onRejectMatch={onRejectMatch}
+                      onConfirmMatch={onConfirmMatch}
+                      onChangeMatch={setRegistrySearchListing}
                       autoMatching={autoMatchingId === r.listing_id}
                       autoMatchNote={autoMatchNotes.get(r.listing_id)}
-                      onAutoMatch={() => onAutoMatchOne(r.listing_id)}
-                      onAddToGroup={(gid) =>
-                        onAddListingToGroup(r.listing_id, gid)
-                      }
-                      onCreateGroup={() =>
-                        setCreateGroupForListingId(r.listing_id)
-                      }
-                      onRemoveFromGroup={(gid) =>
-                        onRemoveListingFromGroup(r.listing_id, gid)
-                      }
+                      onAutoMatch={onAutoMatchOne}
+                      onAddToGroup={onAddListingToGroup}
+                      onCreateGroup={setCreateGroupForListingId}
+                      onRemoveFromGroup={onRemoveListingFromGroup}
                       localDrivers={localDrivers}
                       tagDriverOpen={tagDriverId === r.listing_id}
-                      onOpenTagDriver={() => setTagDriverId(r.listing_id)}
-                      onCancelTagDriver={() => setTagDriverId(null)}
-                      onSetDriver={(name, normalized) =>
-                        onSetDriver(r.listing_id, name, normalized)
-                      }
-                      onClearDriver={() => onClearDriver(r.listing_id)}
-                      onResetDriver={() => onResetDriver(r.listing_id)}
-                      onSetAttributes={(attrs) =>
-                        onSetAttributes(r.listing_id, attrs)
-                      }
-                      onResetAttributes={() => onResetAttributes(r.listing_id)}
+                      onOpenTagDriver={setTagDriverId}
+                      onCancelTagDriver={onCancelTagDriver}
+                      onSetDriver={onSetDriver}
+                      onClearDriver={onClearDriver}
+                      onResetDriver={onResetDriver}
+                      onSetAttributes={onSetAttributes}
+                      onResetAttributes={onResetAttributes}
                       selectMode={selectMode}
                       selected={selectedIds.has(r.listing_id)}
-                      onToggleSelect={() => toggleSelected(r.listing_id)}
+                      onToggleSelect={toggleSelected}
                       imgSizeClass={IMG_CLASS[imgSize]}
                     />
                   ))}
@@ -1739,7 +1614,7 @@ export function Listings() {
                   localDrivers={localDrivers}
                   tagDriverId={tagDriverId}
                   onOpenTagDriver={setTagDriverId}
-                  onCancelTagDriver={() => setTagDriverId(null)}
+                  onCancelTagDriver={onCancelTagDriver}
                   onSetDriver={onSetDriver}
                   onClearDriver={onClearDriver}
                   onResetDriver={onResetDriver}
@@ -1775,7 +1650,7 @@ export function Listings() {
                   localDrivers={localDrivers}
                   tagDriverId={tagDriverId}
                   onOpenTagDriver={setTagDriverId}
-                  onCancelTagDriver={() => setTagDriverId(null)}
+                  onCancelTagDriver={onCancelTagDriver}
                   onSetDriver={onSetDriver}
                   onClearDriver={onClearDriver}
                   onResetDriver={onResetDriver}
@@ -1870,8 +1745,9 @@ export function Listings() {
           listing={registrySearchListing}
           onClose={() => setRegistrySearchListing(null)}
           onLinked={async () => {
+            const id = registrySearchListing.listing_id;
             setRegistrySearchListing(null);
-            await load();
+            await reloadRow(id);
           }}
         />
       )}
@@ -1879,7 +1755,11 @@ export function Listings() {
   );
 }
 
-function ListingCard({
+// Memoized (DCH-58): every callback prop takes the listing id (or row), so
+// the parent can pass the same render-stable handler to every card. During
+// a keystroke or a single-row splice, unchanged cards skip re-rendering
+// entirely — the row object identity is the memo key that matters.
+const ListingCard = memo(function ListingCard({
   row,
   groups,
   offer,
@@ -1916,30 +1796,30 @@ function ListingCard({
   offer: ReceivedOffer | undefined;
   refreshing: boolean;
   unwatching: boolean;
-  onRefresh: () => void;
-  onUnwatch: () => void;
-  onClearMatch: () => void;
-  onRejectMatch: () => void;
-  onConfirmMatch: () => void;
-  onChangeMatch: () => void;
+  onRefresh: (id: number) => void;
+  onUnwatch: (row: ListingRow) => void;
+  onClearMatch: (id: number) => void;
+  onRejectMatch: (id: number) => void;
+  onConfirmMatch: (id: number) => void;
+  onChangeMatch: (row: ListingRow) => void;
   autoMatching: boolean;
   autoMatchNote: string | undefined;
-  onAutoMatch: () => void;
-  onAddToGroup: (groupId: number) => void;
-  onCreateGroup: () => void;
-  onRemoveFromGroup: (groupId: number) => void;
+  onAutoMatch: (id: number) => void;
+  onAddToGroup: (listingId: number, groupId: number) => void;
+  onCreateGroup: (listingId: number) => void;
+  onRemoveFromGroup: (listingId: number, groupId: number) => void;
   localDrivers: DriverOption[];
   tagDriverOpen: boolean;
-  onOpenTagDriver: () => void;
+  onOpenTagDriver: (id: number) => void;
   onCancelTagDriver: () => void;
-  onSetDriver: (name: string, normalized: string) => void;
-  onClearDriver: () => void;
-  onResetDriver: () => void;
-  onSetAttributes: (attrs: ListingAttributes) => void;
-  onResetAttributes: () => void;
+  onSetDriver: (id: number, name: string, normalized: string) => void;
+  onClearDriver: (id: number) => void;
+  onResetDriver: (id: number) => void;
+  onSetAttributes: (id: number, attrs: ListingAttributes) => void;
+  onResetAttributes: (id: number) => void;
   selectMode: boolean;
   selected: boolean;
-  onToggleSelect: () => void;
+  onToggleSelect: (listingId: number) => void;
   imgSizeClass: string;
 }) {
   const total =
@@ -1948,6 +1828,28 @@ function ListingCard({
       : null;
   const ended = row.status === "ended";
   const matched = row.registry_entry_id !== null;
+  // Card-local closures over this row's id. These are recreated per card
+  // render, which is fine — the memo boundary is the card itself.
+  const id = row.listing_id;
+  const refresh = () => onRefresh(id);
+  const unwatch = () => onUnwatch(row);
+  const clearMatch = () => onClearMatch(id);
+  const rejectMatch = () => onRejectMatch(id);
+  const confirmMatch = () => onConfirmMatch(id);
+  const changeMatch = () => onChangeMatch(row);
+  const autoMatch = () => onAutoMatch(id);
+  const addToGroup = (groupId: number) => onAddToGroup(id, groupId);
+  const createGroup = () => onCreateGroup(id);
+  const removeFromGroup = (groupId: number) => onRemoveFromGroup(id, groupId);
+  const openTagDriver = () => onOpenTagDriver(id);
+  const setDriver = (name: string, normalized: string) =>
+    onSetDriver(id, name, normalized);
+  const clearDriver = () => onClearDriver(id);
+  const resetDriver = () => onResetDriver(id);
+  const saveAttributes = (attrs: ListingAttributes) =>
+    onSetAttributes(id, attrs);
+  const resetAttributes = () => onResetAttributes(id);
+  const toggleSelect = () => onToggleSelect(id);
   // Collapsed by default (DCH-20). The list is a scan surface first: you
   // sweep it for a price worth attention, then open the one card. Rendering
   // every card fully expanded is what made the screen read as cluttered.
@@ -1970,7 +1872,7 @@ function ListingCard({
             type="checkbox"
             className="w-4 h-4 accent-accent"
             checked={selected}
-            onChange={onToggleSelect}
+            onChange={toggleSelect}
             aria-label={selected ? "Deselect listing" : "Select listing"}
           />
         </label>
@@ -2021,9 +1923,9 @@ function ListingCard({
             <GroupChipRow
               row={row}
               groups={groups}
-              onAddToGroup={onAddToGroup}
-              onCreateGroup={onCreateGroup}
-              onRemoveFromGroup={onRemoveFromGroup}
+              onAddToGroup={addToGroup}
+              onCreateGroup={createGroup}
+              onRemoveFromGroup={removeFromGroup}
             />
 
             <SectionLabel>Match &amp; valuation</SectionLabel>
@@ -2082,7 +1984,7 @@ function ListingCard({
                       <button
                         className="text-emerald-400 hover:text-emerald-300"
                         type="button"
-                        onClick={onConfirmMatch}
+                        onClick={confirmMatch}
                         title="Lock this in as the right registry entry"
                       >
                         Confirm
@@ -2090,7 +1992,7 @@ function ListingCard({
                       <button
                         className="link-danger"
                         type="button"
-                        onClick={onRejectMatch}
+                        onClick={rejectMatch}
                         title="Wrong entry — drop it and stop auto-matching this listing"
                       >
                         Not it
@@ -2101,7 +2003,7 @@ function ListingCard({
                     <button
                       className="text-fg-muted hover:text-fg"
                       type="button"
-                      onClick={onAutoMatch}
+                      onClick={autoMatch}
                       disabled={autoMatching}
                       title="Re-run auto-matching — useful after correcting attributes; replaces or clears the current suggestion"
                     >
@@ -2111,7 +2013,7 @@ function ListingCard({
                   <button
                     className="text-fg-muted hover:text-fg"
                     type="button"
-                    onClick={onChangeMatch}
+                    onClick={changeMatch}
                     title="Search the diecastregistry.com catalog and link a result to this listing"
                   >
                     Change match…
@@ -2119,7 +2021,7 @@ function ListingCard({
                   <button
                     className="text-fg-subtle hover:text-fg-muted"
                     type="button"
-                    onClick={onClearMatch}
+                    onClick={clearMatch}
                     title="Remove the link to the registry entry"
                   >
                     Clear
@@ -2133,7 +2035,7 @@ function ListingCard({
                   <button
                     className="text-fg-muted hover:text-fg"
                     type="button"
-                    onClick={onChangeMatch}
+                    onClick={changeMatch}
                     title="Search the diecastregistry.com catalog and link a result to this listing"
                   >
                     Match…
@@ -2141,7 +2043,7 @@ function ListingCard({
                   <button
                     className="text-fg-subtle hover:text-fg-muted"
                     type="button"
-                    onClick={onClearMatch}
+                    onClick={clearMatch}
                     title="Clear the no-match flag"
                   >
                     Reset
@@ -2157,7 +2059,7 @@ function ListingCard({
                   <button
                     className="text-fg-muted hover:text-fg"
                     type="button"
-                    onClick={onAutoMatch}
+                    onClick={autoMatch}
                     disabled={autoMatching}
                     title="Search the registry for a best-effort match (pulls the driver's entries from diecastregistry.com if needed)"
                   >
@@ -2166,7 +2068,7 @@ function ListingCard({
                   <button
                     className="text-fg-muted hover:text-fg"
                     type="button"
-                    onClick={onChangeMatch}
+                    onClick={changeMatch}
                     title="Search the diecastregistry.com catalog and link a result to this listing"
                   >
                     Match…
@@ -2174,7 +2076,7 @@ function ListingCard({
                   <button
                     className="text-fg-subtle hover:text-fg-muted"
                     type="button"
-                    onClick={onRejectMatch}
+                    onClick={rejectMatch}
                     title="Mark as having no match in your registry"
                   >
                     Mark no-match
@@ -2193,17 +2095,17 @@ function ListingCard({
               row={row}
               localDrivers={localDrivers}
               open={tagDriverOpen}
-              onOpen={onOpenTagDriver}
+              onOpen={openTagDriver}
               onCancel={onCancelTagDriver}
-              onSet={onSetDriver}
-              onClear={onClearDriver}
-              onReset={onResetDriver}
+              onSet={setDriver}
+              onClear={clearDriver}
+              onReset={resetDriver}
             />
 
             <AttributesSection
               row={row}
-              onSave={onSetAttributes}
-              onReset={onResetAttributes}
+              onSave={saveAttributes}
+              onReset={resetAttributes}
             />
 
             {/* Actions, separated from the match controls above. Only the
@@ -2225,7 +2127,7 @@ function ListingCard({
               <button
                 className="text-xs text-fg-muted hover:text-fg"
                 type="button"
-                onClick={onRefresh}
+                onClick={refresh}
                 disabled={refreshing}
               >
                 {refreshing ? "Refreshing…" : "Refresh"}
@@ -2234,7 +2136,7 @@ function ListingCard({
                 <button
                   className="link-danger text-xs"
                   type="button"
-                  onClick={onUnwatch}
+                  onClick={unwatch}
                   disabled={unwatching}
                   title="Remove from your eBay watchlist and delete this local row"
                 >
@@ -2300,7 +2202,7 @@ function ListingCard({
       </div>
     </li>
   );
-}
+});
 
 /** The rule + caption that separates a card's groups (DCH-20). The expanded
  *  card was seven flat rows of unrelated concerns; the labels are what turn
@@ -2936,52 +2838,50 @@ function GroupedByDriver({
                 total {formatCents(totalCents)}
               </div>
             </summary>
-            <ul className="divide-y divide-border">
-              {items.map((r) => (
-                <li key={r.listing_id} className="px-4 py-2">
-                  <ListingCard
-                    row={r}
-                    groups={groups}
-                    offer={offersByItemId.get(
-                      legacyIdFromExternalId(r.external_id),
-                    )}
-                    refreshing={refreshingId === r.listing_id}
-                    unwatching={unwatchingId === r.listing_id}
-                    onRefresh={() => onRefresh(r.listing_id)}
-                    onUnwatch={() => onUnwatch(r)}
-                    onClearMatch={() => onClearMatch(r.listing_id)}
-                    onRejectMatch={() => onRejectMatch(r.listing_id)}
-                    onConfirmMatch={() => onConfirmMatch(r.listing_id)}
-                    onChangeMatch={() => onChangeMatch(r)}
-                    autoMatching={autoMatchingId === r.listing_id}
-                    autoMatchNote={autoMatchNotes.get(r.listing_id)}
-                    onAutoMatch={() => onAutoMatch(r.listing_id)}
-                    onAddToGroup={(gid) => onAddToGroup(r.listing_id, gid)}
-                    onCreateGroup={() => onCreateGroup(r.listing_id)}
-                    onRemoveFromGroup={(gid) =>
-                      onRemoveFromGroup(r.listing_id, gid)
-                    }
-                    localDrivers={localDrivers}
-                    tagDriverOpen={tagDriverId === r.listing_id}
-                    onOpenTagDriver={() => onOpenTagDriver(r.listing_id)}
-                    onCancelTagDriver={onCancelTagDriver}
-                    onSetDriver={(name, normalized) =>
-                      onSetDriver(r.listing_id, name, normalized)
-                    }
-                    onClearDriver={() => onClearDriver(r.listing_id)}
-                    onResetDriver={() => onResetDriver(r.listing_id)}
-                    onSetAttributes={(attrs) =>
-                      onSetAttributes(r.listing_id, attrs)
-                    }
-                    onResetAttributes={() => onResetAttributes(r.listing_id)}
-                    selectMode={selectMode}
-                    selected={selectedIds.has(r.listing_id)}
-                    onToggleSelect={() => onToggleSelect(r.listing_id)}
-                    imgSizeClass={imgSizeClass}
-                  />
-                </li>
-              ))}
-            </ul>
+            {/* A collapsed bucket mounts no cards at all (DCH-58): the
+                summary line is the whole DOM cost until it's opened. */}
+            {!collapsed.has(driver) && (
+              <ul className="divide-y divide-border">
+                {items.map((r) => (
+                  <li key={r.listing_id} className="px-4 py-2">
+                    <ListingCard
+                      row={r}
+                      groups={groups}
+                      offer={offersByItemId.get(
+                        legacyIdFromExternalId(r.external_id),
+                      )}
+                      refreshing={refreshingId === r.listing_id}
+                      unwatching={unwatchingId === r.listing_id}
+                      onRefresh={onRefresh}
+                      onUnwatch={onUnwatch}
+                      onClearMatch={onClearMatch}
+                      onRejectMatch={onRejectMatch}
+                      onConfirmMatch={onConfirmMatch}
+                      onChangeMatch={onChangeMatch}
+                      autoMatching={autoMatchingId === r.listing_id}
+                      autoMatchNote={autoMatchNotes.get(r.listing_id)}
+                      onAutoMatch={onAutoMatch}
+                      onAddToGroup={onAddToGroup}
+                      onCreateGroup={onCreateGroup}
+                      onRemoveFromGroup={onRemoveFromGroup}
+                      localDrivers={localDrivers}
+                      tagDriverOpen={tagDriverId === r.listing_id}
+                      onOpenTagDriver={onOpenTagDriver}
+                      onCancelTagDriver={onCancelTagDriver}
+                      onSetDriver={onSetDriver}
+                      onClearDriver={onClearDriver}
+                      onResetDriver={onResetDriver}
+                      onSetAttributes={onSetAttributes}
+                      onResetAttributes={onResetAttributes}
+                      selectMode={selectMode}
+                      selected={selectedIds.has(r.listing_id)}
+                      onToggleSelect={onToggleSelect}
+                      imgSizeClass={imgSizeClass}
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
           </details>
         );
       })}
@@ -3165,32 +3065,30 @@ function GroupedByGroup({
         offer={offersByItemId.get(legacyIdFromExternalId(r.external_id))}
         refreshing={refreshingId === r.listing_id}
         unwatching={unwatchingId === r.listing_id}
-        onRefresh={() => onRefresh(r.listing_id)}
-        onUnwatch={() => onUnwatch(r)}
-        onClearMatch={() => onClearMatch(r.listing_id)}
-        onRejectMatch={() => onRejectMatch(r.listing_id)}
-        onConfirmMatch={() => onConfirmMatch(r.listing_id)}
-        onChangeMatch={() => onChangeMatch(r)}
+        onRefresh={onRefresh}
+        onUnwatch={onUnwatch}
+        onClearMatch={onClearMatch}
+        onRejectMatch={onRejectMatch}
+        onConfirmMatch={onConfirmMatch}
+        onChangeMatch={onChangeMatch}
         autoMatching={autoMatchingId === r.listing_id}
         autoMatchNote={autoMatchNotes.get(r.listing_id)}
-        onAutoMatch={() => onAutoMatch(r.listing_id)}
-        onAddToGroup={(gid) => onAddToGroup(r.listing_id, gid)}
-        onCreateGroup={() => onCreateGroup(r.listing_id)}
-        onRemoveFromGroup={(gid) => onRemoveFromGroup(r.listing_id, gid)}
+        onAutoMatch={onAutoMatch}
+        onAddToGroup={onAddToGroup}
+        onCreateGroup={onCreateGroup}
+        onRemoveFromGroup={onRemoveFromGroup}
         localDrivers={localDrivers}
         tagDriverOpen={tagDriverId === r.listing_id}
-        onOpenTagDriver={() => onOpenTagDriver(r.listing_id)}
+        onOpenTagDriver={onOpenTagDriver}
         onCancelTagDriver={onCancelTagDriver}
-        onSetDriver={(name, normalized) =>
-          onSetDriver(r.listing_id, name, normalized)
-        }
-        onClearDriver={() => onClearDriver(r.listing_id)}
-        onResetDriver={() => onResetDriver(r.listing_id)}
-        onSetAttributes={(attrs) => onSetAttributes(r.listing_id, attrs)}
-        onResetAttributes={() => onResetAttributes(r.listing_id)}
+        onSetDriver={onSetDriver}
+        onClearDriver={onClearDriver}
+        onResetDriver={onResetDriver}
+        onSetAttributes={onSetAttributes}
+        onResetAttributes={onResetAttributes}
         selectMode={selectMode}
         selected={selectedIds.has(r.listing_id)}
-        onToggleSelect={() => onToggleSelect(r.listing_id)}
+        onToggleSelect={onToggleSelect}
         imgSizeClass={imgSizeClass}
       />
     </li>
@@ -3227,71 +3125,76 @@ function GroupedByGroup({
               </span>
             </div>
           </summary>
-          <div className="px-3 py-2 space-y-2">
-            {section.groups.map((group) => {
-              const items = groupItems.byId.get(group.id) ?? [];
-              const gkey = `${section.key}::${group.id}`;
-              const totalCents = items.reduce(
-                (s, r) => s + (r.price_cents ?? 0) + (r.shipping_cents ?? 0),
-                0,
-              );
-              const overTarget =
-                group.target_price_cents !== null
-                  ? items.filter(
-                      (r) =>
-                        r.price_cents !== null &&
-                        r.price_cents + (r.shipping_cents ?? 0) >
-                          (group.target_price_cents ?? 0),
-                    ).length
-                  : 0;
-              return (
-                <details
-                  key={gkey}
-                  className="rounded border border-border overflow-hidden"
-                  open={!collapsed.has(gkey)}
-                  onToggle={(e) => setOpen(gkey, e.currentTarget.open)}
-                >
-                  <summary className="cursor-pointer list-none px-3 py-2 flex items-start justify-between gap-4 hover:bg-bg-elevated">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{group.name}</span>
-                        <span className="text-xs text-fg-subtle">
-                          {items.length} listing{items.length === 1 ? "" : "s"}
-                        </span>
+          {/* A collapsed section renders none of its groups or cards
+              (DCH-58) — the DOM stays bounded with everything collapsed. */}
+          {!collapsed.has(section.key) && (
+            <div className="px-3 py-2 space-y-2">
+              {section.groups.map((group) => {
+                const items = groupItems.byId.get(group.id) ?? [];
+                const gkey = `${section.key}::${group.id}`;
+                const totalCents = items.reduce(
+                  (s, r) => s + (r.price_cents ?? 0) + (r.shipping_cents ?? 0),
+                  0,
+                );
+                const overTarget =
+                  group.target_price_cents !== null
+                    ? items.filter(
+                        (r) =>
+                          r.price_cents !== null &&
+                          r.price_cents + (r.shipping_cents ?? 0) >
+                            (group.target_price_cents ?? 0),
+                      ).length
+                    : 0;
+                return (
+                  <details
+                    key={gkey}
+                    className="rounded border border-border overflow-hidden"
+                    open={!collapsed.has(gkey)}
+                    onToggle={(e) => setOpen(gkey, e.currentTarget.open)}
+                  >
+                    <summary className="cursor-pointer list-none px-3 py-2 flex items-start justify-between gap-4 hover:bg-bg-elevated">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{group.name}</span>
+                          <span className="text-xs text-fg-subtle">
+                            {items.length} listing
+                            {items.length === 1 ? "" : "s"}
+                          </span>
+                        </div>
+                        {group.description && (
+                          <div className="text-xs text-fg-subtle mt-0.5 whitespace-pre-wrap">
+                            {group.description}
+                          </div>
+                        )}
+                        {group.target_price_cents !== null && (
+                          <div className="text-xs text-fg-subtle mt-0.5">
+                            target ≤ {formatCents(group.target_price_cents)}
+                            {overTarget > 0 && (
+                              <span className="text-amber-400 ml-2">
+                                {overTarget} over target
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      {group.description && (
-                        <div className="text-xs text-fg-subtle mt-0.5 whitespace-pre-wrap">
-                          {group.description}
-                        </div>
-                      )}
-                      {group.target_price_cents !== null && (
-                        <div className="text-xs text-fg-subtle mt-0.5">
-                          target ≤ {formatCents(group.target_price_cents)}
-                          {overTarget > 0 && (
-                            <span className="text-amber-400 ml-2">
-                              {overTarget} over target
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    <div className="text-xs text-fg-subtle tabular-nums shrink-0">
-                      total {formatCents(totalCents)}
-                    </div>
-                  </summary>
-                  {items.length === 0 ? (
-                    <div className="px-3 py-2.5 text-xs text-fg-subtle">
-                      No listings in this group yet.
-                    </div>
-                  ) : (
-                    <ul className="divide-y divide-border border-t border-border">
-                      {items.map(renderListing)}
-                    </ul>
-                  )}
-                </details>
-              );
-            })}
-          </div>
+                      <div className="text-xs text-fg-subtle tabular-nums shrink-0">
+                        total {formatCents(totalCents)}
+                      </div>
+                    </summary>
+                    {collapsed.has(gkey) ? null : items.length === 0 ? (
+                      <div className="px-3 py-2.5 text-xs text-fg-subtle">
+                        No listings in this group yet.
+                      </div>
+                    ) : (
+                      <ul className="divide-y divide-border border-t border-border">
+                        {items.map(renderListing)}
+                      </ul>
+                    )}
+                  </details>
+                );
+              })}
+            </div>
+          )}
         </details>
       ))}
 
@@ -3310,9 +3213,11 @@ function GroupedByGroup({
               </span>
             </div>
           </summary>
-          <ul className="divide-y divide-border">
-            {groupItems.ungrouped.map(renderListing)}
-          </ul>
+          {!collapsed.has("ungrouped") && (
+            <ul className="divide-y divide-border">
+              {groupItems.ungrouped.map(renderListing)}
+            </ul>
+          )}
         </details>
       )}
     </div>
@@ -6033,11 +5938,4 @@ function OfferBadge({ offer }: { offer: ReceivedOffer }) {
       ✨ {label} →
     </a>
   );
-}
-
-/** Listings table stores eBay item ids as v1|<legacy>|0; the messages
- *  API returns just the legacy segment, so we extract it for lookups. */
-function legacyIdFromExternalId(external_id: string): string {
-  const parts = external_id.split("|");
-  return parts.length >= 2 && /^\d+$/.test(parts[1]) ? parts[1] : external_id;
 }

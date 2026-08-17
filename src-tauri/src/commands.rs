@@ -723,7 +723,7 @@ struct ListingRowRaw {
     matched_scale: Option<String>,
     matched_retail_cents: Option<i64>,
     matched_wholesale_cents: Option<i64>,
-    matched_raw_json: Option<String>,
+    matched_detail_url: Option<String>,
     auto_driver_id: Option<i64>,
     auto_driver_name: Option<String>,
     auto_driver_user_set: i64,
@@ -744,6 +744,19 @@ pub async fn list_listings(state: State<'_, AppState>) -> AppResult<Vec<ListingR
     load_listing_rows(&state.db.pool).await
 }
 
+/// One listing in exactly the shape `list_listings` returns it, or None if
+/// the row no longer exists. Single-row mutations (group add/remove, match
+/// confirm/clear, driver tag, attribute edit, per-listing refresh) re-fetch
+/// just their row through this instead of re-pulling the whole table
+/// (DCH-58); the frontend splices the result into its loaded state.
+#[tauri::command]
+pub async fn get_listing_row(
+    state: State<'_, AppState>,
+    listing_id: i64,
+) -> AppResult<Option<ListingRow>> {
+    load_listing_row(&state.db.pool, listing_id).await
+}
+
 /// Every saved listing with its match, comps and derived scores.
 ///
 /// Split out of the command (DCH-48) so sharing publishes exactly the rows
@@ -757,6 +770,22 @@ pub async fn list_listings(state: State<'_, AppState>) -> AppResult<Vec<ListingR
 /// dynamic `IN (?, ?, …)` would buy nothing and cost the only place in this
 /// file that builds SQL by string concatenation.
 pub async fn load_listing_rows(pool: &sqlx::SqlitePool) -> AppResult<Vec<ListingRow>> {
+    load_listing_rows_where(pool, None).await
+}
+
+/// Single-row flavor of [`load_listing_rows`] — same query, same derived
+/// scores, filtered to one id.
+pub async fn load_listing_row(
+    pool: &sqlx::SqlitePool,
+    listing_id: i64,
+) -> AppResult<Option<ListingRow>> {
+    Ok(load_listing_rows_where(pool, Some(listing_id)).await?.pop())
+}
+
+async fn load_listing_rows_where(
+    pool: &sqlx::SqlitePool,
+    only_listing_id: Option<i64>,
+) -> AppResult<Vec<ListingRow>> {
     let rows: Vec<ListingRowRaw> = sqlx::query_as(
         "SELECT l.id, s.code AS seller_code, l.external_id, l.url, l.title,
                 l.price_cents, l.shipping_cents, l.currency,
@@ -778,7 +807,7 @@ pub async fn load_listing_rows(pool: &sqlx::SqlitePool) -> AppResult<Vec<Listing
                 re.scale AS matched_scale,
                 re.retail_value_cents AS matched_retail_cents,
                 re.wholesale_value_cents AS matched_wholesale_cents,
-                re.raw_json AS matched_raw_json,
+                json_extract(re.raw_json, '$.detail_url') AS matched_detail_url,
                 ad.id AS auto_driver_id,
                 ad.name AS auto_driver_name,
                 l.driver_id_user_set AS auto_driver_user_set,
@@ -793,8 +822,10 @@ pub async fn load_listing_rows(pool: &sqlx::SqlitePool) -> AppResult<Vec<Listing
          LEFT JOIN registry_entries re ON re.id = lm.registry_entry_id
          LEFT JOIN drivers d ON d.id = re.driver_id
          LEFT JOIN drivers ad ON ad.id = l.driver_id
+         WHERE ?1 IS NULL OR l.id = ?1
          ORDER BY l.status = 'active' DESC, l.last_seen_at DESC",
     )
+    .bind(only_listing_id)
     .fetch_all(pool)
     .await?;
 
@@ -823,15 +854,6 @@ pub async fn load_listing_rows(pool: &sqlx::SqlitePool) -> AppResult<Vec<Listing
                 )
             });
             let comp_score = crate::comps::comp_score(total_cents, comps.as_ref());
-            let matched_detail_url = r
-                .matched_raw_json
-                .as_deref()
-                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-                .and_then(|v| {
-                    v.get("detail_url")
-                        .and_then(|x| x.as_str())
-                        .map(str::to_owned)
-                });
             ListingRow {
                 listing_id: r.id,
                 seller_code: r.seller_code,
@@ -871,7 +893,7 @@ pub async fn load_listing_rows(pool: &sqlx::SqlitePool) -> AppResult<Vec<Listing
                 matched_scale: r.matched_scale,
                 matched_retail_cents: r.matched_retail_cents,
                 matched_wholesale_cents: r.matched_wholesale_cents,
-                matched_detail_url,
+                matched_detail_url: r.matched_detail_url,
                 deal_score,
                 comps,
                 comp_score,
