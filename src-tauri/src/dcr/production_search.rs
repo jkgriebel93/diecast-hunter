@@ -16,11 +16,12 @@ use regex::Regex;
 use scraper::{ElementRef, Html, Selector};
 use serde::{Deserialize, Serialize};
 
-use crate::dcr::client::{extract_form_token, looks_like_login_page};
+use crate::dcr::client::{extract_form_token, looks_like_login_page, WALK_CONCURRENCY};
 use crate::dcr::parse::{
     dollars_to_cents, normalize_driver_name, parse_details_line, parse_seq_produced,
     registry_guid_from_feedback_url, SeqProduced,
 };
+use crate::dcr::walk::walk_pages_buffered;
 use crate::dcr::DcrClient;
 use crate::error::{AppError, AppResult};
 use crate::progress::ProgressEmitter;
@@ -150,19 +151,35 @@ pub async fn search_all_pages_with_progress(
     let mut all_results = parse_results(&first_page_html);
     let mut pages_fetched = 1u32;
 
+    // Remaining pages ride the bounded buffered walk (DCH-61): up to
+    // WALK_CONCURRENCY fetches in flight (the client's rate gate still
+    // spaces their starts), delivered in page order so the "registry
+    // order" sort stays exactly what DCR returned. Cancellation, the
+    // login-redirect check, and any fetch error abort the walk and drop
+    // the in-flight fetches.
     let stop_at = total.min(200);
-    for page in (current + 1)..=stop_at {
-        progress.check_cancelled()?;
-        progress.step(
-            format!("Fetching page {page} of {total}{suffix}…"),
-            Some(page),
-            Some(total),
-        );
-        let html = client.get_html(&format!("/Production/{page}")).await?;
-        let mut more = parse_results(&html);
-        all_results.append(&mut more);
-        pages_fetched += 1;
-    }
+    walk_pages_buffered(
+        (current + 1)..=stop_at,
+        WALK_CONCURRENCY,
+        |page| async move { client.get_html(&format!("/Production/{page}")).await },
+        |page, html| {
+            progress.check_cancelled()?;
+            progress.step(
+                format!("Fetching page {page} of {total}{suffix}…"),
+                Some(page),
+                Some(total),
+            );
+            if looks_like_login_page(&html) {
+                client.clear_production_token();
+                return Err(AppError::SessionExpired);
+            }
+            let mut more = parse_results(&html);
+            all_results.append(&mut more);
+            pages_fetched += 1;
+            Ok(())
+        },
+    )
+    .await?;
 
     Ok((all_results, pages_fetched))
 }

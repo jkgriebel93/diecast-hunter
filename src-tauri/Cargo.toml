@@ -38,6 +38,7 @@ scraper = "0.20"
 regex = "1"
 url = "2"
 once_cell = "1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 base64 = "0.22"
 fastrand = "2"
 axum = "0.7"

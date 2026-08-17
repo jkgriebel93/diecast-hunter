@@ -14,9 +14,23 @@ const BASE: &str = "https://www.diecastregistry.com";
 /// don't look like a browser at the TLS or HTTP layer.
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-/// Minimum gap between outbound requests to the same host. Bulk operations
-/// (e.g. registry-detail enrichment) flow through this limiter.
-const MIN_INTERVAL: Duration = Duration::from_millis(800);
+/// Minimum gap between read (GET) request starts. Lowered from the original
+/// 800 ms shared floor (DCH-61) after a conscious politeness call: reads are
+/// what page walks and enrichment are made of, and the serial 800 ms floor —
+/// not network latency — dominated every multi-page operation. This is THE
+/// knob to turn back up if DCR ever objects.
+const READ_INTERVAL: Duration = Duration::from_millis(300);
+
+/// Minimum gap around mutating requests (login, UpdateFilter, register,
+/// delete). Kept at the original conservative 800 ms deliberately — these
+/// change server state and there are few of them, so they gain nothing
+/// from speed and everything from caution.
+const MUTATION_INTERVAL: Duration = Duration::from_millis(800);
+
+/// Most page fetches a walk may have in flight at once — see
+/// [`walk_pages_buffered`]. Bounded and small on purpose: pacing stays
+/// explicit, never "as fast as the pool allows".
+pub(crate) const WALK_CONCURRENCY: usize = 3;
 
 /// Max retry attempts for transient errors (429 / 503 / connection reset).
 const MAX_RETRIES: u32 = 3;
@@ -87,7 +101,7 @@ impl DcrClient {
     pub async fn login(&self, email: &str, password: &str) -> AppResult<()> {
         let login_url = format!("{BASE}/Account/Login");
 
-        self.wait_for_slot().await;
+        self.wait_for_slot(MUTATION_INTERVAL).await;
         let body = self.http.get(&login_url).send().await?.text().await?;
 
         let form_token = extract_form_token(&body).ok_or_else(|| {
@@ -100,7 +114,7 @@ impl DcrClient {
             ("Password", password),
         ];
 
-        self.wait_for_slot().await;
+        self.wait_for_slot(MUTATION_INTERVAL).await;
         let resp = self
             .http
             .post(&login_url)
@@ -144,7 +158,7 @@ impl DcrClient {
         let mut last_err: Option<AppError> = None;
 
         for attempt in 0..=MAX_RETRIES {
-            self.wait_for_slot().await;
+            self.wait_for_slot(READ_INTERVAL).await;
             tracing::debug!("GET {url} (attempt {}, xhr={xhr})", attempt + 1);
             let mut req = self.http.get(&url);
             if xhr {
@@ -234,7 +248,7 @@ impl DcrClient {
         let mut backoff = Duration::from_millis(500);
         let mut last_err: Option<AppError> = None;
         for attempt in 0..=MAX_RETRIES {
-            self.wait_for_slot().await;
+            self.wait_for_slot(MUTATION_INTERVAL).await;
             let field_summary: Vec<String> = form
                 .iter()
                 .map(|(k, v)| {
@@ -322,9 +336,11 @@ impl DcrClient {
         Err(last_err.unwrap_or_else(|| AppError::Network("retries exhausted".into())))
     }
 
-    /// Block until enough time has passed since the last request, then mark
-    /// the next earliest send time.
-    async fn wait_for_slot(&self) {
+    /// Block until enough time has passed since the last request start,
+    /// then reserve the next slot `interval` later. One shared gate paces
+    /// reads and mutations together (a mutation still can't fire mid-burst);
+    /// only the spacing each kind reserves differs (DCH-61).
+    async fn wait_for_slot(&self, interval: Duration) {
         let mut next = self.next_send.lock().await;
         let now = Instant::now();
         if *next > now {
@@ -332,9 +348,9 @@ impl DcrClient {
             drop(next); // release before sleeping
             tokio::time::sleep(wait).await;
             let mut next = self.next_send.lock().await;
-            *next = Instant::now() + MIN_INTERVAL;
+            *next = Instant::now() + interval;
         } else {
-            *next = now + MIN_INTERVAL;
+            *next = now + interval;
         }
     }
 }
