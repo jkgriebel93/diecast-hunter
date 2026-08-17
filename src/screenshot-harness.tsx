@@ -631,6 +631,40 @@ function Harness() {
         cancelled = true;
       };
     }
+    // DCH-58's perf presets photograph what must NOT have changed: the
+    // search-filtered flat list with its facet counts, and the by-driver
+    // view fully collapsed — which now mounts no cards at all, so the shot
+    // doubles as proof the gated sections still render their summaries.
+    if (preset === "perf-search") {
+      const t = setTimeout(() => {
+        const input = document.querySelector<HTMLInputElement>(
+          'input[placeholder="Search title, driver, scheme, seller…"]',
+        );
+        if (input) {
+          // Through the native setter so React's onChange sees the value.
+          Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype,
+            "value",
+          )!.set!.call(input, "elliott");
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+      }, 400);
+      return () => clearTimeout(t);
+    }
+    if (preset === "perf-grouped-collapsed") {
+      let cancelled = false;
+      void (async () => {
+        const step = async (fn: () => void, ms = 200) => {
+          await new Promise((r) => setTimeout(r, ms));
+          if (!cancelled) fn();
+        };
+        await step(() => clickByText("button", "By driver"), 400);
+        await step(() => clickByText("button", "Collapse all"));
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
     // The seller presets drive the real control rather than seeding state:
     // the filter lives in the page's own useState, and a screenshot of a
     // state the UI can't reach isn't evidence of anything.

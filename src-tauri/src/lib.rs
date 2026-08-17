@@ -271,6 +271,7 @@ pub fn run() {
             commands::refresh_all_ebay_listings,
             commands::sync_ebay_watchlist,
             commands::list_listings,
+            commands::get_listing_row,
             commands::clear_listing_match,
             commands::reject_listing_match,
             commands::confirm_listing_match,

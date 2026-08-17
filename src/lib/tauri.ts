@@ -232,6 +232,10 @@ export const api = {
     invoke<RefreshSummary>("refresh_all_ebay_listings"),
   syncEbayWatchlist: () => invoke<WatchlistSyncSummary>("sync_ebay_watchlist"),
   listListings: () => invoke<ListingRow[]>("list_listings"),
+  /** One row in exactly the `list_listings` shape, or null if it no longer
+   *  exists. Single-row mutations re-fetch through this and splice (DCH-58). */
+  getListingRow: (listingId: number) =>
+    invoke<ListingRow | null>("get_listing_row", { listingId }),
   clearListingMatch: (listingId: number) =>
     invoke<void>("clear_listing_match", { listingId }),
   rejectListingMatch: (listingId: number) =>
