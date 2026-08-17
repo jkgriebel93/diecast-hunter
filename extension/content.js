@@ -96,11 +96,26 @@ const CSS = `
   .dh-note { margin-top: 6px; font-size: 11px; color: #9aa2b1; }
   .dh-link { color: #7ab8ff; text-decoration: none; font-size: 12px; }
   .dh-link:hover { text-decoration: underline; }
+  .dh-pill {
+    position: fixed; right: 16px; bottom: 16px; z-index: 2147483646;
+    display: flex; align-items: center; gap: 6px; cursor: pointer;
+    padding: 6px 12px; border-radius: 999px;
+    background: #1c1f26; color: #e6e8ec; font: 12px/1 system-ui, sans-serif;
+    box-shadow: 0 4px 16px rgba(0,0,0,.4); border: 1px solid #333845;
+  }
+  .dh-pill:hover { background: #262b36; }
+  .dh-pill-name { font-weight: 700; letter-spacing: .04em; color: #9aa2b1; }
+  .dh-hidden { display: none; }
 `;
 
 let shadowBody = null;
 
-function mountPanel() {
+/** Both faces of the overlay share one host: the panel and the pill, only
+ *  one visible at a time (DCH-70). Both are `position: fixed` in a corner,
+ *  so neither obscures nor reflows eBay's own content. ✕ still removes the
+ *  host for this page view; the pill/minimize pair is the persistent
+ *  choice. */
+function mountPanel(minimized) {
   const host = document.createElement("div");
   host.id = "diecast-hunter-panel";
   const shadow = host.attachShadow({ mode: "closed" });
@@ -112,16 +127,43 @@ function mountPanel() {
   panel.innerHTML = `
     <div class="dh-title">
       <span>Diecast Hunter</span>
-      <button class="dh-close" title="Hide">✕</button>
+      <span>
+        <button class="dh-close" data-dh-min title="Minimize">–</button>
+        <button class="dh-close" title="Hide">✕</button>
+      </span>
     </div>
     <div class="dh-body dh-muted">Checking registry…</div>
   `;
   shadow.appendChild(panel);
+  const pill = document.createElement("button");
+  pill.className = "dh-pill";
+  pill.title = "Diecast Hunter — show match & valuation";
+  pill.innerHTML = `<span class="dh-pill-name">DH</span><span class="dh-pill-sum"></span>`;
+  shadow.appendChild(pill);
+
+  const apply = (min) => {
+    panel.classList.toggle("dh-hidden", min);
+    pill.classList.toggle("dh-hidden", !min);
+  };
+  apply(minimized);
+  const setMinimized = (min) => {
+    apply(min);
+    // Fire-and-forget: the UI shouldn't wait on storage, and a failed
+    // write only costs remembering the choice.
+    api.storage.local
+      .set({ [dhPanelState.MINIMIZED_KEY]: min })
+      .catch(() => {});
+  };
+  pill.addEventListener("click", () => setMinimized(false));
   panel
-    .querySelector(".dh-close")
+    .querySelector("[data-dh-min]")
+    .addEventListener("click", () => setMinimized(true));
+  panel
+    .querySelector(".dh-close:not([data-dh-min])")
     .addEventListener("click", () => host.remove());
   document.documentElement.appendChild(host);
   shadowBody = panel.querySelector(".dh-body");
+  panel.dhPillSummaryEl = pill.querySelector(".dh-pill-sum");
   return panel;
 }
 
@@ -192,7 +234,17 @@ async function main() {
   if (!title) return;
   const priceCents = extractPriceCents();
 
-  const panel = mountPanel();
+  // The stored choice is read before anything renders so the page never
+  // flashes the full panel on its way to the pill. Absent → minimized.
+  let stored = {};
+  try {
+    stored = await api.storage.local.get(dhPanelState.MINIMIZED_KEY);
+  } catch {
+    // Unreadable storage falls back to the default below.
+  }
+  const panel = mountPanel(
+    dhPanelState.initialMinimized(stored[dhPanelState.MINIMIZED_KEY]),
+  );
 
   const health = await sendMessage({ type: "health" });
   if (!health.ok) {
@@ -260,6 +312,10 @@ async function main() {
     <div class="dh-actions" id="dh-verdict-row"></div>
     <div class="dh-note" id="dh-note"></div>
   `);
+
+  // The pill carries the verdict so the minimized state is a summary, not
+  // just an icon: match quality plus the sharpest price signal.
+  panel.dhPillSummaryEl.textContent = dhPanelState.pillSummary(p);
 
   renderVerdictRow(panel, p, already);
 

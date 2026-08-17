@@ -10,7 +10,12 @@ deal scoring happen locally in the app.
 ## How it works
 
 - `content.js` runs on `ebay.com/itm/*` pages, extracts the listing title
-  and price, and renders a small panel (bottom-right, shadow DOM).
+  and price, and renders a small panel (bottom-right, shadow DOM). It
+  starts as a compact pill carrying the verdict summary — "DH · match 92% ·
+  85% of sold" — and expands to the full panel on click; the pill's "–" /
+  expand choice persists in extension storage across pages and browser
+  restarts (`panel-state.js`, default minimized). The ✕ hides the overlay
+  for that page view only.
 - `background.js` proxies requests to the app's embedded localhost server
   (`listing_receiver`, default `http://localhost:17381`), authenticated
   with a Bearer shared secret:

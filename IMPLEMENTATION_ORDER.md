@@ -1,5 +1,19 @@
 # Implementation order for open DCH tickets
 
+Rev 33, 2026-08-17. **DCH-70 shipped** — extension 0.3.0. The overlay now has two
+faces in one shadow host: a compact pill (default) carrying the verdict summary —
+"DH · match 92% · 85% of sold", comps preferred over retail as the price signal —
+and the full panel, expanded by clicking the pill and re-minimized by a "–" beside
+the ✕ (which still hides per-page-view only). The choice persists in *extension*
+storage (`panel-state.js`, `panelMinimized`; absent → minimized, so fresh installs
+and pre-0.3.0 upgrades both start compact) and is read before first paint so the
+panel never flashes on its way to the pill. `panel-state.js` is a classic script
+publishing `globalThis.dhPanelState` — content scripts can't `export` — and vitest
+imports it for its side effect; the packager gained a "test file" exclusion rule so
+`.test.` files never ship in the zip, and the root vitest now includes
+`extension/**/*.test.mjs`. No app-side changes, as the ticket predicted. Next:
+DCH-63 (edit collection entries + notes).
+
 Rev 32, 2026-08-17. **DCH-73 shipped**, answering the FEATURES.md question it carried:
 yes, every result list should take typed text, and the inventory showed the app was
 already there on every surface but one — Registry, Saved Listings, Collection, Wishlist

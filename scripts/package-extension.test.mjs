@@ -60,6 +60,18 @@ describe("selectFiles", () => {
     expect(kept).toEqual(["manifest.json"]);
   });
 
+  it("drops unit tests but keeps the modules they pin", () => {
+    // DCH-70 put panel-state.js and its vitest file side by side; the
+    // module ships, the test never should.
+    const kept = selectFiles([
+      "manifest.json",
+      "panel-state.js",
+      "panel-state.test.mjs",
+      "vendor/lib.test.ts",
+    ]);
+    expect(kept).toEqual(["manifest.json", "panel-state.js"]);
+  });
+
   it("sorts, so identical inputs give identical archive order", () => {
     expect(selectFiles(["b.js", "a.js", "icons/z.png"])).toEqual([
       "a.js",
