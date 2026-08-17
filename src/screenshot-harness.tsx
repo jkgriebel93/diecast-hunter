@@ -607,7 +607,7 @@ if (preset.startsWith("filter-")) {
 }
 // DCH-72: the match dialog opens from a card body, and cards default
 // collapsed (DCH-20) — expand them pre-mount so "Match…" is clickable.
-if (preset === "counts-match-dialog") {
+if (preset.startsWith("counts-match-dialog")) {
   setManyMinimized(
     LISTINGS.map((l) => `listing:${l.listing_id}`),
     false,
@@ -794,8 +794,11 @@ function Harness() {
     }
     // DCH-72: open the match dialog from the first unmatched card and run
     // the stubbed 450-result search, so the count line above the results is
-    // photographed on the surface the ticket came from.
-    if (preset === "counts-match-dialog") {
+    // photographed on the surface the ticket came from. The `-filtered` and
+    // `-empty` variants (DCH-73) then type at the results box beside it —
+    // "valvoline" narrows the fixture's 450 to half, "zzz" excludes
+    // everything and shows the FilteredEmpty way out.
+    if (preset.startsWith("counts-match-dialog")) {
       let cancelled = false;
       void (async () => {
         const step = async (fn: () => void, ms = 300) => {
@@ -807,6 +810,22 @@ function Harness() {
         // the extra beat lets the prefill land so the shot shows a real
         // search, not an empty form.
         await step(() => clickByText("button", "Search"), 500);
+        if (preset === "counts-match-dialog") return;
+        await step(() => {
+          const input = document.querySelector<HTMLInputElement>(
+            'input[aria-label="Search results"]',
+          );
+          if (input) {
+            Object.getOwnPropertyDescriptor(
+              window.HTMLInputElement.prototype,
+              "value",
+            )!.set!.call(
+              input,
+              preset === "counts-match-dialog-empty" ? "zzz" : "valvoline",
+            );
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+        }, 400);
       })();
       return () => {
         cancelled = true;

@@ -1,5 +1,17 @@
 # Implementation order for open DCH tickets
 
+Rev 32, 2026-08-17. **DCH-73 shipped**, answering the FEATURES.md question it carried:
+yes, every result list should take typed text, and the inventory showed the app was
+already there on every surface but one — Registry, Saved Listings, Collection, Wishlist
+(and its link-listing picker) narrow client-side; Browse, Seller Feed, and Saved
+Searches send `q` to eBay server-side. The one gap was the match dialog, which now has
+the Registry page's "Search these results…" box: same `filterRegistryResults`, so the
+searched fields and case-insensitivity are the same *code*, not a parallel
+implementation. It composes with DCH-72's count ("X of N results." updates as you
+type), defers keystrokes like the reference, and renders `FilteredEmpty` with a Clear
+way out when the box excludes everything — distinct from the search itself returning
+nothing. Next in the polish queue: DCH-70 (extension overlay starts minimized).
+
 Rev 31, 2026-08-17. **DCH-72 shipped.** The audit found most surfaces already compliant
 (Browse, Seller Feed, Saved Searches carry paged "Showing a–b of N" totals; Wishlist and
 Collection had counts), so the work was one real gap and one vocabulary: the match

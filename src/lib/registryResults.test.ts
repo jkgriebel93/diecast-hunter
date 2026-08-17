@@ -111,6 +111,32 @@ describe("filterRegistryResults", () => {
     expect(filterRegistryResults(results, inputs({ q: "ZZZ" }))).toEqual([]);
   });
 
+  it("matches case-insensitively in both directions (DCH-73)", () => {
+    // The match dialog reuses this function for its "Search these results…"
+    // box, so this is also what pins that surface's behavior.
+    nextGuid = 1;
+    const labonte = mkResult({
+      driver_name: "Terry Labonte",
+      scheme_text: "#5 Kellogg's",
+    });
+    const results = [mkResult(), labonte];
+    expect(filterRegistryResults(results, inputs({ q: "LABONTE" }))).toEqual([
+      labonte,
+    ]);
+    expect(filterRegistryResults(results, inputs({ q: "kellogg" }))).toEqual([
+      labonte,
+    ]);
+  });
+
+  it("clearing the text restores the whole list by reference", () => {
+    nextGuid = 1;
+    const results = [mkResult(), mkResult({ driver_name: "Terry Labonte" })];
+    const narrowed = filterRegistryResults(results, inputs({ q: "labonte" }));
+    expect(narrowed).toHaveLength(1);
+    expect(filterRegistryResults(results, inputs({ q: "" }))).toBe(results);
+    expect(filterRegistryResults(results, inputs({ q: "   " }))).toBe(results);
+  });
+
   it("applies retail and wholesale bounds, excluding unvalued rows", () => {
     nextGuid = 1;
     const cheap = mkResult({ retail_value_cents: 2000 });
