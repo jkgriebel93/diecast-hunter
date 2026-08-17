@@ -45,6 +45,7 @@ underneath it and does nothing).
 | `expand-all/` | DCH-68 | The paired Expand/Collapse all: Saved Listings' flat view with every card expanded and the label flipped, and Registry results collapsed with "Expand all" offered |
 | `error-messages/` | DCH-18 | `ErrorBanner` titles and the details disclosure |
 | `extension-match-verdicts/` | — | The eBay extension's in-page verdict |
+| `extension-minimized/` | DCH-70 | The extension overlay's two faces on a mock item page: the default pill ("DH · match 92% · 85% of sold") in the corner, and the full panel with its new minimize button. Shot from a local harness that stubs `chrome.*` and runs the real content script — the states are reachable, not painted |
 | `facet-collapse/` | DCH-43 | Saved Listings' collapsible filter facets — **superseded by `filter-pane/`**; kept as the record of that PR, and its `expanded` / `badges` presets are gone |
 | `filter-pane/` | DCH-47 | The filter sidebar as a scrolling accordion: at rest, collapsed summaries, mid-scroll, a menu escaping the scroll region, and (at 520px) the pinned footer |
 | `filter-parity/` | DCH-35 | Clear filters, filtered-empty, result counts |

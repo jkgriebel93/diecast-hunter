@@ -7,7 +7,12 @@ export default defineConfig({
   resolve: { alias: { "@": path.resolve(__dirname, "src") } },
   test: {
     // App code plus the build scripts under scripts/ (the extension
-    // packager). The Cloudflare Worker keeps its own vitest.
-    include: ["src/**/*.test.ts", "scripts/**/*.test.mjs"],
+    // packager) and the browser extension's pure modules. The Cloudflare
+    // Worker keeps its own vitest.
+    include: [
+      "src/**/*.test.ts",
+      "scripts/**/*.test.mjs",
+      "extension/**/*.test.mjs",
+    ],
   },
 });

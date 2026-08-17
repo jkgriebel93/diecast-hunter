@@ -48,6 +48,12 @@ export const EXCLUDE_RULES = [
     why: "dependency directory",
     test: (p) => p.split("/").includes("node_modules"),
   },
+  // Unit tests live beside the modules they pin (DCH-70) and run in
+  // vitest, never in a browser.
+  {
+    why: "test file",
+    test: (p) => /\.test\.[cm]?[jt]s$/.test(p),
+  },
 ];
 
 /**
