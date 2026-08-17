@@ -2282,6 +2282,17 @@ async fn fetch_collection_rows(
     Ok(out)
 }
 
+/// Set or clear the user's note on any collection entry — DCR-synced rows
+/// included; see `local_collection::set_entry_notes` (DCH-63).
+#[tauri::command]
+pub async fn set_collection_notes(
+    state: State<'_, AppState>,
+    collection_id: i64,
+    notes: Option<String>,
+) -> AppResult<()> {
+    local_collection::set_entry_notes(&state.db.pool, collection_id, notes).await
+}
+
 /// Attach a photo from the user's disk to a collection entry, replacing any
 /// photo already on it. `source_path` comes from the OS file picker.
 ///

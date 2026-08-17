@@ -1,5 +1,18 @@
 # Implementation order for open DCH tickets
 
+Rev 34, 2026-08-17. **DCH-63 shipped**, and the decisions it queued are made. The
+schema needed nothing: `my_collection.notes` has existed since 0001 and the sync's
+DO UPDATE SET list never included it — the gap was purely a write path and UI. The
+editability line is now explicit: **DCR-owned catalog fields stay local-only**
+(ManualEntryDialog, unchanged), while the **user-owned columns — notes, paid_cents,
+condition, photo — are editable on any row**, because the sync can't revert them; a
+new `resync_preserves_user_owned_columns` test pins that guarantee and stands guard
+over the upsert's SET list. `local_collection::set_entry_notes` (any row, trims,
+blank→NULL, missing-row error) backs a `set_collection_notes` command; every
+Collection row gets Add/Edit note opening a small Modal, and notes joined the search
+haystack (answering the ticket's second question: yes, searchable). Next: DCH-71
+(refresh stale option lists), then DCH-66/65/64 close out the polish epic.
+
 Rev 33, 2026-08-17. **DCH-70 shipped** — extension 0.3.0. The overlay now has two
 faces in one shadow host: a compact pill (default) carrying the verdict summary —
 "DH · match 92% · 85% of sold", comps preferred over retail as the price signal —

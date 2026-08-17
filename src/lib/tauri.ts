@@ -187,6 +187,10 @@ export const api = {
    *  stored copy. */
   setCollectionPhoto: (collectionId: number, sourcePath: string) =>
     invoke<string>("set_collection_photo", { collectionId, sourcePath }),
+  /** Set or clear the note on any collection entry — DCR-synced included;
+   *  the sync never writes the notes column (DCH-63). */
+  setCollectionNotes: (collectionId: number, notes: string | null) =>
+    invoke<void>("set_collection_notes", { collectionId, notes }),
   clearCollectionPhoto: (collectionId: number) =>
     invoke<void>("clear_collection_photo", { collectionId }),
   /** Grant the webview read access to one just-picked file so it can be
