@@ -17,6 +17,7 @@ import {
   filterAllowedScales,
   formatCents,
   formatCount,
+  formatResultCount,
   type CollectionRow,
 } from "@/lib/tauri";
 import { useImageSize, type ImageSize } from "@/lib/imageSize";
@@ -411,11 +412,9 @@ export function Collection() {
         <div className="flex items-center gap-3">
           {items && (
             <div className="text-xs text-fg-subtle">
-              {filteredItems === totalItems
-                ? groupByDriver
-                  ? `${totalItems} items across ${groups?.length ?? 0} drivers`
-                  : `${totalItems} items`
-                : `${filteredItems} of ${totalItems} items shown`}
+              {filteredItems === totalItems && groupByDriver
+                ? `${formatCount(totalItems)} items across ${formatCount(groups?.length ?? 0)} drivers.`
+                : formatResultCount(filteredItems, totalItems, "item")}
             </div>
           )}
           <button
@@ -711,7 +710,8 @@ function DriverCard({
           </span>
           <span className="font-medium">{group.driver_name}</span>
           <span className="text-xs text-fg-subtle">
-            {group.items.length} item{group.items.length === 1 ? "" : "s"}
+            {formatCount(group.items.length)} item
+            {group.items.length === 1 ? "" : "s"}
           </span>
         </div>
         <div className="text-xs text-fg-muted tabular-nums">

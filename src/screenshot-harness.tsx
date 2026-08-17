@@ -605,6 +605,14 @@ const ALL_SECTIONS = [
 if (preset.startsWith("filter-")) {
   setManyMinimized(ALL_SECTIONS, false);
 }
+// DCH-72: the match dialog opens from a card body, and cards default
+// collapsed (DCH-20) — expand them pre-mount so "Match…" is clickable.
+if (preset === "counts-match-dialog") {
+  setManyMinimized(
+    LISTINGS.map((l) => `listing:${l.listing_id}`),
+    false,
+  );
+}
 // Seller now starts collapsed (DCH-47). Its control has to be on screen
 // before the popover presets can drive it — clicking a `display: none`
 // trigger opens a menu anchored to a zero-sized rect.
@@ -779,6 +787,26 @@ function Harness() {
           );
           if (port) port.scrollTop = port.scrollHeight;
         }, 600);
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+    // DCH-72: open the match dialog from the first unmatched card and run
+    // the stubbed 450-result search, so the count line above the results is
+    // photographed on the surface the ticket came from.
+    if (preset === "counts-match-dialog") {
+      let cancelled = false;
+      void (async () => {
+        const step = async (fn: () => void, ms = 300) => {
+          await new Promise((r) => setTimeout(r, ms));
+          if (!cancelled) fn();
+        };
+        await step(() => clickByText("button", "Match…"), 400);
+        // The dialog prefetches its option lists before the criteria render;
+        // the extra beat lets the prefill land so the shot shows a real
+        // search, not an empty form.
+        await step(() => clickByText("button", "Search"), 500);
       })();
       return () => {
         cancelled = true;

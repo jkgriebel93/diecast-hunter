@@ -1,5 +1,19 @@
 # Implementation order for open DCH tickets
 
+Rev 31, 2026-08-17. **DCH-72 shipped.** The audit found most surfaces already compliant
+(Browse, Seller Feed, Saved Searches carry paged "Showing a–b of N" totals; Wishlist and
+Collection had counts), so the work was one real gap and one vocabulary: the match
+dialog (`RegistrySearchDialog`) now pins a result count above its scroll region — the
+ticket's origin — and Saved Listings shows a total even when nothing is narrowed
+(previously the line was blank until filters bit). The vocabulary is a shared
+`formatResultCount(shown, total, noun)` in `lib/format.ts` ("N results." /
+"X of N results.", thousands-separated, plural noun in the narrowed form), adopted by
+Registry (the reference, now dogfooding it), Wishlist, Listings, and Collection's
+header; Collection's per-group and grouped-header counts went through `formatCount` on
+the way past. Zero states were left alone — `FilteredEmpty` and "No results." still
+render, with the count line beside rather than instead of them. Next: DCH-73, which
+adds free-text narrowing to the same dialog this ticket put a count on.
+
 Rev 30, 2026-08-17. **DCH-68 shipped.** The audit found the ticket's premise half-true:
 Collection's flat and grouped controls and Listings' grouped-section toggle were already
 bidirectional — the real gaps were card-level. `lib/minimized.tsx` gained `allExpanded`

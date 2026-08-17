@@ -21,6 +21,23 @@ export function formatCount(n: number | null | undefined): string {
   return COUNT.format(n);
 }
 
+/** "12,500 results." / "1 result." / "48 of 12,500 results." — the one
+ *  vocabulary for result counts on search surfaces (DCH-72), taken from the
+ *  Registry page (the reference list screen, DCH-35). The narrowed form
+ *  renders only when the filters are actually excluding something, and it
+ *  always uses the plural noun — "1 of 3 result" reads as a typo. Irregular
+ *  plurals pass both forms ("entry", "entries"). */
+export function formatResultCount(
+  shown: number,
+  total: number,
+  one = "result",
+  many = `${one}s`,
+): string {
+  if (shown === total)
+    return `${formatCount(total)} ${total === 1 ? one : many}.`;
+  return `${formatCount(shown)} of ${formatCount(total)} ${many}.`;
+}
+
 /** "1/23/2026, 4:05:00 PM" — a stored Unix timestamp as a local date+time.
  *
  *  Takes *seconds*, because that's what every timestamp column in the schema

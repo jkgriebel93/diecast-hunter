@@ -9,6 +9,7 @@ import {
   formatAgo,
   formatCents,
   formatCount,
+  formatResultCount,
   isPreferredOem,
   prepareBrandOptions,
   prepareMakeOptions,
@@ -783,9 +784,7 @@ export function Registry() {
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-xs text-fg-subtle">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <div>
-                {sortedResults!.length === results.length
-                  ? `${formatCount(results.length)} result${results.length === 1 ? "" : "s"}.`
-                  : `${formatCount(sortedResults!.length)} of ${formatCount(results.length)} results.`}
+                {formatResultCount(sortedResults!.length, results.length)}
               </div>
               <input
                 type="text"
