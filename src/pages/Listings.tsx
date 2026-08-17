@@ -93,6 +93,7 @@ import {
   type StatusOption,
   type TypeOption,
 } from "@/lib/listingFilters";
+import { filterRegistryResults } from "@/lib/registryResults";
 import { useEvent } from "@/lib/useEvent";
 import {
   EMPTY_YEAR_RANGE,
@@ -4866,6 +4867,13 @@ function RegistrySearchDialog({
   const [selectedFinishGuid, setSelectedFinishGuid] = useState("");
 
   const [results, setResults] = useState<ProductionSearchResult[] | null>(null);
+  /** Free-text narrowing over the returned results (DCH-73) — the same
+   *  post-hoc client-side pattern as the Registry page's "Search these
+   *  results…" box, via the same `filterRegistryResults`. DCR's production
+   *  search is structured-only, so this is the only way to type at a result
+   *  list. Deferred so keystrokes stay responsive against a broad search. */
+  const [resultSearch, setResultSearch] = useState("");
+  const deferredResultSearch = useDeferredValue(resultSearch);
   const [searching, setSearching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [criteriaOpen, setCriteriaOpen] = useState(true);
@@ -4888,6 +4896,22 @@ function RegistrySearchDialog({
     () =>
       oemShortlisted ? oems.filter((o) => isPreferredOem(o.display)) : oems,
     [oems, oemShortlisted],
+  );
+  // Only the text vector applies here — the dialog has no value-range
+  // inputs — so the money bounds stay blank and `filterRegistryResults`
+  // passes everything through them.
+  const visibleResults = useMemo(
+    () =>
+      results === null
+        ? null
+        : filterRegistryResults(results, {
+            q: deferredResultSearch,
+            retailMin: "",
+            retailMax: "",
+            wholesaleMin: "",
+            wholesaleMax: "",
+          }),
+    [results, deferredResultSearch],
   );
 
   useEffect(() => {
@@ -4990,6 +5014,7 @@ function RegistrySearchDialog({
     setSearching(true);
     setDialogError(null);
     setResults(null);
+    setResultSearch("");
     try {
       const r = await api.searchDcrProduction({
         driver_guids: selectedDriverGuid ? [selectedDriverGuid] : [],
@@ -5260,11 +5285,21 @@ function RegistrySearchDialog({
       )}
 
       {/* Pinned above the scroll region: the count's whole job is to say
-          how broad the search was before anyone scrolls (DCH-72). The
-          zero-result state keeps its own "No results." message below. */}
+          how broad the search was before anyone scrolls (DCH-72), and the
+          box beside it narrows these results client-side (DCH-73) exactly
+          like the Registry page's "Search these results…". The zero-result
+          state keeps its own "No results." message below. */}
       {!searching && results !== null && results.length > 0 && (
-        <div className="text-xs text-fg-subtle mt-3">
-          {formatResultCount(results.length, results.length)}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3 text-xs text-fg-subtle">
+          <div>{formatResultCount(visibleResults!.length, results.length)}</div>
+          <input
+            type="text"
+            className="input !w-56 !py-0.5 !text-[11px]"
+            value={resultSearch}
+            onChange={(e) => setResultSearch(e.target.value)}
+            placeholder="Search these results…"
+            aria-label="Search results"
+          />
         </div>
       )}
 
@@ -5273,8 +5308,13 @@ function RegistrySearchDialog({
           <div className="text-sm text-fg-subtle">Searching…</div>
         ) : results === null ? null : results.length === 0 ? (
           <div className="text-sm text-fg-subtle">No results.</div>
+        ) : visibleResults!.length === 0 ? (
+          // The box excluded everything — a different situation from the
+          // search itself coming back empty, and the one where a way out
+          // helps (DCH-35).
+          <FilteredEmpty onClear={() => setResultSearch("")} noun="results" />
         ) : (
-          results.map((r) => (
+          visibleResults!.map((r) => (
             <button
               key={r.registry_guid}
               type="button"
