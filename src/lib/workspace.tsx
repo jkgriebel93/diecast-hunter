@@ -270,16 +270,35 @@ export interface WorkspaceApi {
 
 const WorkspaceContext = createContext<WorkspaceApi | null>(null);
 
-export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, undefined, loadInitial);
+export function WorkspaceProvider({
+  children,
+  initial,
+  persist = true,
+}: {
+  children: ReactNode;
+  /** Start from a single pane pinned to this view instead of the persisted
+   *  workspace. A viewer window (DCH-64) passes this so it never *reads*
+   *  `workspace.v1` — pair it with `persist={false}` so it never writes it
+   *  either; localStorage is shared across every webview in the app. */
+  initial?: ViewId;
+  persist?: boolean;
+}) {
+  const [state, dispatch] = useReducer(reducer, undefined, () => {
+    if (initial) {
+      const pane = makePane(initial);
+      return { panes: [pane], activePaneId: pane.id };
+    }
+    return loadInitial();
+  });
 
   useEffect(() => {
+    if (!persist) return;
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch {
       // Persistence is best-effort; ignore quota/serialization failures.
     }
-  }, [state]);
+  }, [state, persist]);
 
   const api = useMemo<WorkspaceApi>(() => {
     const active = state.panes.find((p) => p.id === state.activePaneId);

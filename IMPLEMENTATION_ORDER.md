@@ -1,5 +1,20 @@
 # Implementation order for open DCH tickets
 
+Rev 38, 2026-08-23. **DCH-64 shipped — the polish epic (DCH-69) is complete.** The design
+note went onto the ticket first and the build followed it exactly: a secondary window is a
+**stateless single-view viewer** — `open_viewer_window` (sync command, so window creation
+runs on the main thread) opens `index.html?viewer=<ViewId>` under a `viewer-<name>` label
+(one per view; a second request focuses the first), and `main.tsx` mounts that one page
+with no sidebar, tab strip, or `frontendReady` signal. Viewers never touch `workspace.v1`:
+`WorkspaceProvider` grew `initial`/`persist` props, so the viewer runs an ephemeral
+workspace — which is also what keeps `<ViewLink>` alive in a viewer (a link swaps the
+pinned view instead of dead-ending). The close handler now branches on the window label:
+viewers just close, and closing the main window takes viewers with it on both the
+hide-to-tray path and the real exit (an orphaned viewer would otherwise keep the process
+alive). `capabilities/default.json` grants `viewer-*` the same permissions as `main` —
+without that, every `invoke` from a viewer is denied. Next up: DCH-74 (Lionel part number
+— scope first), then DCH-26.
+
 Rev 37, 2026-08-23. **DCH-65 shipped**, its problem statement having finally arrived from
 the reporter: the header meant was the per-entry title, and the format is
 `<Driver> <Car No.> <Year> <Primary Sponsor> <Car Model> <Paint Scheme> <Special Attrs>`.
@@ -295,6 +310,7 @@ read-only projection.
 | DCH-54 | One `EbayClient` + `EbayUserCreds` + `ListingAssocContext` per watchlist sync (and per refresh-all pass): per-item TLS handshakes, keyring reads, and drivers/vocab/alias/model reloads are gone, the 200 ms limiter finally spans items, and Trading calls take `&reqwest::Client` so they share the Browse pool. Archival's local half (`flag_ended_listings`) was split from its network half so tests never link the keyring. |
 | DCH-68 | Paired Expand/Collapse all via shared `ExpandCollapseAllButton` + `allExpanded` in `lib/minimized.tsx` (default-aware; expand writes explicit `false`). Collection flat refactored onto it; Listings flat's dead toolbar button now drives the cards; Registry results gained the control, bounded to the rendered page. |
 | DCH-67 | CalVer `YY.M.D` + short commit, derived at build time (`build.rs` → `DCH_BUILD_VERSION`/`DCH_BUILD_COMMIT`): window title `Diecast Hunter 26.8.17 (abc1234)`, `app:` line on the Dashboard diagnostics card, `app_version`/`build_commit` in `app_status`. CI stamps installers via `tauri build --config`; conf's static version is a local-build fallback. Two-digit year because MSI caps the major field at 255. |
+| DCH-64 | "Open in new window": stateless single-view viewer windows (`?viewer=<ViewId>`, `viewer-*` labels, one per view). Ephemeral `WorkspaceProvider` keeps `ViewLink` working while `workspace.v1` stays main-window-only; close/tray behaviour branches on the window label. Closed epic DCH-69. |
 | DCH-65 | Every Collection entry titled `<Driver> #<No.> <Year> <Sponsor/Scheme> <Model> <Specials>` via the unit-tested `lib/collectionTitle.ts` — scheme text split at its `#N` and year anchors, columns winning where discrete, brand/finish as the specials. Sponsor and scheme name stay one segment; the data can't split them. |
 | DCH-61 | DCR pacing: reads at 300 ms between starts, mutations keep 800 ms (named constants; `READ_INTERVAL` is the back-off knob); production-search walks fetch up to 3 pages in flight via `dcr/walk.rs` — ordered delivery, bounded window, error/cancel drops in-flight requests. Closed epic DCH-62. |
 | DCH-60 | Startup perf: backfill deferred behind `frontend_ready` (15s fallback); `attrs_scanned_at` high-water mark (migration 0033) + SQL-side slim JSON so a quiet launch reads nothing and the blob never leaves SQLite; keyring + schtasks on the blocking pool (async `settings::secret_*`, `scheduler::*`); Settings refresh via one `Promise.all`; Browse/Seller Feed on the narrow `list_watched_external_ids`. |

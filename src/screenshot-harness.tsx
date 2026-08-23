@@ -24,6 +24,8 @@ import { Wishlist } from "./pages/Wishlist";
 // workspace context. Listings doesn't, which is why this only showed up
 // once a second page was photographed.
 import { WorkspaceProvider } from "./lib/workspace";
+import { ViewerApp } from "./ViewerApp";
+import { Sidebar } from "./components/Sidebar";
 import { Settings } from "./pages/Settings";
 import { SellerFeed } from "./pages/SellerFeed";
 import { Registry } from "./pages/Registry";
@@ -667,6 +669,11 @@ if (
 ) {
   localStorage.setItem("collection:group-by-driver", "0");
 }
+// DCH-64: the viewer-window preset shows Collection standing alone in a
+// viewer; flat so the shot is rows, not collapsed driver panels.
+if (preset === "viewer-window") {
+  localStorage.setItem("collection:group-by-driver", "0");
+}
 // DCH-72: the match dialog opens from a card body, and cards default
 // collapsed (DCH-20) — expand them pre-mount so "Match…" is clickable.
 if (preset.startsWith("counts-match-dialog")) {
@@ -716,6 +723,18 @@ function panelScroller(): HTMLElement | null {
 
 function Harness() {
   React.useEffect(() => {
+    // DCH-64: the hover-only row buttons reveal on focus too — focusing the
+    // new-window one is how a headless capture gets it on screen.
+    if (preset === "viewer-sidebar") {
+      const t = setTimeout(() => {
+        document
+          .querySelector<HTMLElement>(
+            '[aria-label="Open My Collection in a new window"]',
+          )
+          ?.focus();
+      }, 400);
+      return () => clearTimeout(t);
+    }
     // DCH-47's three panel states. Each drives the real controls, so a shot
     // is evidence the UI can reach the state, not just that it can paint it.
     if (preset.startsWith("filter-")) {
@@ -1115,6 +1134,19 @@ function Harness() {
       };
     }
   }, []);
+  // The viewer presets (DCH-64) skip the fake tab-strip chrome: a viewer
+  // window has no tabs, and the sidebar shot needs the app's left edge.
+  if (preset === "viewer-window") {
+    return <ViewerApp view="/collection" />;
+  }
+  if (preset === "viewer-sidebar") {
+    return (
+      <div className="flex h-full">
+        <Sidebar />
+        <div className="flex-1 bg-bg" />
+      </div>
+    );
+  }
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-stretch border-b border-border bg-bg-panel text-xs">

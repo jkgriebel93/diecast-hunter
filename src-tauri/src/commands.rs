@@ -764,6 +764,51 @@ pub async fn frontend_ready(state: State<'_, AppState>) -> AppResult<()> {
     Ok(())
 }
 
+/// The window label for a viewer of `view_id`, or None when the id isn't
+/// shaped like one of our view paths. Labels can't contain '/', so
+/// "/ebay/feed" becomes "viewer-ebay-feed". The validation is deliberately
+/// strict — the id comes from our own sidebar, so anything else is a bug,
+/// not input to accommodate.
+fn viewer_window_label(view_id: &str) -> Option<String> {
+    let rest = view_id.strip_prefix('/')?;
+    if rest.is_empty()
+        || rest.starts_with('/')
+        || rest.ends_with('/')
+        || !rest.chars().all(|c| c.is_ascii_lowercase() || c == '/')
+    {
+        return None;
+    }
+    Some(format!("viewer-{}", rest.replace('/', "-")))
+}
+
+/// Open (or focus) a secondary "viewer" window pinned to one view (DCH-64).
+/// A viewer is deliberately stateless — the URL carries the view id and the
+/// frontend entry mounts that one page without the workspace shell — so the
+/// only state created here is the OS window itself. One viewer per view: a
+/// second request focuses the existing window instead of stacking a
+/// duplicate. Deliberately not async: sync commands run on the main thread,
+/// where window creation is safe on every platform.
+#[tauri::command]
+pub fn open_viewer_window(app: tauri::AppHandle, view_id: String, title: String) -> AppResult<()> {
+    use tauri::Manager;
+    let label = viewer_window_label(&view_id)
+        .ok_or_else(|| AppError::Config(format!("not a view id: {view_id}")))?;
+    if let Some(w) = app.get_webview_window(&label) {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+        return Ok(());
+    }
+    let url = format!("index.html?viewer={view_id}");
+    tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::App(url.into()))
+        .title(format!("{title} — Diecast Hunter"))
+        .inner_size(1100.0, 750.0)
+        .min_inner_size(700.0, 500.0)
+        .build()
+        .map_err(|e| AppError::Config(format!("could not open the window: {e}")))?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn list_listings(state: State<'_, AppState>) -> AppResult<Vec<ListingRow>> {
     load_listing_rows(&state.db.pool).await
@@ -2963,4 +3008,39 @@ pub async fn refresh_registry_presearch(
         finish_progress(&progress, &result, "Pre-search refresh");
     }
     result
+}
+
+#[cfg(test)]
+mod viewer_window_tests {
+    use super::viewer_window_label;
+
+    #[test]
+    fn maps_view_paths_to_labels() {
+        assert_eq!(
+            viewer_window_label("/collection").as_deref(),
+            Some("viewer-collection")
+        );
+        assert_eq!(
+            viewer_window_label("/ebay/feed").as_deref(),
+            Some("viewer-ebay-feed")
+        );
+    }
+
+    #[test]
+    fn rejects_anything_not_shaped_like_a_view_path() {
+        for bad in [
+            "",
+            "/",
+            "collection",
+            "/Collection",
+            "//collection",
+            "/collection/",
+            "/collection?x=1",
+            "/collection#frag",
+            "/co llection",
+            "/collection\"onload",
+        ] {
+            assert_eq!(viewer_window_label(bad), None, "accepted {bad:?}");
+        }
+    }
 }
