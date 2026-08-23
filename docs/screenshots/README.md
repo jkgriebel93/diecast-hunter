@@ -41,6 +41,7 @@ underneath it and does nothing).
 | `app-version/` | DCH-67 | The Dashboard diagnostics card's `app: 26.8.17 (cd658ea)` line — the in-app face of the build-derived CalVer + commit that also titles the window |
 | `archive-ended-listings/` | DCH-10 | Archived rows and the end-reason labels |
 | `collection-sorts/` | DCH-66 | The grouped toolbar's two labelled sort controls (Drivers: / Cars:) beside the flat view's single one — the answer to the ticket's "too busy?" question in pixels |
+| `collection-entry-titles/` | DCH-65 | Every entry titled `<Driver> #<No.> <Year> <Sponsor/Scheme> <Model> <Specials>` — the flat list, and a grouped panel open to show the rows carry the full format under the driver's own header |
 | `collection-notes/` | DCH-63 | Add note / Edit note on every Collection row — DCR-synced included — with a note rendered under its entry, and the note editor open with the car line naming what it's on |
 | `danger-actions/` | DCH-33 | `.btn-danger` / `.link-danger` at rest |
 | `enrichment-cap/` | DCH-53 | Settings' Sync tab with the "Max detail pages per sync" cap beside the pre-warm cap |

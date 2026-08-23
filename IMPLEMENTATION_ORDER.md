@@ -1,5 +1,22 @@
 # Implementation order for open DCH tickets
 
+Rev 37, 2026-08-23. **DCH-65 shipped**, its problem statement having finally arrived from
+the reporter: the header meant was the per-entry title, and the format is
+`<Driver> <Car No.> <Year> <Primary Sponsor> <Car Model> <Paint Scheme> <Special Attrs>`.
+The build is `lib/collectionTitle.ts` (unit-tested): DCR has no discrete sponsor, scheme
+or display-model fields — all three are fused into `scheme_text`, and the `make` column
+is a code ("CWC") — so the title splits the scheme text at the two tokens it can anchor
+on, the leading `#N` and the year, with the discrete columns winning where they exist and
+every part optional (stubs, manual free-text schemes and empty rows all degrade). One
+recorded deviation: sponsor and paint-scheme name can't be told apart in the data, so
+they render as one segment ahead of the model instead of around it. `brand`/`finish` are
+the special attributes, with `(Standard)` dropped and duplicates suppressed. Adopted by
+the card title, the remove confirmation and the note dialog; the flat view's separate
+driver line is gone (the title carries the driver now), and the search haystack needed
+nothing — it already indexed every field the title reads. The polish epic is down to
+DCH-64, which still wants its design note (second-window workspace state, tray-close
+interaction) before a branch.
+
 Rev 36, 2026-08-17. **DCH-66 shipped**, and its open question is answered: two
 dropdowns is NOT too busy, because the one control it replaces was busier — its year
 options secretly reordered *drivers* by their newest car while the cars inside stayed
@@ -278,6 +295,7 @@ read-only projection.
 | DCH-54 | One `EbayClient` + `EbayUserCreds` + `ListingAssocContext` per watchlist sync (and per refresh-all pass): per-item TLS handshakes, keyring reads, and drivers/vocab/alias/model reloads are gone, the 200 ms limiter finally spans items, and Trading calls take `&reqwest::Client` so they share the Browse pool. Archival's local half (`flag_ended_listings`) was split from its network half so tests never link the keyring. |
 | DCH-68 | Paired Expand/Collapse all via shared `ExpandCollapseAllButton` + `allExpanded` in `lib/minimized.tsx` (default-aware; expand writes explicit `false`). Collection flat refactored onto it; Listings flat's dead toolbar button now drives the cards; Registry results gained the control, bounded to the rendered page. |
 | DCH-67 | CalVer `YY.M.D` + short commit, derived at build time (`build.rs` → `DCH_BUILD_VERSION`/`DCH_BUILD_COMMIT`): window title `Diecast Hunter 26.8.17 (abc1234)`, `app:` line on the Dashboard diagnostics card, `app_version`/`build_commit` in `app_status`. CI stamps installers via `tauri build --config`; conf's static version is a local-build fallback. Two-digit year because MSI caps the major field at 255. |
+| DCH-65 | Every Collection entry titled `<Driver> #<No.> <Year> <Sponsor/Scheme> <Model> <Specials>` via the unit-tested `lib/collectionTitle.ts` — scheme text split at its `#N` and year anchors, columns winning where discrete, brand/finish as the specials. Sponsor and scheme name stay one segment; the data can't split them. |
 | DCH-61 | DCR pacing: reads at 300 ms between starts, mutations keep 800 ms (named constants; `READ_INTERVAL` is the back-off knob); production-search walks fetch up to 3 pages in flight via `dcr/walk.rs` — ordered delivery, bounded window, error/cancel drops in-flight requests. Closed epic DCH-62. |
 | DCH-60 | Startup perf: backfill deferred behind `frontend_ready` (15s fallback); `attrs_scanned_at` high-water mark (migration 0033) + SQL-side slim JSON so a quiet launch reads nothing and the blob never leaves SQLite; keyring + schtasks on the blocking pool (async `settings::secret_*`, `scheduler::*`); Settings refresh via one `Promise.all`; Browse/Seller Feed on the narrow `list_watched_external_ids`. |
 | DCH-59 | Registry results perf: pure filter/sort in `lib/registryResults.ts` (tested, incl. the pinned nulls-first-on-descending quirk); one deferred value over all five narrowing inputs; 200-at-a-time bounded render with "Show more"; memoized `RegistryResultCard`; `MultiSelect` capped at 100 rendered options with a count note; match dialog uses display→GUID Maps + memoized datalists. |
