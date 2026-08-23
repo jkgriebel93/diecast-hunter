@@ -444,7 +444,9 @@ function collectionItem(i: number): CollectionRow {
     make: "CWC",
     finish: i % 2 === 0 ? "Elite" : null,
     production_qty: 2400 + i * 100,
-    scheme_text: `#${5 + i} ${i % 2 === 0 ? "Valvoline" : "HendrickCars.com"}`,
+    // Garage-shaped: "#N <sponsor/scheme> <year> <model>" — the anchors the
+    // DCH-65 title builder splits on, so the shots show the real format.
+    scheme_text: `#${5 + i} ${i % 2 === 0 ? "Valvoline" : "HendrickCars.com"} ${2015 + (i % 8)} Chevy Monte Carlo`,
     image_url: null,
     detail_url: local ? null : `/diecast/x/y/asset-${i}`,
     retail_value_cents: local ? null : 8999 + i * 500,
@@ -656,9 +658,13 @@ if (preset.startsWith("filter-")) {
 }
 // DCH-63: the collection presets shoot the flat view, so every row's note
 // affordance is on screen without first expanding driver groups. The page
-// reads this once at state init. `collection-grouped` is the exception —
-// DCH-66's subject is the grouped toolbar's two sort controls.
-if (preset.startsWith("collection") && preset !== "collection-grouped") {
+// reads this once at state init. The `collection-grouped*` presets are the
+// exception — DCH-66's subject is the grouped toolbar's two sort controls,
+// and DCH-65's `collection-grouped-open` shoots the rows inside a panel.
+if (
+  preset.startsWith("collection") &&
+  !preset.startsWith("collection-grouped")
+) {
   localStorage.setItem("collection:group-by-driver", "0");
 }
 // DCH-72: the match dialog opens from a card body, and cards default
@@ -847,6 +853,15 @@ function Harness() {
       return () => {
         cancelled = true;
       };
+    }
+    // DCH-65: open the first driver panel so the grouped rows' full-format
+    // titles are in frame under the panel's own driver header.
+    if (preset === "collection-grouped-open") {
+      const t = setTimeout(
+        () => document.querySelector<HTMLElement>(".card > button")?.click(),
+        400,
+      );
+      return () => clearTimeout(t);
     }
     // DCH-63: open the note editor on the first row that already has one.
     if (preset === "collection-notes-dialog") {

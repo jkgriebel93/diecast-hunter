@@ -38,6 +38,7 @@ import {
 } from "@/lib/minimized";
 import { Thumbnail } from "@/components/Thumbnail";
 import { DCR_BASE } from "@/lib/dcr";
+import { collectionTitle } from "@/lib/collectionTitle";
 
 const IMG_CLASS: Record<ImageSize, string> = {
   sm: "w-24 h-24",
@@ -144,7 +145,7 @@ export function Collection() {
   }
 
   async function onRemove(item: CollectionRow) {
-    const label = item.scheme_text ?? item.driver_name ?? "this diecast";
+    const label = collectionTitle(item) || "this diecast";
     // A manual entry was never on DCR, so warning about deleting it there
     // would be describing something that isn't going to happen.
     const ok = window.confirm(
@@ -695,7 +696,6 @@ export function Collection() {
                   onNotes={setNotesTarget}
                   removingId={removingId}
                   duplicateOf={duplicates.get(item.collection_id)}
-                  showDriver
                 />
               ))}
             </ul>
@@ -782,7 +782,6 @@ function CollectionItemRow({
   onNotes,
   removingId,
   duplicateOf,
-  showDriver = false,
 }: {
   item: CollectionRow;
   imgSizeClass: string;
@@ -793,8 +792,6 @@ function CollectionItemRow({
   /** Set when this manually-added row now also exists as a synced DCR row —
    *  see findLocalDuplicates. */
   duplicateOf?: CollectionRow;
-  /** Show the driver name (used by the flat, ungrouped view). */
-  showDriver?: boolean;
 }) {
   const [isCollapsed, onToggle] = useMinimized(
     `collection:${item.collection_id}`,
@@ -808,7 +805,7 @@ function CollectionItemRow({
 
   const title = (
     <div className="text-sm font-medium truncate flex items-center gap-2">
-      <span className="truncate">{item.scheme_text ?? "(no scheme)"}</span>
+      <span className="truncate">{collectionTitle(item) || "(no scheme)"}</span>
       {item.is_local && (
         <span
           className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] font-normal uppercase tracking-wide text-fg-subtle"
@@ -817,11 +814,6 @@ function CollectionItemRow({
           Manual
         </span>
       )}
-    </div>
-  );
-  const driverLine = showDriver && (
-    <div className="text-xs text-fg-subtle mb-0.5">
-      {item.driver_name ?? "(unknown)"}
     </div>
   );
 
@@ -841,10 +833,7 @@ function CollectionItemRow({
           title={isCollapsed ? "Expand" : "Minimize"}
           aria-expanded={!isCollapsed}
         >
-          <div className="min-w-0">
-            {driverLine}
-            {title}
-          </div>
+          <div className="min-w-0">{title}</div>
         </button>
         {!isCollapsed && (
           <>
@@ -1024,13 +1013,7 @@ function NotesDialog({
   const [busy, setBusy] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
 
-  const carLine = [
-    item.year != null ? String(item.year) : null,
-    item.driver_name,
-    item.scheme_text,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const carLine = collectionTitle(item);
 
   async function onSave() {
     setBusy(true);
