@@ -693,6 +693,9 @@ pub struct ListingRow {
     /// production-tag photo (migration 0022), or copied from a confirmed
     /// match by the attribute backfill.
     pub production_count: Option<i64>,
+    /// Manufacturer part number, any brand (DCH-74). Manual-entry only —
+    /// neither auto-detection nor the match backfill writes it.
+    pub part_number: Option<String>,
     /// True when the attributes were copied from the confirmed registry
     /// match (`attrs_from_entry_id` set) rather than derived from the
     /// listing itself.
@@ -751,6 +754,7 @@ struct ListingRowRaw {
     is_race_win: i64,
     is_autographed: i64,
     production_count: Option<i64>,
+    part_number: Option<String>,
     attrs_from_entry_id: Option<i64>,
     attributes_user_set: i64,
 }
@@ -917,7 +921,8 @@ async fn load_listing_rows_where(
                    FROM listing_group_members
                   WHERE listing_id = l.id) AS group_ids_csv,
                 l.oem, l.brand, l.finish, l.make, l.is_race_win, l.is_autographed,
-                l.production_count, l.attrs_from_entry_id, l.attributes_user_set
+                l.production_count, l.part_number, l.attrs_from_entry_id,
+                l.attributes_user_set
          FROM listings l
          JOIN sellers s ON s.id = l.seller_id
          LEFT JOIN listing_matches lm ON lm.listing_id = l.id
@@ -1018,6 +1023,7 @@ async fn load_listing_rows_where(
                 is_race_win: r.is_race_win != 0,
                 is_autographed: r.is_autographed != 0,
                 production_count: r.production_count,
+                part_number: r.part_number,
                 attrs_from_match: r.attrs_from_entry_id.is_some(),
                 attributes_user_set: r.attributes_user_set != 0,
             }
@@ -1278,15 +1284,79 @@ pub async fn reset_listing_driver(
     Ok(row.and_then(|(d,)| d))
 }
 
-/// Set the attributes on a listing (oem / brand / finish / make plus the
-/// race-win and autograph flags). Replaces the full set every call — the UI
-/// edits them together in one form. Empty or whitespace-only strings are
-/// stored as NULL. Sets `attributes_user_set = 1` so the auto-fill pass in
+/// The user-entered attribute set, cleaned. One row in `write_listing_attributes`'
+/// SET list per field — the round-trip test pins that correspondence.
+struct ListingAttributeInput {
+    oem: Option<String>,
+    brand: Option<String>,
+    finish: Option<String>,
+    make: Option<String>,
+    is_race_win: bool,
+    is_autographed: bool,
+    production_count: Option<i64>,
+    part_number: Option<String>,
+}
+
+/// The SQL half of `set_listing_attributes`, factored out so the SET list is
+/// testable against a migrated pool without a Tauri State.
+async fn write_listing_attributes(
+    pool: &SqlitePool,
+    listing_id: i64,
+    attrs: ListingAttributeInput,
+) -> AppResult<()> {
+    fn clean(s: Option<String>) -> Option<String> {
+        s.map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
+    }
+    sqlx::query(
+        "UPDATE listings
+         SET oem = ?, brand = ?, finish = ?, make = ?,
+             is_race_win = ?, is_autographed = ?, production_count = ?,
+             part_number = ?,
+             attributes_user_set = 1, attrs_from_entry_id = NULL
+         WHERE id = ?",
+    )
+    .bind(clean(attrs.oem))
+    .bind(clean(attrs.brand))
+    .bind(clean(attrs.finish))
+    .bind(clean(attrs.make))
+    .bind(attrs.is_race_win as i64)
+    .bind(attrs.is_autographed as i64)
+    .bind(attrs.production_count.filter(|v| *v >= 0))
+    .bind(clean(attrs.part_number))
+    .bind(listing_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// The SQL half of `reset_listing_attributes`: wipe the fields and drop the
+/// pin. The caller re-runs auto-detection afterwards — which never fills
+/// `part_number` (manual-entry only, DCH-74), so a reset leaves it empty.
+async fn wipe_listing_attributes(pool: &SqlitePool, listing_id: i64) -> AppResult<()> {
+    sqlx::query(
+        "UPDATE listings
+         SET oem = NULL, brand = NULL, finish = NULL, make = NULL,
+             is_race_win = 0, is_autographed = 0, production_count = NULL,
+             part_number = NULL,
+             attributes_user_set = 0, attrs_from_entry_id = NULL
+         WHERE id = ?",
+    )
+    .bind(listing_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Set the attributes on a listing (oem / brand / finish / make / part
+/// number plus the race-win and autograph flags). Replaces the full set
+/// every call — the UI edits them together in one form. Empty or
+/// whitespace-only strings are stored as NULL. Sets
+/// `attributes_user_set = 1` so the auto-fill pass in
 /// `sync::attribute_assoc` leaves this row alone from now on.
 // The argument list IS the IPC contract with the frontend's
 // `setListingAttributes` — Tauri maps each named arg from the JS payload.
 // Bundling them into a struct would mean a matching Deserialize type on both
-// sides for no gain, so the 9 args stay.
+// sides for no gain, so the args stay.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn set_listing_attributes(
@@ -1299,28 +1369,23 @@ pub async fn set_listing_attributes(
     is_race_win: bool,
     is_autographed: bool,
     production_count: Option<i64>,
+    part_number: Option<String>,
 ) -> AppResult<()> {
-    fn clean(s: Option<String>) -> Option<String> {
-        s.map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
-    }
-    sqlx::query(
-        "UPDATE listings
-         SET oem = ?, brand = ?, finish = ?, make = ?,
-             is_race_win = ?, is_autographed = ?, production_count = ?,
-             attributes_user_set = 1, attrs_from_entry_id = NULL
-         WHERE id = ?",
+    write_listing_attributes(
+        &state.db.pool,
+        listing_id,
+        ListingAttributeInput {
+            oem,
+            brand,
+            finish,
+            make,
+            is_race_win,
+            is_autographed,
+            production_count,
+            part_number,
+        },
     )
-    .bind(clean(oem))
-    .bind(clean(brand))
-    .bind(clean(finish))
-    .bind(clean(make))
-    .bind(is_race_win as i64)
-    .bind(is_autographed as i64)
-    .bind(production_count.filter(|v| *v >= 0))
-    .bind(listing_id)
-    .execute(&state.db.pool)
-    .await?;
-    Ok(())
+    .await
 }
 
 /// Drop the manual attribute pin, wipe the attribute fields, and re-run
@@ -1331,16 +1396,7 @@ pub async fn reset_listing_attributes(
     listing_id: i64,
 ) -> AppResult<()> {
     let pool = &state.db.pool;
-    sqlx::query(
-        "UPDATE listings
-         SET oem = NULL, brand = NULL, finish = NULL, make = NULL,
-             is_race_win = 0, is_autographed = 0, production_count = NULL,
-             attributes_user_set = 0, attrs_from_entry_id = NULL
-         WHERE id = ?",
-    )
-    .bind(listing_id)
-    .execute(pool)
-    .await?;
+    wipe_listing_attributes(pool, listing_id).await?;
     sync::attribute_assoc::associate_listing_attributes(pool, listing_id).await?;
     Ok(())
 }
@@ -3008,6 +3064,101 @@ pub async fn refresh_registry_presearch(
         finish_progress(&progress, &result, "Pre-search refresh");
     }
     result
+}
+
+#[cfg(test)]
+mod listing_attribute_tests {
+    use super::*;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+    use std::str::FromStr;
+
+    async fn migrated_pool() -> SqlitePool {
+        let opts = SqliteConnectOptions::from_str("sqlite::memory:")
+            .unwrap()
+            .foreign_keys(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(opts)
+            .await
+            .expect("open in-memory db");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+        pool
+    }
+
+    async fn insert_listing(pool: &SqlitePool) -> i64 {
+        sqlx::query(
+            "INSERT INTO listings
+                (seller_id, external_id, url, title, status, saved_at, last_seen_at)
+             VALUES ((SELECT id FROM sellers WHERE code = 'ebay'),
+                     'v1|100|0', 'https://example.test/itm/1', 'a listing',
+                     'active', 1, 1)",
+        )
+        .execute(pool)
+        .await
+        .unwrap()
+        .last_insert_rowid()
+    }
+
+    fn attrs(part_number: Option<&str>) -> ListingAttributeInput {
+        ListingAttributeInput {
+            oem: Some("Action".into()),
+            brand: Some("Elite".into()),
+            finish: None,
+            make: None,
+            is_race_win: false,
+            is_autographed: true,
+            production_count: Some(5004),
+            part_number: part_number.map(str::to_string),
+        }
+    }
+
+    /// DCH-74's guard: the part number round-trips through the save (with
+    /// the pin set), a blank one stores as NULL like the other text fields,
+    /// and the reset wipe clears it along with the pin.
+    #[tokio::test]
+    async fn part_number_round_trips_and_reset_wipes_it() {
+        let pool = migrated_pool().await;
+        let id = insert_listing(&pool).await;
+
+        write_listing_attributes(&pool, id, attrs(Some("  6-82735 ")))
+            .await
+            .unwrap();
+        let (pn, pinned): (Option<String>, i64) =
+            sqlx::query_as("SELECT part_number, attributes_user_set FROM listings WHERE id = ?")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(pn.as_deref(), Some("6-82735"), "trimmed on the way in");
+        assert_eq!(pinned, 1, "saving the editor pins the row");
+
+        write_listing_attributes(&pool, id, attrs(Some("   ")))
+            .await
+            .unwrap();
+        let (pn,): (Option<String>,) =
+            sqlx::query_as("SELECT part_number FROM listings WHERE id = ?")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(pn, None, "whitespace-only stores as NULL");
+
+        write_listing_attributes(&pool, id, attrs(Some("6-82735")))
+            .await
+            .unwrap();
+        wipe_listing_attributes(&pool, id).await.unwrap();
+        let (pn, pinned): (Option<String>, i64) =
+            sqlx::query_as("SELECT part_number, attributes_user_set FROM listings WHERE id = ?")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(pn, None, "reset wipes the part number");
+        assert_eq!(pinned, 0, "reset drops the pin");
+    }
 }
 
 #[cfg(test)]

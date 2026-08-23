@@ -135,8 +135,11 @@ function listing(i: number): ListingRow {
     is_race_win: i % 6 === 0,
     is_autographed: i % 8 === 0,
     production_count: null,
+    // DCH-74: a couple of rows carry a manually entered part number so the
+    // PN chip and the search-by-PN preset have something to show.
+    part_number: i % 8 === 2 ? "6-82735" : null,
     attrs_from_match: false,
-    attributes_user_set: false,
+    attributes_user_set: i % 8 === 2,
   };
 }
 
@@ -674,6 +677,14 @@ if (
 if (preset === "viewer-window") {
   localStorage.setItem("collection:group-by-driver", "0");
 }
+// DCH-74: both part-number presets work inside card bodies, and cards
+// default collapsed (DCH-20) — expand them pre-mount.
+if (preset.startsWith("pn-")) {
+  setManyMinimized(
+    LISTINGS.map((l) => `listing:${l.listing_id}`),
+    false,
+  );
+}
 // DCH-72: the match dialog opens from a card body, and cards default
 // collapsed (DCH-20) — expand them pre-mount so "Match…" is clickable.
 if (preset.startsWith("counts-match-dialog")) {
@@ -929,6 +940,31 @@ function Harness() {
     // DCH-68: the flat view's paired control drives the cards themselves.
     if (preset === "expandall-flat") {
       const t = setTimeout(() => clickByText("button", "Expand all"), 400);
+      return () => clearTimeout(t);
+    }
+    // DCH-74: the attribute editor with its new Part number field, and the
+    // Listings search finding a row by its manually entered PN — the chip
+    // stays in frame on the surviving card.
+    if (preset === "pn-editor") {
+      const t = setTimeout(
+        () => clickByText("button", "Edit attributes…"),
+        400,
+      );
+      return () => clearTimeout(t);
+    }
+    if (preset === "pn-search") {
+      const t = setTimeout(() => {
+        const input = document.querySelector<HTMLInputElement>(
+          'input[placeholder="Search title, driver, scheme, seller…"]',
+        );
+        if (input) {
+          Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype,
+            "value",
+          )!.set!.call(input, "6-82735");
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+      }, 400);
       return () => clearTimeout(t);
     }
     // DCH-58's perf presets photograph what must NOT have changed: the

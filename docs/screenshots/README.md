@@ -60,6 +60,7 @@ underneath it and does nothing).
 | `manual-collection-entry/` | DCH-12 | Adding a car DCR doesn't list |
 | `match-dialog-search/` | DCH-73 | The match dialog's "Search these results…" box narrowing 450 → 225 with the count updating beside it, and the box excluding everything — FilteredEmpty with its Clear way out, distinct from a search that returned nothing |
 | `open-in-new-window/` | DCH-64 | The stateless viewer window — My Collection standing alone with no sidebar or tab strip — and the sidebar row's new "Open in a new window" button (revealed by focus, as hover would) |
+| `part-number/` | DCH-74 | The attribute editor's Part number field, and the Listings search narrowed by a typed PN with the `PN:` chip and MANUAL badge on the surviving card |
 | `result-counts/` | DCH-72 | The match dialog's result count pinned above its scroll region (the surface that had none), and Saved Listings' "4 of 24 listings." while a search narrows the flat list |
 | `seller-feed-chrome/` | DCH-16 | The reworked Seller Feed: Browse-shaped filter card with the shared Clear filters control, Manage Saved Sellers as a modal, FilteredEmpty, and the bottom pager |
 | `seller-feed-image-sizes/` | DCH-49 | The feed's gallery grid before (fixed 19rem columns crushing the md/lg cards) and after (columns sized to the image) |

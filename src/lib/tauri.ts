@@ -304,6 +304,7 @@ export const api = {
       isRaceWin: attrs.is_race_win,
       isAutographed: attrs.is_autographed,
       productionCount: attrs.production_count,
+      partNumber: attrs.part_number,
     }),
   resetListingAttributes: (listingId: number) =>
     invoke<void>("reset_listing_attributes", { listingId }),
@@ -1258,6 +1259,9 @@ export interface ListingRow {
   /** Production-run size, read off the listing's production-tag photo
    *  or copied from the confirmed match. */
   production_count: number | null;
+  /** Manufacturer part number, any brand (DCH-74). Manual-entry only —
+   *  never auto-detected or backfilled. */
+  part_number: string | null;
   /** True when the attributes were copied from the confirmed registry
    *  match rather than derived from the listing itself. */
   attrs_from_match: boolean;
@@ -1277,6 +1281,8 @@ export interface ListingAttributes {
   is_autographed: boolean;
   /** Production-run size, read off the listing's production-tag photo. */
   production_count: number | null;
+  /** Manufacturer part number (DCH-74), typed in by the user. */
+  part_number: string | null;
 }
 
 export interface DriverOption {

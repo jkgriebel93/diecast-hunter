@@ -2506,6 +2506,7 @@ function AttributesSection({
   const [raceWin, setRaceWin] = useState(false);
   const [autographed, setAutographed] = useState(false);
   const [prodCount, setProdCount] = useState("");
+  const [partNumber, setPartNumber] = useState("");
   const [options, setOptions] = useState<AttributeOptions>(
     EMPTY_ATTRIBUTE_OPTIONS,
   );
@@ -2518,6 +2519,7 @@ function AttributesSection({
     setRaceWin(row.is_race_win);
     setAutographed(row.is_autographed);
     setProdCount(row.production_count?.toString() ?? "");
+    setPartNumber(row.part_number ?? "");
     setOpen(true);
     void loadAttributeOptions().then(setOptions);
   }
@@ -2535,6 +2537,7 @@ function AttributesSection({
       is_autographed: autographed,
       // 0 is valid: collector convention for prototypes/samples.
       production_count: Number.isFinite(pc) && pc >= 0 ? pc : null,
+      part_number: partNumber.trim() || null,
     });
   }
 
@@ -2544,6 +2547,7 @@ function AttributesSection({
     row.finish !== null ||
     row.make !== null ||
     row.production_count !== null ||
+    row.part_number !== null ||
     row.is_race_win ||
     row.is_autographed;
 
@@ -2556,6 +2560,7 @@ function AttributesSection({
             ["Brand", row.brand],
             ["Make", row.make],
             ["Finish", row.finish],
+            ["PN", row.part_number],
           ] as const
         ).map(
           // Loose `!=` on purpose: catches undefined as well as null. A row
@@ -2623,7 +2628,7 @@ function AttributesSection({
           type="button"
           className="text-fg-muted hover:text-fg"
           onClick={openEditor}
-          title="Tag this listing with OEM / brand / make / finish and race-win or autograph flags"
+          title="Tag this listing with OEM / brand / make / finish, a part number, and race-win or autograph flags"
         >
           {hasAny ? "Edit attributes…" : "Attributes…"}
         </button>
@@ -2679,6 +2684,14 @@ function AttributesSection({
         onChange={(e) => setProdCount(e.target.value)}
         placeholder="Run (1 of…)"
         title="Production-run size from the tag photo, e.g. 5004 — enter 0 for prototypes/samples"
+      />
+      <input
+        type="text"
+        className="input !py-1 !text-xs w-28"
+        value={partNumber}
+        onChange={(e) => setPartNumber(e.target.value)}
+        placeholder="Part number"
+        title="Manufacturer part number, any brand — e.g. Lionel 6-82735. Manual entry only; nothing fills this automatically"
       />
       <label className="inline-flex items-center gap-1 cursor-pointer">
         <input

@@ -64,6 +64,7 @@ export function buildSearchHaystack(row: ListingRow): string {
     row.brand,
     row.finish,
     row.make,
+    row.part_number,
     row.is_race_win && "race win",
     row.is_autographed && "autograph autographed",
   ]
