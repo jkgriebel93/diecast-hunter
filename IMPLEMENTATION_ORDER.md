@@ -1,5 +1,17 @@
 # Implementation order for open DCH tickets
 
+Rev 39, 2026-08-23. **DCH-74 shipped**, made small by its scope clarification: part
+numbers are **manual-entry only** (Lionel's or any brand's — the column is the
+brand-agnostic `listings.part_number`, migration 0034), so the whole feature is the
+existing attribute conventions minus auto-detection. It rides `set_listing_attributes`
+(which pins the row) and is wiped by reset; nothing in `attribute_assoc` — detection or
+match backfill — ever writes it, which is what "honors the pin" degenerates to when no
+automatic writer exists. Editor field, `PN:` chip, and search-haystack membership on the
+Listings page; a memory-pool round-trip test pins the SET lists. The match-scoring
+question stays open on DCH-26's side of the fence until enough PNs exist to be a signal.
+Next: DCH-26 (Lionel website integration — now holding both open questions: scraping as
+a PN source, and PN-based matching), DCH-27, and the standing DCH-42.
+
 Rev 38, 2026-08-23. **DCH-64 shipped — the polish epic (DCH-69) is complete.** The design
 note went onto the ticket first and the build followed it exactly: a secondary window is a
 **stateless single-view viewer** — `open_viewer_window` (sync command, so window creation
@@ -310,6 +322,7 @@ read-only projection.
 | DCH-54 | One `EbayClient` + `EbayUserCreds` + `ListingAssocContext` per watchlist sync (and per refresh-all pass): per-item TLS handshakes, keyring reads, and drivers/vocab/alias/model reloads are gone, the 200 ms limiter finally spans items, and Trading calls take `&reqwest::Client` so they share the Browse pool. Archival's local half (`flag_ended_listings`) was split from its network half so tests never link the keyring. |
 | DCH-68 | Paired Expand/Collapse all via shared `ExpandCollapseAllButton` + `allExpanded` in `lib/minimized.tsx` (default-aware; expand writes explicit `false`). Collection flat refactored onto it; Listings flat's dead toolbar button now drives the cards; Registry results gained the control, bounded to the rendered page. |
 | DCH-67 | CalVer `YY.M.D` + short commit, derived at build time (`build.rs` → `DCH_BUILD_VERSION`/`DCH_BUILD_COMMIT`): window title `Diecast Hunter 26.8.17 (abc1234)`, `app:` line on the Dashboard diagnostics card, `app_version`/`build_commit` in `app_status`. CI stamps installers via `tauri build --config`; conf's static version is a local-build fallback. Two-digit year because MSI caps the major field at 255. |
+| DCH-74 | `listings.part_number` (migration 0034), brand-agnostic and manual-entry only: editor field + `PN:` chip + search haystack, pinned/wiped with the rest of the attribute set; no auto-detection or backfill writes it. Match scoring deferred to DCH-26's scoping. |
 | DCH-64 | "Open in new window": stateless single-view viewer windows (`?viewer=<ViewId>`, `viewer-*` labels, one per view). Ephemeral `WorkspaceProvider` keeps `ViewLink` working while `workspace.v1` stays main-window-only; close/tray behaviour branches on the window label. Closed epic DCH-69. |
 | DCH-65 | Every Collection entry titled `<Driver> #<No.> <Year> <Sponsor/Scheme> <Model> <Specials>` via the unit-tested `lib/collectionTitle.ts` — scheme text split at its `#N` and year anchors, columns winning where discrete, brand/finish as the specials. Sponsor and scheme name stay one segment; the data can't split them. |
 | DCH-61 | DCR pacing: reads at 300 ms between starts, mutations keep 800 ms (named constants; `READ_INTERVAL` is the back-off knob); production-search walks fetch up to 3 pages in flight via `dcr/walk.rs` — ordered delivery, bounded window, error/cancel drops in-flight requests. Closed epic DCH-62. |

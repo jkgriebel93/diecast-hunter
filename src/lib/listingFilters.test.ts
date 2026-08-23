@@ -73,6 +73,7 @@ function mkRow(overrides: Partial<ListingRow> = {}): ListingRow {
     is_race_win: false,
     is_autographed: false,
     production_count: null,
+    part_number: null,
     attrs_from_match: false,
     attributes_user_set: false,
     ...overrides,
@@ -361,6 +362,12 @@ describe("buildSearchHaystack", () => {
     expect(hay).toContain("autograph autographed");
     expect(hay).toContain("chrome");
     expect(hay).toBe(hay.toLowerCase());
+  });
+
+  it("includes the manually entered part number (DCH-74)", () => {
+    nextId = 1;
+    const row = mkRow({ part_number: "6-82735" });
+    expect(buildSearchHaystack(row)).toContain("6-82735");
   });
 });
 
