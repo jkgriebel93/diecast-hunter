@@ -241,6 +241,10 @@ export const api = {
   /** One-shot startup signal: the frontend's first mount fetches are in
    *  flight, so the backend may start its deferred backfill (DCH-60). */
   frontendReady: () => invoke<void>("frontend_ready"),
+  /** Open (or focus) the stateless single-view viewer window for a view
+   *  (DCH-64). `title` becomes the OS window title. */
+  openViewerWindow: (viewId: string, title: string) =>
+    invoke<void>("open_viewer_window", { viewId, title }),
   listListings: () => invoke<ListingRow[]>("list_listings"),
   /** Narrow (external_id → listing_id) pairs for watched eBay listings —
    *  what Browse and the Seller Feed badge results with, without the full

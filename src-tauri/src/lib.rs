@@ -89,6 +89,12 @@ pub fn run() {
         ))
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Viewer windows (DCH-64) just close — hide-to-tray belongs
+                // to the main window alone, and a hidden viewer would have
+                // no way back from the tray.
+                if window.label() != "main" {
+                    return;
+                }
                 let state = window.app_handle().state::<AppState>();
                 if state
                     .run_in_background
@@ -96,6 +102,15 @@ pub fn run() {
                 {
                     api.prevent_close();
                     let _ = window.hide();
+                }
+                // Closing the main window takes any viewers with it — in
+                // tray mode so "the app is in the tray" stays unambiguous,
+                // and on a real exit so an orphaned viewer can't keep the
+                // process alive with no main window to come back to.
+                for (label, w) in window.app_handle().webview_windows() {
+                    if label.starts_with("viewer-") {
+                        let _ = w.close();
+                    }
                 }
             }
         })
@@ -311,6 +326,7 @@ pub fn run() {
             commands::refresh_all_ebay_listings,
             commands::sync_ebay_watchlist,
             commands::frontend_ready,
+            commands::open_viewer_window,
             commands::list_listings,
             commands::list_watched_external_ids,
             commands::get_listing_row,
