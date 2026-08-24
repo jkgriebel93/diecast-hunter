@@ -785,6 +785,58 @@ fn viewer_window_label(view_id: &str) -> Option<String> {
     Some(format!("viewer-{}", rest.replace('/', "-")))
 }
 
+/// What the enlarged-photo window may be pointed at (DCH-75): the web
+/// images a listing carries, or the inline data images the dev harness
+/// uses. Nothing else — file:, tauri:, javascript: and friends are refused,
+/// because whatever passes here becomes a webview's location.
+fn is_photo_url(url: &str) -> bool {
+    url.starts_with("https://") || url.starts_with("http://") || url.starts_with("data:image/")
+}
+
+/// One reusable window label for the enlarged photo view. The `viewer-`
+/// prefix is what ties it into DCH-64's lifecycle: it closes with the main
+/// window and the `viewer-*` capability grant covers it.
+const PHOTO_WINDOW_LABEL: &str = "viewer-photo";
+
+/// Open the enlarged-photo window on `url` (DCH-75), reusing the existing
+/// window by navigating it — clicking through a listing's photos retargets
+/// one window rather than stacking new ones. `title` names the window after
+/// the listing so a torn-off photo stays identifiable.
+#[tauri::command]
+pub fn open_photo_window(app: tauri::AppHandle, url: String, title: String) -> AppResult<()> {
+    use tauri::Manager;
+    if !is_photo_url(&url) {
+        return Err(AppError::Config(format!("not a photo url: {url}")));
+    }
+    let encoded: String = url::form_urlencoded::byte_serialize(url.as_bytes()).collect();
+    let query = format!("photo={encoded}");
+    if let Some(w) = app.get_webview_window(PHOTO_WINDOW_LABEL) {
+        // Derive the new location from the window's current one, so the
+        // dev-server origin and the production tauri origin both survive.
+        if let Ok(mut current) = w.url() {
+            current.set_path("/index.html");
+            current.set_query(Some(&query));
+            let _ = w.navigate(current);
+            let _ = w.set_title(&format!("{title} — Diecast Hunter"));
+            let _ = w.show();
+            let _ = w.unminimize();
+            let _ = w.set_focus();
+            return Ok(());
+        }
+    }
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        PHOTO_WINDOW_LABEL,
+        tauri::WebviewUrl::App(format!("index.html?{query}").into()),
+    )
+    .title(format!("{title} — Diecast Hunter"))
+    .inner_size(900.0, 900.0)
+    .min_inner_size(400.0, 400.0)
+    .build()
+    .map_err(|e| AppError::Config(format!("could not open the window: {e}")))?;
+    Ok(())
+}
+
 /// Open (or focus) a secondary "viewer" window pinned to one view (DCH-64).
 /// A viewer is deliberately stateless — the URL carries the view id and the
 /// frontend entry mounts that one page without the workspace shell — so the
@@ -3158,6 +3210,30 @@ mod listing_attribute_tests {
                 .unwrap();
         assert_eq!(pn, None, "reset wipes the part number");
         assert_eq!(pinned, 0, "reset drops the pin");
+    }
+}
+
+#[cfg(test)]
+mod photo_window_tests {
+    use super::is_photo_url;
+
+    #[test]
+    fn accepts_web_and_data_images_only() {
+        assert!(is_photo_url(
+            "https://i.ebayimg.com/images/g/abc/s-l1600.jpg"
+        ));
+        assert!(is_photo_url("http://example.test/a.png"));
+        assert!(is_photo_url("data:image/svg+xml;utf8,<svg/>"));
+        for bad in [
+            "",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "tauri://localhost/index.html",
+            "data:text/html,<script>1</script>",
+            "ftp://example.test/a.jpg",
+        ] {
+            assert!(!is_photo_url(bad), "accepted {bad:?}");
+        }
     }
 }
 

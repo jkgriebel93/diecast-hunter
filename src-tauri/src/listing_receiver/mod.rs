@@ -376,6 +376,12 @@ async fn match_reject(
 /// and a listing worth a verdict is worth tracking). Returns
 /// (listing_id, saved_now) or a ready-to-return error response — notably
 /// when the non-diecast filter rejects the save.
+// The Err deliberately IS the HTTP response for the early-return path:
+// built once per failed request, on a cold path, so the large-variant cost
+// clippy worries about never occurs in a loop, and boxing it would add
+// unwrapping noise at both call sites for no measurable win. Flagged by
+// clippy 1.98, which extended this lint to async fns.
+#[allow(clippy::result_large_err)]
 async fn resolve_or_save_listing(pool: &SqlitePool, input: &str) -> Result<(i64, bool), Response> {
     if let Some(id) = find_saved_ebay_listing(pool, input).await {
         return Ok((id, false));

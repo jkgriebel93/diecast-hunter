@@ -27,6 +27,7 @@ import {
   sortDriverOptions,
   type CompSummary,
   type DriverOption,
+  type FeedItemDetail,
   type FormOptionRow,
   type GroupMigrationProposal,
   type ListingAttributes,
@@ -75,6 +76,8 @@ import {
 } from "@/lib/filterPanel";
 import { AnchoredMenu, AnchoredMenuList } from "@/components/AnchoredMenu";
 import { Thumbnail } from "@/components/Thumbnail";
+import { CarouselThumbnail } from "@/components/CarouselThumbnail";
+import { visibleImages } from "@/lib/carousel";
 import { DCR_BASE, resolveDcrUrl } from "@/lib/dcr";
 import {
   sellerFilterLabel,
@@ -1882,6 +1885,34 @@ const ListingCard = memo(function ListingCard({
     `listing:${row.listing_id}`,
     true,
   );
+
+  // Photo carousel (DCH-75). Card-local on purpose: the fetch is served
+  // from the row's own raw_json (feed_item_detail prefers the local copy),
+  // so there's nothing worth a page-level cache, and keeping the state
+  // here means nothing new crosses the memo boundary (DCH-58). Offered
+  // only on live eBay rows — an archived listing's image URLs rot after
+  // the sale (DCH-13), so the control is withheld there rather than
+  // opening onto a row of dead frames.
+  const [photosOpen, setPhotosOpen] = useState(false);
+  const [photoDetail, setPhotoDetail] = useState<FeedItemDetail | null>(null);
+  const [photosLoading, setPhotosLoading] = useState(false);
+  const [photosError, setPhotosError] = useState<unknown>(null);
+  const canBrowsePhotos = row.seller_code === "ebay" && !row.is_archived;
+  async function togglePhotos() {
+    const opening = !photosOpen;
+    setPhotosOpen(opening);
+    // Cached detail makes reopening free; a previous error retries.
+    if (!opening || photoDetail || photosLoading) return;
+    setPhotosError(null);
+    setPhotosLoading(true);
+    try {
+      setPhotoDetail(await api.feedItemDetail(row.external_id));
+    } catch (e) {
+      setPhotosError(e);
+    } finally {
+      setPhotosLoading(false);
+    }
+  }
   return (
     <li
       className={`card flex gap-4 ${minimized ? "!py-2" : ""} ${
@@ -1907,7 +1938,39 @@ const ListingCard = memo(function ListingCard({
         onToggle={toggleMinimized}
         className="self-start -mt-0.5"
       />
-      {!minimized && <Thumbnail src={row.image_url} className={imgSizeClass} />}
+      {!minimized && (
+        <div className="shrink-0">
+          <CarouselThumbnail
+            images={visibleImages(
+              photosOpen,
+              photoDetail?.image_urls,
+              row.image_url,
+            )}
+            className={imgSizeClass}
+            photoTitle={row.title}
+          />
+          {canBrowsePhotos && (
+            <button
+              type="button"
+              className="mt-1 block w-full text-center text-xs text-fg-muted hover:text-fg"
+              onClick={() => void togglePhotos()}
+              title="Step through all of the listing's photos — served from the saved copy, no eBay call"
+            >
+              {photosOpen ? "Hide photos" : "Photos"}
+            </button>
+          )}
+          {photosOpen && photosLoading && (
+            <div className="mt-1 text-center text-xs text-fg-subtle">
+              Loading…
+            </div>
+          )}
+          {photosOpen && photosError != null && (
+            <div className="mt-1 max-w-[12rem]">
+              <ErrorBanner error={photosError} variant="inline" />
+            </div>
+          )}
+        </div>
+      )}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <div className="text-sm font-medium truncate flex-1 min-w-0">

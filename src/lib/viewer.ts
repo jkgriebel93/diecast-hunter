@@ -15,3 +15,17 @@ export function viewerViewFromSearch(search: string): ViewId | null {
   const raw = new URLSearchParams(search).get("viewer");
   return raw !== null && isViewId(raw) ? raw : null;
 }
+
+/** The image the enlarged-photo window (DCH-75) should show, from its
+ *  `location.search` — or null when absent or not an image URL. The
+ *  allowlist mirrors the backend's `is_photo_url`: web images and inline
+ *  data images only, because this string becomes an `<img src>`. */
+export function photoUrlFromSearch(search: string): string | null {
+  const raw = new URLSearchParams(search).get("photo");
+  if (raw === null) return null;
+  return raw.startsWith("https://") ||
+    raw.startsWith("http://") ||
+    raw.startsWith("data:image/")
+    ? raw
+    : null;
+}

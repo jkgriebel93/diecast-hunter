@@ -2,7 +2,7 @@
 // a real view or the window renders the normal app. Null is the safe answer
 // for everything else — a stale shortcut must not produce a blank window.
 import { describe, expect, it } from "vitest";
-import { viewerViewFromSearch } from "./viewer";
+import { photoUrlFromSearch, viewerViewFromSearch } from "./viewer";
 
 describe("viewerViewFromSearch", () => {
   it("returns a valid view id", () => {
@@ -25,5 +25,32 @@ describe("viewerViewFromSearch", () => {
     expect(viewerViewFromSearch("?viewer=/no-such-view")).toBeNull();
     expect(viewerViewFromSearch("?viewer=collection")).toBeNull();
     expect(viewerViewFromSearch("?viewer=")).toBeNull();
+  });
+});
+
+describe("photoUrlFromSearch", () => {
+  it("returns web and data image urls, decoded", () => {
+    expect(
+      photoUrlFromSearch(
+        "?photo=https%3A%2F%2Fi.ebayimg.com%2Fimages%2Fg%2Fabc%2Fs-l1600.jpg",
+      ),
+    ).toBe("https://i.ebayimg.com/images/g/abc/s-l1600.jpg");
+    expect(
+      photoUrlFromSearch(
+        "?photo=data%3Aimage%2Fsvg%2Bxml%3Butf8%2C%3Csvg%2F%3E",
+      ),
+    ).toBe("data:image/svg+xml;utf8,<svg/>");
+  });
+
+  it("refuses anything that isn't an image url — it becomes an img src", () => {
+    expect(photoUrlFromSearch("")).toBeNull();
+    expect(photoUrlFromSearch("?photo=")).toBeNull();
+    expect(photoUrlFromSearch("?photo=javascript%3Aalert(1)")).toBeNull();
+    expect(
+      photoUrlFromSearch("?photo=file%3A%2F%2F%2Fetc%2Fpasswd"),
+    ).toBeNull();
+    expect(
+      photoUrlFromSearch("?photo=data%3Atext%2Fhtml%2C%3Cscript%3E"),
+    ).toBeNull();
   });
 });

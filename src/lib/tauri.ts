@@ -245,6 +245,10 @@ export const api = {
    *  (DCH-64). `title` becomes the OS window title. */
   openViewerWindow: (viewId: string, title: string) =>
     invoke<void>("open_viewer_window", { viewId, title }),
+  /** Show one image enlarged in the reusable photo window (DCH-75).
+   *  A second call retargets the same window rather than stacking. */
+  openPhotoWindow: (url: string, title: string) =>
+    invoke<void>("open_photo_window", { url, title }),
   listListings: () => invoke<ListingRow[]>("list_listings"),
   /** Narrow (external_id → listing_id) pairs for watched eBay listings —
    *  what Browse and the Seller Feed badge results with, without the full

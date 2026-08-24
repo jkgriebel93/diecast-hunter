@@ -25,7 +25,8 @@ import { ErrorBanner } from "@/components/ErrorBanner";
 import { NoticeBanner } from "@/components/NoticeBanner";
 import { Modal } from "@/components/Modal";
 import { ClearFiltersButton, FilteredEmpty } from "@/components/FilterCard";
-import { Thumbnail } from "@/components/Thumbnail";
+import { CarouselThumbnail } from "@/components/CarouselThumbnail";
+import { visibleImages } from "@/lib/carousel";
 
 const PAGE_SIZE = 50;
 
@@ -1077,19 +1078,11 @@ function FeedCard({
     `ebay-item:${item.item_id}`,
   );
   const [expanded, setExpanded] = useState(false);
-  const [imgIndex, setImgIndex] = useState(0);
 
   // The search response carries one image; the full set arrives with the
   // detail (DCH-52). Until then — and for single-image listings — there is
-  // nothing to cycle, so no carousel controls render.
-  const images =
-    expanded && detail && detail.image_urls.length > 0
-      ? detail.image_urls
-      : item.image_url
-        ? [item.image_url]
-        : [];
-  const shownImage =
-    images.length > 0 ? images[imgIndex % images.length] : null;
+  // nothing to cycle, so the shared carousel renders no controls.
+  const images = visibleImages(expanded, detail?.image_urls, item.image_url);
 
   function onToggleDetails() {
     const opening = !expanded;
@@ -1107,32 +1100,11 @@ function FeedCard({
           className="self-start -mt-0.5"
         />
         {!minimized && (
-          <div className="shrink-0 space-y-1">
-            <Thumbnail src={shownImage} className={imgSizeClass} />
-            {expanded && images.length > 1 && (
-              <div className="flex items-center justify-center gap-2 text-xs text-fg-subtle tabular-nums">
-                <button
-                  type="button"
-                  className="px-1.5 hover:text-fg"
-                  aria-label="Previous image"
-                  onClick={() =>
-                    setImgIndex((i) => (i - 1 + images.length) % images.length)
-                  }
-                >
-                  ‹
-                </button>
-                {(imgIndex % images.length) + 1} / {images.length}
-                <button
-                  type="button"
-                  className="px-1.5 hover:text-fg"
-                  aria-label="Next image"
-                  onClick={() => setImgIndex((i) => (i + 1) % images.length)}
-                >
-                  ›
-                </button>
-              </div>
-            )}
-          </div>
+          <CarouselThumbnail
+            images={images}
+            className={imgSizeClass}
+            photoTitle={item.title}
+          />
         )}
         <div className="min-w-0 flex-1">
           <div
