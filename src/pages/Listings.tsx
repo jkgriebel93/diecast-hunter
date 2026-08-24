@@ -1947,6 +1947,7 @@ const ListingCard = memo(function ListingCard({
               row.image_url,
             )}
             className={imgSizeClass}
+            photoTitle={row.title}
           />
           {canBrowsePhotos && (
             <button

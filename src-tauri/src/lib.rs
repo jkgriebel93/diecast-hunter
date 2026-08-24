@@ -327,6 +327,7 @@ pub fn run() {
             commands::sync_ebay_watchlist,
             commands::frontend_ready,
             commands::open_viewer_window,
+            commands::open_photo_window,
             commands::list_listings,
             commands::list_watched_external_ids,
             commands::get_listing_row,

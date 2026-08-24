@@ -10,7 +10,13 @@ and the fetch is `feed_item_detail`, which serves watched rows from their own `r
 (zero Browse quota; a failed fetch renders inline `ErrorBanner` and the card stays
 usable). The archived-rows decision: the control is **withheld** on archived rows rather
 than degraded — their image URLs rot (DCH-13), and the archive is a records surface, not
-a shopping one. Recorded on the ticket. The queue back of this: DCH-26, DCH-27, DCH-42.
+a shopping one. Recorded on the ticket. Same-PR follow-up: clicking a carousel image
+opens it **enlarged in the reusable photo window** — `open_photo_window` validates the
+URL against an image allowlist (it becomes a webview location), navigates the existing
+`viewer-photo` window rather than stacking, and rides DCH-64's `viewer-*` lifecycle so
+it closes with the main window; `?photo=<url>` in `main.tsx` mounts the inert
+`PhotoWindow`, with the frontend parser enforcing the same allowlist. The queue back of
+this: DCH-26, DCH-27, DCH-42.
 
 Rev 39, 2026-08-23. **DCH-74 shipped**, made small by its scope clarification: part
 numbers are **manual-entry only** (Lionel's or any brand's — the column is the

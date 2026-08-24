@@ -52,7 +52,7 @@ underneath it and does nothing).
 | `facet-collapse/` | DCH-43 | Saved Listings' collapsible filter facets — **superseded by `filter-pane/`**; kept as the record of that PR, and its `expanded` / `badges` presets are gone |
 | `filter-pane/` | DCH-47 | The filter sidebar as a scrolling accordion: at rest, collapsed summaries, mid-scroll, a menu escaping the scroll region, and (at 520px) the pinned footer |
 | `filter-parity/` | DCH-35 | Clear filters, filtered-empty, result counts |
-| `listing-photo-carousel/` | DCH-75 | The Saved Listings card's photo carousel open at "2 / 3" with the Photos toggle beneath the thumbnail, and the failed-fetch state rendering inline ErrorBanner while the card stays usable |
+| `listing-photo-carousel/` | DCH-75 | The Saved Listings card's photo carousel open at "2 / 3" with the Photos toggle beneath the thumbnail, the failed-fetch state rendering inline ErrorBanner while the card stays usable, and the enlarged-photo window a clicked image opens |
 | `listing-sharing/` | DCH-48 | Share selection dialog, the created link, the unconfigured state, and Settings' Active links |
 | `helper-adoption/` | DCH-34 | Shared formatters on the list screens |
 | `listing-panel/` | DCH-20 | Listing cards collapsed by default |

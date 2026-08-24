@@ -1100,7 +1100,11 @@ function FeedCard({
           className="self-start -mt-0.5"
         />
         {!minimized && (
-          <CarouselThumbnail images={images} className={imgSizeClass} />
+          <CarouselThumbnail
+            images={images}
+            className={imgSizeClass}
+            photoTitle={item.title}
+          />
         )}
         <div className="min-w-0 flex-1">
           <div

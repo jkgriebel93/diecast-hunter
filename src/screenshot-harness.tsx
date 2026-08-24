@@ -533,6 +533,9 @@ const RESULTS: Record<string, unknown> = {
             "Mint in box, never displayed. Includes the original certificate of authenticity.\n1 of 5,004 produced.",
         },
       }),
+  // DCH-75: clicking a carousel image asks for the photo window; the stub
+  // just succeeds so a stray click during a capture doesn't console-error.
+  open_photo_window: null,
   list_wishlists: WISHLISTS,
   create_wishlist: {
     wishlist_id: 3,
