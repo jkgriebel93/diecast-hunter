@@ -515,7 +515,8 @@ const RESULTS: Record<string, unknown> = {
   unhide_feed_listing: null,
   // DCH-52: `feed-details-error` leaves this command unstubbed on purpose —
   // the rejected invoke is the real error path the shot documents.
-  ...(preset === "feed-details-error"
+  // DCH-75's `photos-error` reuses the same trick on the Listings page.
+  ...(preset === "feed-details-error" || preset === "photos-error"
     ? {}
     : {
         feed_item_detail: {
@@ -676,6 +677,13 @@ if (
 // viewer; flat so the shot is rows, not collapsed driver panels.
 if (preset === "viewer-window") {
   localStorage.setItem("collection:group-by-driver", "0");
+}
+// DCH-75: the photo presets work the thumbnail column of expanded cards.
+if (preset.startsWith("photos-")) {
+  setManyMinimized(
+    LISTINGS.map((l) => `listing:${l.listing_id}`),
+    false,
+  );
 }
 // DCH-74: both part-number presets work inside card bodies, and cards
 // default collapsed (DCH-20) — expand them pre-mount.
@@ -941,6 +949,31 @@ function Harness() {
     if (preset === "expandall-flat") {
       const t = setTimeout(() => clickByText("button", "Expand all"), 400);
       return () => clearTimeout(t);
+    }
+    // DCH-75: open the first card's photo carousel — the stubbed detail
+    // returns three images, so advancing once shows "2 / 3" — and the
+    // error preset's unstubbed command shows the inline failure.
+    if (preset.startsWith("photos-")) {
+      let cancelled = false;
+      void (async () => {
+        const step = async (fn: () => void, ms = 300) => {
+          await new Promise((r) => setTimeout(r, ms));
+          if (!cancelled) fn();
+        };
+        await step(() => clickByText("button", "Photos"), 400);
+        if (preset === "photos-open") {
+          await step(() => {
+            document
+              .querySelector<HTMLButtonElement>(
+                'button[aria-label="Next image"]',
+              )
+              ?.click();
+          });
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
     }
     // DCH-74: the attribute editor with its new Part number field, and the
     // Listings search finding a row by its manually entered PN — the chip
