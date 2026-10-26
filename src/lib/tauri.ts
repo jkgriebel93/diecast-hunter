@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { ExportFormat } from "./exportFormat";
 
 export interface AppStatus {
   /** Build-time CalVer + commit (DCH-67) — what a bug report should quote. */
@@ -342,15 +343,17 @@ export const api = {
     invoke<void>("delete_registry_presearch", { id }),
   refreshRegistryPresearch: (id: number) =>
     invoke<number>("refresh_registry_presearch", { id }),
-  exportRegistrySearchHtml: (
+  exportRegistrySearch: (
     results: ProductionSearchResult[],
     finishLabel: string | null,
     path: string,
+    format: ExportFormat,
   ) =>
-    invoke<ExportSummary>("export_registry_search_html", {
+    invoke<ExportSummary>("export_registry_search", {
       results,
       finishLabel,
       path,
+      format,
     }),
   linkListingToRegistry: (
     listingId: number,
@@ -519,12 +522,13 @@ export const api = {
       wishlistId,
       listingIds,
     }),
-  exportWishlistHtml: (wishlistId: number, path: string) =>
-    invoke<ExportSummary>("export_wishlist_html", { wishlistId, path }),
-  exportCollectionHtml: (rows: CollectionRow[], path: string) =>
-    invoke<ExportSummary>("export_collection_html", { rows, path }),
-  exportCollectionCsv: (rows: CollectionRow[], path: string) =>
-    invoke<ExportSummary>("export_collection_csv", { rows, path }),
+  exportWishlist: (wishlistId: number, path: string, format: ExportFormat) =>
+    invoke<ExportSummary>("export_wishlist", { wishlistId, path, format }),
+  exportCollection: (
+    rows: CollectionRow[],
+    path: string,
+    format: ExportFormat,
+  ) => invoke<ExportSummary>("export_collection", { rows, path, format }),
 };
 
 /** One named wishlist, for the list-management UI. */

@@ -37,6 +37,12 @@ import {
   useMinimized,
 } from "@/lib/minimized";
 import { Thumbnail } from "@/components/Thumbnail";
+import { ExportMenu } from "@/components/ExportMenu";
+import {
+  describeExport,
+  exportSaveOptions,
+  type ExportFormat,
+} from "@/lib/exportFormat";
 import { DCR_BASE } from "@/lib/dcr";
 import { collectionTitle } from "@/lib/collectionTitle";
 
@@ -184,36 +190,25 @@ export function Collection() {
   }
 
   /** Export the currently displayed rows (post-filter, in displayed order)
-   *  as a print-friendly HTML file (images embedded, opened in the browser
-   *  for printing) or a CSV spreadsheet. */
-  async function onExport(format: "html" | "csv") {
+   *  in the chosen format: a print-friendly HTML file (images embedded,
+   *  opened in the browser for printing), a CSV spreadsheet, or JSON. */
+  async function onExport(format: ExportFormat) {
     const rows = groupByDriver
       ? (groups ?? []).flatMap((g) => g.items)
       : (flatItems ?? []);
     if (rows.length === 0) return;
-    const path = await saveDialog({
-      title: format === "csv" ? "Export collection CSV" : "Export collection",
-      defaultPath: `my-collection.${format}`,
-      filters:
-        format === "csv"
-          ? [{ name: "CSV", extensions: ["csv"] }]
-          : [{ name: "HTML", extensions: ["html"] }],
-    });
+    const path = await saveDialog(
+      exportSaveOptions("Export collection", "my-collection", format),
+    );
     if (!path) return;
     setExporting(true);
     setError(null);
     setNotice(null);
     setSuccessMsg(null);
     try {
-      const summary =
-        format === "csv"
-          ? await api.exportCollectionCsv(rows, path)
-          : await api.exportCollectionHtml(rows, path);
+      const summary = await api.exportCollection(rows, path, format);
       setSuccessMsg(
-        `Exported ${summary.entries} item${summary.entries === 1 ? "" : "s"} to ${summary.path}` +
-          (summary.images_failed > 0
-            ? ` (${summary.images_failed} image${summary.images_failed === 1 ? "" : "s"} could not be downloaded).`
-            : ".") +
+        describeExport(summary, { one: "item", many: "items" }) +
           (format === "html"
             ? " Opening in your browser — print from there."
             : ""),
@@ -399,32 +394,16 @@ export function Collection() {
                 : formatResultCount(filteredItems, totalItems, "item")}
             </div>
           )}
-          <button
-            className="btn-secondary"
-            type="button"
-            disabled={exporting || filteredItems === 0}
-            onClick={() => onExport("csv")}
+          <ExportMenu
+            busy={exporting}
+            disabled={filteredItems === 0}
+            onSelect={onExport}
             title={
               filteredItems > 0
-                ? "Save the displayed items as a CSV spreadsheet"
+                ? "Save the displayed items as a print-friendly HTML file, a CSV spreadsheet, or JSON"
                 : "Nothing to export"
             }
-          >
-            Export CSV…
-          </button>
-          <button
-            className="btn-secondary"
-            type="button"
-            disabled={exporting || filteredItems === 0}
-            onClick={() => onExport("html")}
-            title={
-              filteredItems > 0
-                ? "Save the displayed items as a print-friendly HTML file (images embedded) and open it for printing"
-                : "Nothing to export"
-            }
-          >
-            {exporting ? "Exporting…" : "Export / Print…"}
-          </button>
+          />
           <button
             className="btn-secondary"
             type="button"

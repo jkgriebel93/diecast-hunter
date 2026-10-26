@@ -4,6 +4,12 @@ import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { describeError } from "@/lib/errors";
 import { Modal } from "@/components/Modal";
 import { ClearFiltersButton, FilteredEmpty } from "@/components/FilterCard";
+import { ExportMenu } from "@/components/ExportMenu";
+import {
+  describeExport,
+  exportSaveOptions,
+  type ExportFormat,
+} from "@/lib/exportFormat";
 import {
   api,
   formatAgo,
@@ -439,15 +445,18 @@ export function Registry() {
   }
 
   /** Export whatever is currently displayed (post value-filter, post-sort)
-   *  to a self-contained HTML file. Finish isn't part of search results, so
-   *  we can only label it when the search was pinned to a single finish. */
-  async function onExport() {
+   *  in the chosen format — a self-contained HTML file, CSV, or JSON. Finish
+   *  isn't part of search results, so we can only label it when the search
+   *  was pinned to a single finish. */
+  async function onExport(format: ExportFormat) {
     if (!sortedResults || sortedResults.length === 0) return;
-    const path = await saveDialog({
-      title: "Export registry search results",
-      defaultPath: "registry-export.html",
-      filters: [{ name: "HTML", extensions: ["html"] }],
-    });
+    const path = await saveDialog(
+      exportSaveOptions(
+        "Export registry search results",
+        "registry-export",
+        format,
+      ),
+    );
     if (!path) return;
     setExporting(true);
     setError(null);
@@ -458,17 +467,13 @@ export function Registry() {
           ? (finishes.find((f) => f.value === selectedFinishGuids[0])
               ?.display ?? null)
           : null;
-      const summary = await api.exportRegistrySearchHtml(
+      const summary = await api.exportRegistrySearch(
         sortedResults,
         finishLabel,
         path,
+        format,
       );
-      setInfo(
-        `Exported ${summary.entries} result${summary.entries === 1 ? "" : "s"} to ${summary.path}` +
-          (summary.images_failed > 0
-            ? ` (${summary.images_failed} image${summary.images_failed === 1 ? "" : "s"} could not be downloaded).`
-            : "."),
-      );
+      setInfo(describeExport(summary, { one: "result", many: "results" }));
     } catch (e) {
       setError(String(e));
     } finally {
@@ -743,24 +748,18 @@ export function Registry() {
               {refreshing ? "Refreshing options…" : "Refresh options"}
             </button>
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={onExport}
+              <ExportMenu
+                busy={exporting}
                 disabled={
-                  searching ||
-                  exporting ||
-                  !sortedResults ||
-                  sortedResults.length === 0
+                  searching || !sortedResults || sortedResults.length === 0
                 }
+                onSelect={onExport}
                 title={
                   sortedResults && sortedResults.length > 0
-                    ? "Save the displayed results as an HTML file"
+                    ? "Save the displayed results as HTML, CSV, or JSON"
                     : "Run a search first — exports the displayed results"
                 }
-              >
-                {exporting ? "Exporting…" : "Export"}
-              </button>
+              />
               <button
                 type="button"
                 className="btn-secondary"
