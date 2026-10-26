@@ -1670,37 +1670,45 @@ pub async fn set_registry_search_mode(state: State<'_, AppState>, mode: String) 
     settings::set(&state.db.pool, settings::KEY_REGISTRY_SEARCH_MODE, &mode).await
 }
 
-/// Export the currently displayed registry-search results to a standalone
-/// HTML file at `path` (chosen by the user via a save dialog on the JS
-/// side). Images are downloaded and embedded, so this can take a while for
-/// big result sets — it participates in the shared progress/cancel plumbing.
+/// Export the currently displayed registry-search results to a file at
+/// `path` (chosen by the user via a save dialog on the JS side) in `format`.
+/// HTML downloads and embeds images, so it can take a while for big result
+/// sets — it participates in the shared progress/cancel plumbing. CSV and
+/// JSON write the rows immediately with each image's URL.
 #[tauri::command]
-pub async fn export_registry_search_html(
+pub async fn export_registry_search(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
     results: Vec<crate::dcr::ProductionSearchResult>,
     finish_label: Option<String>,
     path: String,
+    format: crate::export::ExportFormat,
 ) -> AppResult<crate::export::ExportSummary> {
     let progress = ProgressEmitter::new(app, "registry_export");
     set_active_cancel(&state, &progress).await;
-    let result =
-        crate::export::export_registry_results(&progress, &results, finish_label.as_deref(), &path)
-            .await;
+    let result = crate::export::export_registry_results(
+        &progress,
+        &results,
+        finish_label.as_deref(),
+        &path,
+        format,
+    )
+    .await;
     clear_active_cancel(&state).await;
     finish_progress(&progress, &result, "Registry export");
     result
 }
 
-/// Export one wishlist (entries, notes, linked candidate listings) to a
-/// standalone print-friendly HTML file at `path`. Same image-embedding and
-/// progress/cancel behavior as the registry export.
+/// Export one wishlist (entries, notes, linked candidate listings) to a file
+/// at `path` in `format`. Same image-embedding and progress/cancel behavior
+/// as the registry export.
 #[tauri::command]
-pub async fn export_wishlist_html(
+pub async fn export_wishlist(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
     wishlist_id: i64,
     path: String,
+    format: crate::export::ExportFormat,
 ) -> AppResult<crate::export::ExportSummary> {
     let name: Option<(String,)> = sqlx::query_as("SELECT name FROM wishlists WHERE id = ?")
         .bind(wishlist_id)
@@ -1712,39 +1720,30 @@ pub async fn export_wishlist_html(
     let entries = crate::wishlist::list(&state.db.pool, wishlist_id).await?;
     let progress = ProgressEmitter::new(app, "wishlist_export");
     set_active_cancel(&state, &progress).await;
-    let result = crate::export::export_wishlist(&progress, &name, &entries, &path).await;
+    let result = crate::export::export_wishlist(&progress, &name, &entries, &path, format).await;
     clear_active_cancel(&state).await;
     finish_progress(&progress, &result, "Wishlist export");
     result
 }
 
 /// Export the collection rows the My Collection page is currently displaying
-/// (post-filter, post-sort — the frontend passes them back) to a standalone
-/// print-friendly HTML file at `path`. Same image-embedding and
-/// progress/cancel behavior as the registry export.
+/// (post-filter, post-sort — the frontend passes them back) to a file at
+/// `path` in `format`. Same image-embedding and progress/cancel behavior as
+/// the registry export.
 #[tauri::command]
-pub async fn export_collection_html(
+pub async fn export_collection(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
     rows: Vec<CollectionRow>,
     path: String,
+    format: crate::export::ExportFormat,
 ) -> AppResult<crate::export::ExportSummary> {
     let progress = ProgressEmitter::new(app, "collection_export");
     set_active_cancel(&state, &progress).await;
-    let result = crate::export::export_collection(&progress, &rows, &path).await;
+    let result = crate::export::export_collection(&progress, &rows, &path, format).await;
     clear_active_cancel(&state).await;
     finish_progress(&progress, &result, "Collection export");
     result
-}
-
-/// CSV counterpart of [`export_collection_html`] — no images, so it writes
-/// immediately without progress plumbing.
-#[tauri::command]
-pub async fn export_collection_csv(
-    rows: Vec<CollectionRow>,
-    path: String,
-) -> AppResult<crate::export::ExportSummary> {
-    crate::export::export_collection_csv(&rows, &path).await
 }
 
 async fn run_dcr_production_search(
@@ -2105,8 +2104,8 @@ pub struct DriverGroup {
     pub wholesale_total_cents: i64,
 }
 
-// Deserialize too: the collection exports round-trip the displayed rows
-// back from the frontend (see export_collection_html / _csv).
+// Deserialize too: the collection export round-trips the displayed rows
+// back from the frontend (see export_collection).
 #[derive(Serialize, Deserialize)]
 pub struct CollectionRow {
     pub collection_id: i64,

@@ -20,6 +20,12 @@ import { ErrorBanner } from "@/components/ErrorBanner";
 import { Modal } from "@/components/Modal";
 import { FilterCard, FilteredEmpty } from "@/components/FilterCard";
 import { Thumbnail } from "@/components/Thumbnail";
+import { ExportMenu } from "@/components/ExportMenu";
+import {
+  describeExport,
+  exportSaveOptions,
+  type ExportFormat,
+} from "@/lib/exportFormat";
 import { DCR_BASE } from "@/lib/dcr";
 
 const IMG_CLASS: Record<ImageSize, string> = {
@@ -321,33 +327,31 @@ export function Wishlist() {
     }
   }
 
-  /** Export the wishlist to a self-contained, print-friendly HTML file,
-   *  then open it in the default browser so it can go straight to print. */
-  async function onExport() {
+  /** Export the wishlist in the chosen format. HTML is the self-contained,
+   *  print-friendly file, opened in the default browser so it can go
+   *  straight to print; CSV and JSON are data exports with image URLs. */
+  async function onExport(format: ExportFormat) {
     if (activeId === null || !entries || entries.length === 0) return;
     const slug = (activeList?.name ?? "wishlist")
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "");
-    const path = await saveDialog({
-      title: "Export wishlist",
-      defaultPath: `${slug || "wishlist"}.html`,
-      filters: [{ name: "HTML", extensions: ["html"] }],
-    });
+    const path = await saveDialog(
+      exportSaveOptions("Export wishlist", slug || "wishlist", format),
+    );
     if (!path) return;
     setExporting(true);
     setError(null);
     setInfo(null);
     try {
-      const summary = await api.exportWishlistHtml(activeId, path);
+      const summary = await api.exportWishlist(activeId, path, format);
       setInfo(
-        `Exported ${summary.entries} entr${summary.entries === 1 ? "y" : "ies"} to ${summary.path}` +
-          (summary.images_failed > 0
-            ? ` (${summary.images_failed} image${summary.images_failed === 1 ? "" : "s"} could not be downloaded).`
-            : ".") +
-          " Opening in your browser — print from there.",
+        describeExport(summary, { one: "entry", many: "entries" }) +
+          (format === "html"
+            ? " Opening in your browser — print from there."
+            : ""),
       );
-      void openExternal(summary.path);
+      if (format === "html") void openExternal(summary.path);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -382,19 +386,16 @@ export function Wishlist() {
           >
             Share…
           </button>
-          <button
-            className="btn-secondary"
-            type="button"
-            onClick={onExport}
-            disabled={exporting || !entries || entries.length === 0}
+          <ExportMenu
+            busy={exporting}
+            disabled={!entries || entries.length === 0}
+            onSelect={onExport}
             title={
               entries && entries.length > 0
-                ? "Save the wishlist as a print-friendly HTML file (images embedded) and open it for printing"
+                ? "Save the wishlist as a print-friendly HTML file, a CSV spreadsheet, or JSON"
                 : "Nothing to export yet"
             }
-          >
-            {exporting ? "Exporting…" : "Export / Print…"}
-          </button>
+          />
           <ImageSizeToggle size={imgSize} onChange={setImgSize} />
         </div>
       </header>
