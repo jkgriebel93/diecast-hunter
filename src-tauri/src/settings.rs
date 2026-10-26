@@ -80,6 +80,13 @@ pub const KEY_AUTO_SYNC_INTERVAL_HOURS: &str = "auto_sync.interval_hours";
 /// Unix timestamp of the last background-sync attempt (success or failure).
 /// The loop uses this to decide when the interval has elapsed.
 pub const KEY_AUTO_SYNC_LAST_RUN: &str = "auto_sync.last_run";
+/// JSON array of `sync::auto_sync::AutoSyncPhaseError` from the most recent
+/// background run, one per phase that failed. Deleted when a run completes
+/// with every phase succeeding, so "absent" means the last run was clean.
+/// Without this the only trace of a failing background sync was a WARN line
+/// in the log file, which is how a revoked eBay sign-in went unnoticed for
+/// two weeks of twice-daily failures.
+pub const KEY_AUTO_SYNC_LAST_ERRORS: &str = "auto_sync.last_errors";
 pub const DEFAULT_AUTO_SYNC_INTERVAL_HOURS: u32 = 12;
 /// Cap on how many registry entries the background pre-warm refresh may
 /// re-walk in one run (see `sync::registry_prewarm::refresh_stale_prewarms`).
@@ -113,6 +120,22 @@ pub fn ebay_user_access_token_key(env: &str) -> String {
 
 pub fn ebay_user_access_token_expires_key(env: &str) -> String {
     format!("ebay.{env}.user.access_token_expires_at")
+}
+
+/// Unix timestamp of the moment eBay last answered a refresh-token grant
+/// with `invalid_grant` — the refresh token in the keyring is dead (eBay
+/// revokes it on a password change, on the user removing the app under
+/// Third-party app access, or by customer-support action) and only a new
+/// consent flow can replace it. Absent = no known revocation. Cleared on a
+/// successful token exchange or refresh, and on disconnect.
+pub fn ebay_user_revoked_at_key(env: &str) -> String {
+    format!("ebay.{env}.user.revoked_at")
+}
+
+/// eBay's `error_description` from that `invalid_grant` answer, so Settings
+/// can show why the sign-in stopped working.
+pub fn ebay_user_revoked_reason_key(env: &str) -> String {
+    format!("ebay.{env}.user.revoked_reason")
 }
 
 pub fn ebay_user_granted_scopes_key(env: &str) -> String {

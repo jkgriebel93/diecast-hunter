@@ -47,6 +47,16 @@ export interface AutoSyncSettings {
   /** Cap on registry detail pages a non-forced enrichment pass fetches per
    *  run. 0 = disabled. A forced re-enrich ignores it. */
   enrich_max_entries: number;
+  /** Phases that failed in the most recent background run; empty when it
+   *  was clean or has never run. `error` is the raw backend message, so it
+   *  goes through `ErrorBanner` like any other thrown value. */
+  last_errors: AutoSyncPhaseError[];
+}
+
+export interface AutoSyncPhaseError {
+  /** "DCR", "eBay", "pre-warm refresh" or "pre-search refresh". */
+  phase: string;
+  error: string;
 }
 
 export interface RemoveEntrySummary {
@@ -1160,11 +1170,20 @@ export interface RefreshSummary {
 }
 
 export interface EbayOauthStatus {
+  /** A refresh token is stored and eBay still honours it. False once eBay
+   *  has answered a refresh with `invalid_grant`, even though the dead
+   *  token is still in the keyring — see `needs_reconnect`. */
   connected: boolean;
   environment: string;
   has_ru_name: boolean;
   granted_scopes: string[];
   access_token_expires_at: number | null;
+  /** eBay revoked the stored sign-in; only a new consent flow fixes it. */
+  needs_reconnect: boolean;
+  /** When the revocation was first seen, and eBay's own description. Both
+   *  null unless `needs_reconnect`. */
+  revoked_at: number | null;
+  revoked_reason: string | null;
 }
 
 /** Sold-price statistics over comparable archived listings (see the Rust

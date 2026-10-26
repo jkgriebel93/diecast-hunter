@@ -23,6 +23,19 @@ describe("describeError — eBay auth and quota", () => {
     expect(d.detail).toContain("IAF Token is invalid");
   });
 
+  it("names a revoked refresh token as a sign-in problem, not a config one", () => {
+    const d = describeError(
+      'network error: ebay oauth token endpoint returned 400 Bad Request: {"error":"invalid_grant","error_description":"the provided authorization refresh token is invalid or was issued to another client"}',
+    );
+    expect(d.kind).toBe("auth");
+    expect(d.title).toBe("eBay no longer accepts this app's sign-in.");
+    expect(d.hint).toMatch(/Reconnect your eBay account/);
+    // Without this branch a 400 falls through to the generic "request
+    // failed" title, which says nothing about reconnecting.
+    expect(d.title).not.toMatch(/request .* failed/);
+    expect(d.detail).toContain("invalid_grant");
+  });
+
   it("explains the daily quota without alarming the user about data", () => {
     const d = describeError(
       "eBay rate limit reached: eBay's daily API quota is used up (HTTP 429 from https://api.ebay.com/x).",

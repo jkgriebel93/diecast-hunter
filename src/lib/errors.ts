@@ -117,6 +117,23 @@ function describeNetwork(body: string): DescribedError {
   const host = hostFrom(body);
   const status = statusFrom(body);
 
+  // eBay's token endpoint answering a refresh with `invalid_grant`: the
+  // stored refresh token was revoked upstream (password change, app removed
+  // under Third-party app access, CS action) or has aged out. The body's
+  // wording — "invalid or was issued to another client" — reads like a
+  // configuration mistake, which it almost never is; the only fix is a new
+  // consent flow.
+  if (lower.includes("invalid_grant")) {
+    return {
+      title: "eBay no longer accepts this app's sign-in.",
+      hint:
+        "Reconnect your eBay account in Settings. eBay revokes the sign-in " +
+        "after a password change or after the app is removed under " +
+        "Third-party app access.",
+      detail: body,
+      kind: "auth",
+    };
+  }
   if (lower.includes("iaf token")) {
     return {
       title: "Your eBay sign-in has expired.",

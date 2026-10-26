@@ -155,6 +155,9 @@ pub struct AutoSyncSettings {
     /// Cap on registry detail pages a non-forced enrichment pass fetches per
     /// run. 0 = enrichment disabled. A forced re-enrich ignores it.
     pub enrich_max_entries: u32,
+    /// Phases that failed in the most recent background run. Empty when the
+    /// last run was clean (or it has never run).
+    pub last_errors: Vec<sync::auto_sync::AutoSyncPhaseError>,
 }
 
 #[tauri::command]
@@ -179,6 +182,12 @@ pub async fn get_auto_sync_settings(state: State<'_, AppState>) -> AppResult<Aut
         .await?
         .and_then(|v| v.parse::<u32>().ok())
         .unwrap_or(settings::DEFAULT_ENRICH_MAX_ENTRIES);
+    // Unparseable = treat as clean rather than fail the whole Settings load;
+    // the row is only ever written by `auto_sync::run_once`.
+    let last_errors = settings::get(pool, settings::KEY_AUTO_SYNC_LAST_ERRORS)
+        .await?
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default();
     Ok(AutoSyncSettings {
         enabled,
         interval_hours,
@@ -186,6 +195,7 @@ pub async fn get_auto_sync_settings(state: State<'_, AppState>) -> AppResult<Aut
         scheduled: crate::scheduler::exists().await,
         prewarm_max_entries,
         enrich_max_entries,
+        last_errors,
     })
 }
 
