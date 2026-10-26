@@ -10,6 +10,7 @@
 //! in `auto_sync.last_run` so the Settings page can show when it last ran.
 
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 use crate::progress::ProgressEmitter;
@@ -19,6 +20,18 @@ use crate::sync;
 /// Run the collection + eBay syncs once against `pool`. Never returns an
 /// error — phase failures are logged. Returns whether both phases succeeded,
 /// which the headless entry point maps to a process exit code.
+/// One failed phase of a background run, persisted under
+/// `auto_sync.last_errors` so the Settings page can show it. `error` is the
+/// `Display` form of the `AppError`, unchanged, so the frontend's
+/// `describeError` can classify it the same way it would a foreground
+/// failure (an `invalid_grant` here becomes "Reconnect your eBay account").
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoSyncPhaseError {
+    /// Which phase: "DCR", "eBay", "pre-warm refresh", "pre-search refresh".
+    pub phase: String,
+    pub error: String,
+}
+
 pub async fn run_once(pool: &SqlitePool) -> bool {
     // Headless: no AppHandle, so no UI progress events. check_cancelled is
     // unused here (nothing flips the token in a one-shot process).
@@ -28,6 +41,7 @@ pub async fn run_once(pool: &SqlitePool) -> bool {
     tracing::info!("auto-sync: starting headless sync");
 
     let mut ok = true;
+    let mut failures: Vec<AutoSyncPhaseError> = Vec::new();
 
     // One DCR session for the whole run (DCH-57): the collection sync's login
     // is the run's only login — the pre-warm and pre-search refreshes below
@@ -49,6 +63,10 @@ pub async fn run_once(pool: &SqlitePool) -> bool {
         Err(e) => {
             ok = false;
             tracing::warn!("auto-sync DCR failed: {e}");
+            failures.push(AutoSyncPhaseError {
+                phase: "DCR".into(),
+                error: e.to_string(),
+            });
         }
     }
 
@@ -64,6 +82,10 @@ pub async fn run_once(pool: &SqlitePool) -> bool {
         Err(e) => {
             ok = false;
             tracing::warn!("auto-sync eBay failed: {e}");
+            failures.push(AutoSyncPhaseError {
+                phase: "eBay".into(),
+                error: e.to_string(),
+            });
         }
     }
 
@@ -82,6 +104,10 @@ pub async fn run_once(pool: &SqlitePool) -> bool {
         Err(e) => {
             ok = false;
             tracing::warn!("auto-sync prewarm refresh failed: {e}");
+            failures.push(AutoSyncPhaseError {
+                phase: "pre-warm refresh".into(),
+                error: e.to_string(),
+            });
         }
     }
 
@@ -101,6 +127,10 @@ pub async fn run_once(pool: &SqlitePool) -> bool {
         Err(e) => {
             ok = false;
             tracing::warn!("auto-sync pre-search refresh failed: {e}");
+            failures.push(AutoSyncPhaseError {
+                phase: "pre-search refresh".into(),
+                error: e.to_string(),
+            });
         }
     }
 
@@ -109,6 +139,19 @@ pub async fn run_once(pool: &SqlitePool) -> bool {
     // run.
     if let Err(e) = settings::set(pool, settings::KEY_AUTO_SYNC_LAST_RUN, &now.to_string()).await {
         tracing::warn!("auto-sync: could not record last_run: {e}");
+    }
+    // And what went wrong, so the failure is visible somewhere other than
+    // this log file. A clean run clears the previous run's record.
+    let record = if failures.is_empty() {
+        settings::delete(pool, settings::KEY_AUTO_SYNC_LAST_ERRORS).await
+    } else {
+        match serde_json::to_string(&failures) {
+            Ok(json) => settings::set(pool, settings::KEY_AUTO_SYNC_LAST_ERRORS, &json).await,
+            Err(e) => Err(crate::error::AppError::Parse(e.to_string())),
+        }
+    };
+    if let Err(e) = record {
+        tracing::warn!("auto-sync: could not record last_errors: {e}");
     }
 
     tracing::info!("auto-sync: headless sync complete (ok={ok})");

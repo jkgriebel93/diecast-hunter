@@ -28,11 +28,21 @@ pub const DEFAULT_SCOPES: &[&str] = &["https://api.ebay.com/oauth/api_scope"];
 
 #[derive(Debug, Serialize, Clone)]
 pub struct OauthStatus {
+    /// A refresh token is stored *and* eBay hasn't rejected it. A revoked
+    /// token still sits in the keyring, so this is deliberately not "a
+    /// refresh token exists" — that definition kept Settings reporting
+    /// "Connected" for two weeks after eBay had stopped honouring it.
     pub connected: bool,
     pub environment: String,
     pub has_ru_name: bool,
     pub granted_scopes: Vec<String>,
     pub access_token_expires_at: Option<i64>,
+    /// eBay answered the last refresh with `invalid_grant`: the stored
+    /// refresh token was revoked upstream and only a new consent flow fixes
+    /// it. `revoked_at` / `revoked_reason` carry when and eBay's own words.
+    pub needs_reconnect: bool,
+    pub revoked_at: Option<i64>,
+    pub revoked_reason: Option<String>,
 }
 
 /// Builds the URL the user should open in their browser to authorize the app.
@@ -102,7 +112,23 @@ pub async fn refresh_access_token(
         urlencode(&scopes.join(" "))
     );
 
-    let token = post_token_endpoint(env, app_id, cert_id, &body).await?;
+    let token = match post_token_endpoint(env, app_id, cert_id, &body).await {
+        Ok(token) => token,
+        Err(AppError::Network(msg)) if is_refresh_token_revoked_error(&msg) => {
+            // eBay no longer honours the stored refresh token. Remember that
+            // so Settings can say "Needs reconnect" instead of "Connected",
+            // and drop the cached access token so nothing downstream keeps
+            // presenting a sign-in eBay has withdrawn.
+            record_revocation(pool, env, &msg).await?;
+            return Err(AppError::Network(msg));
+        }
+        Err(e) => return Err(e),
+    };
+
+    // A refresh that eBay accepted proves the token is live again (a
+    // revocation flag can only be stale if the user reconnected through
+    // some path that didn't clear it).
+    clear_revocation(pool, env).await?;
 
     // Refresh-token exchange usually omits the refresh_token field (the old
     // one stays valid). Preserve it.
@@ -232,8 +258,55 @@ pub fn is_iaf_token_expired_error(msg: &str) -> bool {
     lower.contains("iaf token") && (lower.contains("expired") || lower.contains("invalid"))
 }
 
+/// eBay's token endpoint answers a refresh-token grant whose token it has
+/// revoked (password change, app removed under Third-party app access, CS
+/// action) or that has passed its 18-month life with HTTP 400 and
+/// `"error":"invalid_grant"`. The description text is the same in every
+/// case — "the provided authorization refresh token is invalid or was
+/// issued to another client" — so the error code is the thing to match.
+pub fn is_refresh_token_revoked_error(msg: &str) -> bool {
+    msg.contains("invalid_grant")
+}
+
+/// Pull eBay's `error_description` out of the token-endpoint failure
+/// message, which is `ebay oauth token endpoint returned <status>: <json>`.
+/// Falls back to the whole message when the body isn't the expected JSON.
+fn token_error_description(msg: &str) -> String {
+    msg.find('{')
+        .and_then(|i| serde_json::from_str::<serde_json::Value>(&msg[i..]).ok())
+        .and_then(|v| {
+            v.get("error_description")
+                .and_then(|d| d.as_str())
+                .map(|d| d.to_string())
+        })
+        .unwrap_or_else(|| msg.to_string())
+}
+
+async fn record_revocation(pool: &SqlitePool, env: EbayEnvironment, msg: &str) -> AppResult<()> {
+    let now = Utc::now().timestamp();
+    settings::set(
+        pool,
+        &settings::ebay_user_revoked_at_key(env.as_str()),
+        &now.to_string(),
+    )
+    .await?;
+    settings::set(
+        pool,
+        &settings::ebay_user_revoked_reason_key(env.as_str()),
+        &token_error_description(msg),
+    )
+    .await?;
+    invalidate_user_token_cache(pool, env).await
+}
+
+async fn clear_revocation(pool: &SqlitePool, env: EbayEnvironment) -> AppResult<()> {
+    settings::delete(pool, &settings::ebay_user_revoked_at_key(env.as_str())).await?;
+    settings::delete(pool, &settings::ebay_user_revoked_reason_key(env.as_str())).await
+}
+
 pub async fn disconnect(pool: &SqlitePool, env: EbayEnvironment) -> AppResult<()> {
     settings::secret_delete(&settings::ebay_user_refresh_token_entry(env.as_str())).await?;
+    clear_revocation(pool, env).await?;
     settings::delete(pool, &settings::ebay_user_access_token_key(env.as_str())).await?;
     settings::delete(
         pool,
@@ -265,13 +338,29 @@ pub async fn status(pool: &SqlitePool, env: EbayEnvironment) -> AppResult<OauthS
     )
     .await?
     .and_then(|s| s.parse().ok());
+    let revoked_at: Option<i64> =
+        settings::get(pool, &settings::ebay_user_revoked_at_key(env.as_str()))
+            .await?
+            .and_then(|s| s.parse().ok());
+    let revoked_reason =
+        settings::get(pool, &settings::ebay_user_revoked_reason_key(env.as_str())).await?;
+    // A revocation only means something while the dead token is still the
+    // one we'd present; after a disconnect there's nothing to reconnect.
+    let needs_reconnect = has_refresh && revoked_at.is_some();
 
     Ok(OauthStatus {
-        connected: has_refresh,
+        connected: has_refresh && !needs_reconnect,
         environment: env.as_str().to_string(),
         has_ru_name,
         granted_scopes: granted,
         access_token_expires_at: expires_at,
+        needs_reconnect,
+        revoked_at: if needs_reconnect { revoked_at } else { None },
+        revoked_reason: if needs_reconnect {
+            revoked_reason
+        } else {
+            None
+        },
     })
 }
 
@@ -344,6 +433,8 @@ async fn persist_tokens(
             "eBay didn't return a refresh_token — nothing to persist for future use".into(),
         ));
     }
+    // A fresh consent flow supersedes any recorded revocation.
+    clear_revocation(pool, env).await?;
     Ok(())
 }
 
@@ -397,5 +488,32 @@ mod tests {
         assert!(!is_iaf_token_expired_error("your watchlist is empty"));
         // "expired" without "iaf token" — could be the listing, not the token.
         assert!(!is_iaf_token_expired_error("offer has expired"));
+    }
+
+    #[test]
+    fn invalid_grant_is_a_revoked_refresh_token() {
+        assert!(is_refresh_token_revoked_error(
+            r#"ebay oauth token endpoint returned 400 Bad Request: {"error":"invalid_grant","error_description":"the provided authorization refresh token is invalid or was issued to another client"}"#
+        ));
+        // A wrong Cert ID is a different failure with a different fix.
+        assert!(!is_refresh_token_revoked_error(
+            r#"ebay oauth token endpoint returned 401 Unauthorized: {"error":"invalid_client","error_description":"client authentication failed"}"#
+        ));
+        assert!(!is_refresh_token_revoked_error("network timed out"));
+    }
+
+    #[test]
+    fn revocation_reason_is_ebays_description() {
+        assert_eq!(
+            token_error_description(
+                r#"ebay oauth token endpoint returned 400 Bad Request: {"error":"invalid_grant","error_description":"the provided authorization refresh token is invalid or was issued to another client"}"#
+            ),
+            "the provided authorization refresh token is invalid or was issued to another client"
+        );
+        // No JSON body: keep the whole message rather than lose it.
+        assert_eq!(
+            token_error_description("ebay oauth token endpoint returned 502 Bad Gateway: <html>"),
+            "ebay oauth token endpoint returned 502 Bad Gateway: <html>"
+        );
     }
 }

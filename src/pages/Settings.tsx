@@ -12,6 +12,7 @@ import {
   formatDateTime,
   formatTime,
   sortDriverOptions,
+  type AutoSyncPhaseError,
   type AutoSyncSettings,
   type BackgroundSettings,
   type CredentialState,
@@ -121,6 +122,9 @@ export function Settings() {
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
   const [autoSyncInterval, setAutoSyncInterval] = useState("12");
   const [autoSyncLastRun, setAutoSyncLastRun] = useState<number | null>(null);
+  const [autoSyncLastErrors, setAutoSyncLastErrors] = useState<
+    AutoSyncPhaseError[]
+  >([]);
   const [autoSyncScheduled, setAutoSyncScheduled] = useState(false);
   const [autoSyncPrewarmMax, setAutoSyncPrewarmMax] = useState("5000");
   const [autoSyncEnrichMax, setAutoSyncEnrichMax] = useState("500");
@@ -366,6 +370,7 @@ export function Settings() {
         setAutoSyncEnabled(s.enabled);
         setAutoSyncInterval(String(s.interval_hours));
         setAutoSyncLastRun(s.last_run);
+        setAutoSyncLastErrors(s.last_errors);
         setAutoSyncScheduled(s.scheduled);
         setAutoSyncPrewarmMax(String(s.prewarm_max_entries));
         setAutoSyncEnrichMax(String(s.enrich_max_entries));
@@ -760,6 +765,7 @@ export function Settings() {
         const autoSync = await api.getAutoSyncSettings();
         setAutoSyncScheduled(autoSync.scheduled);
         setAutoSyncLastRun(autoSync.last_run);
+        setAutoSyncLastErrors(autoSync.last_errors);
       } catch {
         // not fatal — status badge may lag until next page load
       }
@@ -1052,6 +1058,31 @@ export function Settings() {
                 </div>
               ) : (
                 <div className="space-y-2">
+                  {oauthStatus?.needs_reconnect && (
+                    <div className="rounded-md bg-bg-elevated border border-border px-3 py-2 space-y-1">
+                      <div className="text-xs text-amber-400">
+                        ⚠ Needs reconnect
+                      </div>
+                      <NoticeBanner
+                        tone="warning"
+                        variant="inline"
+                        message={
+                          <>
+                            eBay stopped accepting this app's sign-in on{" "}
+                            {formatDateTime(oauthStatus.revoked_at)}
+                            {oauthStatus.revoked_reason
+                              ? ` ("${oauthStatus.revoked_reason}")`
+                              : ""}
+                            . That happens after an eBay password change, or
+                            after the app is removed under My eBay → Third-party
+                            app access. Watchlist sync and offers are stopped
+                            until you reconnect; nothing saved locally is
+                            affected.
+                          </>
+                        }
+                      />
+                    </div>
+                  )}
                   <button
                     className="btn-primary"
                     type="button"
@@ -1065,7 +1096,9 @@ export function Settings() {
                   >
                     {oauthBusy && !awaitingPaste
                       ? "Opening…"
-                      : "Connect eBay account"}
+                      : oauthStatus?.needs_reconnect
+                        ? "Reconnect eBay account"
+                        : "Connect eBay account"}
                   </button>
                   {awaitingPaste && (
                     <div className="space-y-2">
@@ -1386,6 +1419,22 @@ export function Settings() {
                   ? `Last background sync ${formatDateTime(autoSyncLastRun)}`
                   : "Background sync hasn't run yet."}
               </div>
+              {autoSyncLastErrors.length > 0 && (
+                <div className="space-y-2">
+                  <div className="text-xs text-amber-400">
+                    ⚠ The last background sync didn't finish cleanly. It will
+                    keep failing the same way until this is fixed:
+                  </div>
+                  {autoSyncLastErrors.map((f) => (
+                    <div key={f.phase} className="space-y-1">
+                      <div className="text-xs text-fg-subtle">
+                        {f.phase} phase
+                      </div>
+                      <ErrorBanner error={f.error} variant="inline" />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {autoSyncMessage && (
